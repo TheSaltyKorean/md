@@ -59,6 +59,24 @@ reacts="$(api --paginate "repos/$REPO/issues/comments/$req_id/reactions" \
   --jq ".[] | select(.user.login==\"$BOT\") | .content")" || red "reactions lookup failed (fail-closed)."
 thumbs="$(printf '%s\n' "$reacts" | grep -cx '+1' | tr -d ' ')"
 
+# Comment-based all-clear: Codex signals a clean review by posting a comment such
+# as "Codex Review: Didn't find any major issues" that names the reviewed commit
+# ("Reviewed commit: <sha>"). Only the Codex bot can author a comment as $BOT, so
+# this is trustworthy; we additionally require it to name the CURRENT head SHA so
+# a clean review of an older commit can't green a newer head. This binds to the
+# exact SHA (stronger than the reaction path's date proxy).
+short_sha="${head_sha:0:9}"
+clean_lines="$(api --paginate "repos/$REPO/issues/$PR/comments" \
+  --jq ".[] | select(.user.login==\"$BOT\") | select(.body|test(\"find any major issues|no major issues\";\"i\")) | (.body|gsub(\"[\\n\\r]+\";\" \"))")" \
+  || red "clean-review comment lookup failed (fail-closed)."
+clean_on_head=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  case "$line" in *"$short_sha"*) clean_on_head=1; break;; esac
+done <<EOF
+$clean_lines
+EOF
+
 latest_review_date="$(printf '%s\n' "$reviews" | grep -v '^$' | sort | tail -1 | cut -f1)"
 
 if api --paginate "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx 'codex-accepted'; then
@@ -80,7 +98,13 @@ if api --paginate "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx 'co
 fi
 
 [ "${later_reviews:-0}" -eq 0 ] || red "Codex submitted a review with findings after the latest request."
-[ "${thumbs:-0}" -gt 0 ] || red "no literal Codex 👍 (+1) all-clear on the latest review request yet."
 
-echo "GREEN $head_sha: Codex all-clear (👍) on request $req_id; no later findings."
-exit 0
+if [ "${thumbs:-0}" -gt 0 ]; then
+  echo "GREEN $head_sha: Codex all-clear (👍 reaction) on request $req_id; no later findings."
+  exit 0
+fi
+if [ "${clean_on_head:-0}" -gt 0 ]; then
+  echo "GREEN $head_sha: Codex all-clear (clean-review comment naming head $short_sha); no later findings."
+  exit 0
+fi
+red "no Codex all-clear yet: neither a 👍 reaction nor a clean-review comment naming the current head ($short_sha)."
