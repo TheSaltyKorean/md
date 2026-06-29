@@ -179,17 +179,17 @@ number must increase with every store upload.
 
 ## License
 
-Source-available under the **Markdown Studio Noncommercial No-Derivatives
-License 1.0** (see [`LICENSE.md`](LICENSE.md)) — adapted from PolyForm Noncommercial
-1.0.0. In short:
+Source-available under the **PolyForm Noncommercial License 1.0.0** (see
+[`LICENSE.md`](LICENSE.md)). In short:
 
-- ✅ **Free** for personal and other **non-commercial** use.
-- 💼 **Business / commercial use requires a separate commercial license** from
-  the copyright holder.
-- 🚫 **No redistribution, clones, or derivative works.**
+- ✅ **Free** for any **non-commercial** purpose (personal use, research,
+  education, noncommercial organizations), including making changes and new
+  works for those purposes.
+- 💼 **Commercial / business use is not granted** by this license — contact the
+  copyright holder for commercial terms.
 
-This is **not** an OSI open-source license. Not legal advice — have counsel
-review before relying on it commercially.
+This is a source-available license, **not** an OSI open-source license. Not
+legal advice.
 
 ## Tests
 
