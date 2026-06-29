@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:printing/printing.dart';
@@ -150,30 +149,29 @@ class _PrintDialogState extends State<PrintDialog> {
     final messenger = ScaffoldMessenger.of(context);
     final json = const JsonEncoder.withIndent('  ').convert(profile.toJson());
     final safe = profile.name.replaceAll(RegExp(r'[^\w\-. ]'), '_');
-    final path = await FilePicker.platform.saveFile(
-      dialogTitle: 'Export print profile',
-      fileName: '$safe.print-profile.json',
-      type: FileType.custom,
-      allowedExtensions: const ['json'],
-      bytes: Uint8List.fromList(utf8.encode(json)),
-    );
-    if (path == null) return;
-    // On desktop, saveFile only returns a path — we write the file ourselves, so
-    // a write failure must be surfaced. On mobile/web the bytes were already
-    // written by saveFile, and File access to the returned URI may not work.
-    String? error;
-    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      try {
-        await File(path).writeAsString(json);
-      } catch (e) {
-        error = '$e';
+    final bytes = Uint8List.fromList(utf8.encode(json));
+    // file_picker writes the bytes itself (desktop included for the pinned v10),
+    // so any failure — a denied or invalid destination — comes from saveFile.
+    // Wrap the whole call so those failures surface instead of being swallowed.
+    String? path;
+    try {
+      path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Export print profile',
+        fileName: '$safe.print-profile.json',
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+        bytes: bytes,
+      );
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(
+            SnackBar(content: Text('Export failed: $e')));
       }
+      return;
     }
-    if (!mounted) return;
-    messenger.showSnackBar(SnackBar(
-        content: Text(error == null
-            ? 'Exported "${profile.name}"'
-            : 'Export failed: $error')));
+    if (path == null || !mounted) return; // user cancelled
+    messenger.showSnackBar(
+        SnackBar(content: Text('Exported "${profile.name}"')));
   }
 
   @override

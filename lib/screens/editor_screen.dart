@@ -12,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import '../models/editor_mode.dart';
 import '../services/file_association_service.dart';
 import '../services/file_service.dart';
+import '../services/print_profile_service.dart';
 import '../services/single_instance_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
@@ -66,16 +67,27 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   void onWindowClose() async {
     final ws = context.read<WorkspaceController>();
     final single = context.read<SingleInstanceService>();
+    final theme = context.read<ThemeController>();
+    final profiles = context.read<PrintProfileService>();
     final anyDirty = ws.documents.any((d) => d.isDirty);
     if (anyDirty && mounted) {
       final ok = await _confirmDiscard(context, 'One or more open documents');
       if (!ok) return; // keep the window open
     }
+    // Drain any preference write still in flight (UI callbacks fire-and-forget
+    // setAutoReload / cycle / setDefault), so a setting changed right before
+    // closing isn't lost. Bounded so a stuck write can't hang the close.
+    try {
+      await Future.wait([
+        ws.pendingWrites,
+        theme.pendingWrites,
+        profiles.pendingWrites,
+      ]).timeout(const Duration(seconds: 2));
+    } catch (_) {}
     // Release the long-lived event sources (single-instance ServerSocket + file
-    // watchers) first, then exit the process directly. windowManager.destroy()
-    // alone leaves the Flutter engine lingering for many seconds on Windows;
-    // exit(0) terminates immediately. All preference writes are awaited at their
-    // call sites, so nothing is mid-write here.
+    // watchers), then exit the process directly. windowManager.destroy() alone
+    // leaves the Flutter engine lingering for many seconds on Windows; exit(0)
+    // terminates immediately.
     try {
       await single.dispose();
     } catch (_) {}

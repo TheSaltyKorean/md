@@ -13,6 +13,11 @@ class ThemeController extends ChangeNotifier {
   final SharedPreferences _prefs;
   ThemeMode _mode = ThemeMode.system;
 
+  /// The most recent persistence write, so a caller (e.g. the close handler)
+  /// can wait for it to settle even though UI callbacks fire-and-forget.
+  Future<void> _pending = Future.value();
+  Future<void> get pendingWrites => _pending;
+
   ThemeMode get mode => _mode;
 
   bool isDark(BuildContext context) {
@@ -38,7 +43,7 @@ class ThemeController extends ChangeNotifier {
     if (mode == _mode) return;
     _mode = mode;
     notifyListeners();
-    await _prefs.setString(_prefsKey, mode.name);
+    await (_pending = _prefs.setString(_prefsKey, mode.name));
   }
 
   /// Convenience toggle used by the toolbar icon button. Cycles

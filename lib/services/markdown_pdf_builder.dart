@@ -56,29 +56,6 @@ class MarkdownPdfBuilder {
       PdfColor.fromInt(profile.accentColor ?? profile.primaryColor);
 
   List<pw.Widget> build(String markdown) {
-    // Block-level <div> HTML (used by legal docs for signature lines and small
-    // labels) isn't understood by the Markdown parser — it would otherwise come
-    // through as raw text. Pull those out and render them ourselves, parsing the
-    // surrounding Markdown around them so document order is preserved.
-    final divRe = RegExp(r'<div\b([^>]*)>([^<]*)</div>');
-    final widgets = <pw.Widget>[];
-    var last = 0;
-    for (final m in divRe.allMatches(markdown)) {
-      if (m.start > last) {
-        widgets.addAll(_parseMarkdown(markdown.substring(last, m.start)));
-      }
-      final w = _htmlDiv(m.group(1) ?? '', m.group(2) ?? '');
-      if (w != null) widgets.add(w);
-      last = m.end;
-    }
-    if (last < markdown.length) {
-      widgets.addAll(_parseMarkdown(markdown.substring(last)));
-    }
-    return widgets;
-  }
-
-  List<pw.Widget> _parseMarkdown(String markdown) {
-    if (markdown.trim().isEmpty) return const [];
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
@@ -92,13 +69,53 @@ class MarkdownPdfBuilder {
 
   // --- Inline-styled <div> blocks (signature lines & labels) ------------------
 
+  static final _divRe =
+      RegExp(r'<div\b([^>]*)>([\s\S]*?)</div>', caseSensitive: false);
+
+  /// If [raw] is block-level `<div>` HTML (used by legal docs for signature
+  /// lines and labels), render those divs and any text between them; else null.
+  /// Operating on already-parsed block text means fenced code samples (which are
+  /// `pre`/`code` nodes) are never mistaken for document divs.
+  pw.Widget? _divBlock(String raw) {
+    final matches = _divRe.allMatches(raw).toList();
+    if (matches.isEmpty) return null;
+    final children = <pw.Widget>[];
+    void addText(String s) {
+      final t = s.trim();
+      if (t.isEmpty) return;
+      children.add(pw.RichText(text: pw.TextSpan(children: _inline([md.Text(t)]))));
+    }
+
+    var last = 0;
+    for (final m in matches) {
+      addText(raw.substring(last, m.start));
+      final w = _htmlDiv(m.group(1) ?? '', m.group(2) ?? '');
+      if (w != null) children.add(w);
+      last = m.end;
+    }
+    addText(raw.substring(last));
+    if (children.isEmpty) return pw.SizedBox();
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 4),
+      child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start, children: children),
+    );
+  }
+
   /// Render a block-level `<div style="…">content</div>`. An empty div with a
   /// `border-bottom` becomes a signature/blank line (width given as a percent);
   /// a div with text becomes a styled label. Returns null for an empty,
   /// borderless div (purely structural).
   pw.Widget? _htmlDiv(String attrs, String content) {
     final style = _parseStyle(attrs);
-    final text = content.trim();
+    // Inline markup inside a label (<b>…</b>) and HTML whitespace entities are
+    // common in exported legal HTML; strip tags and normalise nbsp before
+    // deciding whether the div is "empty".
+    final text = content
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll(RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' ')
+        .replaceAll(' ', ' ')
+        .trim();
     final hasBorder = style.containsKey('border-bottom');
     final marginTop = _lengthPt(style['margin-top']) ?? 0;
 
@@ -130,10 +147,12 @@ class MarkdownPdfBuilder {
   }
 
   Map<String, String> _parseStyle(String attrs) {
-    final m = RegExp(r'style\s*=\s*"([^"]*)"').firstMatch(attrs);
+    // Accept both double- and single-quoted style attributes.
+    final m = RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''').firstMatch(attrs);
     final out = <String, String>{};
     if (m == null) return out;
-    for (final decl in m.group(1)!.split(';')) {
+    final decls = m.group(2) ?? m.group(3) ?? '';
+    for (final decl in decls.split(';')) {
       final i = decl.indexOf(':');
       if (i <= 0) continue;
       out[decl.substring(0, i).trim().toLowerCase()] =
@@ -165,6 +184,17 @@ class MarkdownPdfBuilder {
     return (t < 0.4 ? 0.4 : t, c ?? _text);
   }
 
+  /// The bundled fonts have no distinct ballot-box glyphs, so checked (☑/☒) and
+  /// unchecked (☐) boxes render identically (both look "marked"). Map them to
+  /// clear ASCII so a checklist reads correctly in the PDF.
+  String _symbols(String t) {
+    if (!RegExp('[☐-☒]').hasMatch(t)) return t;
+    return t
+        .replaceAll('☑', '[x]')
+        .replaceAll('☒', '[x]')
+        .replaceAll('☐', '[  ]');
+  }
+
   PdfColor? _cssColor(String? v) {
     if (v == null) return null;
     final m = RegExp(r'#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})').firstMatch(v.trim());
@@ -180,7 +210,7 @@ class MarkdownPdfBuilder {
 
   pw.Widget? _block(md.Node node) {
     if (node is md.Text) {
-      return _paragraph([node]);
+      return _divBlock(node.text) ?? _paragraph([node]);
     }
     if (node is! md.Element) return null;
 
@@ -198,7 +228,8 @@ class MarkdownPdfBuilder {
       case 'h6':
         return _heading(node, 11);
       case 'p':
-        return _paragraph(node.children ?? const []);
+        return _divBlock(node.textContent) ??
+            _paragraph(node.children ?? const []);
       case 'hr':
         return pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 8),
@@ -499,7 +530,7 @@ class MarkdownPdfBuilder {
       if (n is md.Text) {
         spans.add(
           pw.TextSpan(
-            text: n.text,
+            text: _symbols(n.text),
             style: _textStyle(
               bold: bold || boldDefault,
               italic: italic,

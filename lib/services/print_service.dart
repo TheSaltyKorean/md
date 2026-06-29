@@ -408,10 +408,12 @@ class PrintService {
     }
   }
 
-  /// Font families offered in the profile editor.
+  /// Font families offered in the profile editor. Roboto stays first because it
+  /// is the resolver's fallback for any unrecognised family, so the editor's
+  /// default selection matches what an unsupported profile actually renders.
   static const List<String> availableFonts = [
-    'Inter',
     'Roboto',
+    'Inter',
     'Lato',
     'Open Sans',
     'Montserrat',

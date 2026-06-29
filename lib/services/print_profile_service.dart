@@ -22,6 +22,10 @@ class PrintProfileService extends ChangeNotifier {
   String _defaultId = PrintProfile.personal.id;
   Map<String, String> _docMap = {};
 
+  /// Most recent persistence write (UI callbacks don't await it).
+  Future<void> _pending = Future.value();
+  Future<void> get pendingWrites => _pending;
+
   List<PrintProfile> get profiles => List.unmodifiable(_profiles);
   String get defaultId => _defaultId;
   PrintProfile get defaultProfile => byId(_defaultId);
@@ -73,11 +77,11 @@ class PrintProfileService extends ChangeNotifier {
     }
   }
 
-  Future<void> _persistProfiles() async =>
-      _prefs.setString(_profilesKey, PrintProfile.encodeList(_profiles));
+  Future<void> _persistProfiles() =>
+      _pending = _prefs.setString(_profilesKey, PrintProfile.encodeList(_profiles));
 
-  Future<void> _persistDocMap() async =>
-      _prefs.setString(_docMapKey, jsonEncode(_docMap));
+  Future<void> _persistDocMap() =>
+      _pending = _prefs.setString(_docMapKey, jsonEncode(_docMap));
 
   Future<void> upsert(PrintProfile profile) async {
     final idx = _profiles.indexWhere((p) => p.id == profile.id);
@@ -95,7 +99,7 @@ class PrintProfileService extends ChangeNotifier {
     _profiles.removeWhere((p) => p.id == id);
     if (_defaultId == id) {
       _defaultId = _profiles.first.id;
-      await _prefs.setString(_defaultKey, _defaultId);
+      await (_pending = _prefs.setString(_defaultKey, _defaultId));
     }
     _docMap.removeWhere((_, v) => v == id);
     notifyListeners();
@@ -106,7 +110,7 @@ class PrintProfileService extends ChangeNotifier {
   Future<void> setDefault(String id) async {
     _defaultId = id;
     notifyListeners();
-    await _prefs.setString(_defaultKey, id);
+    await (_pending = _prefs.setString(_defaultKey, id));
   }
 
   /// Associate a document with a profile (or clear it when [id] is null).

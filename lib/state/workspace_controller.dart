@@ -20,6 +20,10 @@ class WorkspaceController extends ChangeNotifier {
   int _activeIndex = 0;
   bool _autoReload = true;
 
+  /// Most recent persistence write (UI callbacks don't await it).
+  Future<void> _pending = Future.value();
+  Future<void> get pendingWrites => _pending;
+
   List<DocumentController> get documents => List.unmodifiable(_docs);
   int get activeIndex => _activeIndex;
   DocumentController get active => _docs[_activeIndex];
@@ -126,7 +130,7 @@ class WorkspaceController extends ChangeNotifier {
     if (value == _autoReload) return;
     _autoReload = value;
     notifyListeners();
-    await _prefs.setBool(_autoReloadKey, value);
+    await (_pending = _prefs.setBool(_autoReloadKey, value));
     // Resolve any pending conflicts that no longer need the user.
     for (final d in _docs) {
       d.resolveIfSafe();
