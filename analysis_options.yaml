@@ -1,0 +1,16 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    avoid_print: false # we use debugPrint, but allow print in tooling
+    use_key_in_widget_constructors: true
+
+analyzer:
+  errors:
+    # Treat missing required params etc. as errors (default), but keep TODOs as info.
+    todo: ignore
+  exclude:
+    - "**/*.g.dart"
+    - "build/**"
