@@ -56,6 +56,29 @@ class MarkdownPdfBuilder {
       PdfColor.fromInt(profile.accentColor ?? profile.primaryColor);
 
   List<pw.Widget> build(String markdown) {
+    // Block-level <div> HTML (used by legal docs for signature lines and small
+    // labels) isn't understood by the Markdown parser — it would otherwise come
+    // through as raw text. Pull those out and render them ourselves, parsing the
+    // surrounding Markdown around them so document order is preserved.
+    final divRe = RegExp(r'<div\b([^>]*)>([^<]*)</div>');
+    final widgets = <pw.Widget>[];
+    var last = 0;
+    for (final m in divRe.allMatches(markdown)) {
+      if (m.start > last) {
+        widgets.addAll(_parseMarkdown(markdown.substring(last, m.start)));
+      }
+      final w = _htmlDiv(m.group(1) ?? '', m.group(2) ?? '');
+      if (w != null) widgets.add(w);
+      last = m.end;
+    }
+    if (last < markdown.length) {
+      widgets.addAll(_parseMarkdown(markdown.substring(last)));
+    }
+    return widgets;
+  }
+
+  List<pw.Widget> _parseMarkdown(String markdown) {
+    if (markdown.trim().isEmpty) return const [];
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
@@ -65,6 +88,92 @@ class MarkdownPdfBuilder {
     );
     final nodes = document.parseLines(const LineSplitter().convert(markdown));
     return nodes.map(_block).whereType<pw.Widget>().toList();
+  }
+
+  // --- Inline-styled <div> blocks (signature lines & labels) ------------------
+
+  /// Render a block-level `<div style="…">content</div>`. An empty div with a
+  /// `border-bottom` becomes a signature/blank line (width given as a percent);
+  /// a div with text becomes a styled label. Returns null for an empty,
+  /// borderless div (purely structural).
+  pw.Widget? _htmlDiv(String attrs, String content) {
+    final style = _parseStyle(attrs);
+    final text = content.trim();
+    final hasBorder = style.containsKey('border-bottom');
+    final marginTop = _lengthPt(style['margin-top']) ?? 0;
+
+    if (text.isEmpty) {
+      if (!hasBorder) return null;
+      final width = _percent(style['width']) ?? 60;
+      final height = _lengthPt(style['height']) ?? 36;
+      final border = _border(style['border-bottom']!);
+      final line = pw.Container(height: border.$1, color: border.$2);
+      return pw.Padding(
+        padding: pw.EdgeInsets.only(top: marginTop + height, bottom: 2),
+        child: width >= 100
+            ? line
+            : pw.Row(children: [
+                pw.Expanded(flex: width.round(), child: line),
+                pw.Expanded(
+                    flex: (100 - width).round(), child: pw.SizedBox()),
+              ]),
+      );
+    }
+
+    final size = _lengthPt(style['font-size']) ?? 10;
+    final color = _cssColor(style['color']) ?? _text;
+    return pw.Padding(
+      padding: pw.EdgeInsets.only(top: marginTop, bottom: 4),
+      child: pw.Text(text,
+          style: pw.TextStyle(fontSize: size, color: color, font: fonts.base)),
+    );
+  }
+
+  Map<String, String> _parseStyle(String attrs) {
+    final m = RegExp(r'style\s*=\s*"([^"]*)"').firstMatch(attrs);
+    final out = <String, String>{};
+    if (m == null) return out;
+    for (final decl in m.group(1)!.split(';')) {
+      final i = decl.indexOf(':');
+      if (i <= 0) continue;
+      out[decl.substring(0, i).trim().toLowerCase()] =
+          decl.substring(i + 1).trim();
+    }
+    return out;
+  }
+
+  /// Parse a CSS length like "52pt" / "12px" into points (px ≈ 0.75pt).
+  double? _lengthPt(String? v) {
+    if (v == null) return null;
+    final m = RegExp(r'([\d.]+)\s*(pt|px)?').firstMatch(v);
+    if (m == null) return null;
+    final n = double.tryParse(m.group(1)!);
+    if (n == null) return null;
+    return m.group(2) == 'px' ? n * 0.75 : n;
+  }
+
+  double? _percent(String? v) {
+    if (v == null) return null;
+    final m = RegExp(r'([\d.]+)\s*%').firstMatch(v);
+    return m == null ? null : double.tryParse(m.group(1)!);
+  }
+
+  /// Parse "1.5pt solid #111344" → (thickness, colour).
+  (double, PdfColor) _border(String v) {
+    final t = _lengthPt(v) ?? 1.0;
+    final c = _cssColor(RegExp(r'#[0-9a-fA-F]{3,6}').firstMatch(v)?.group(0));
+    return (t < 0.4 ? 0.4 : t, c ?? _text);
+  }
+
+  PdfColor? _cssColor(String? v) {
+    if (v == null) return null;
+    final m = RegExp(r'#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})').firstMatch(v.trim());
+    if (m == null) return null;
+    var hex = m.group(1)!;
+    if (hex.length == 3) {
+      hex = hex.split('').map((c) => '$c$c').join();
+    }
+    return PdfColor.fromInt(0xFF000000 | int.parse(hex, radix: 16));
   }
 
   // --- Block-level rendering --------------------------------------------------
