@@ -74,7 +74,7 @@ class PrintService {
     final content = builder.build(markdown);
 
     // Brand "cover" mode: the logo appears once at the top of the document
-    // (not as a running header), like the SK Meridian brief.
+    // (not as a running header), like a branded cover sheet.
     final useCover = profile.coverLogo && logo != null;
     final body = <pw.Widget>[
       if (useCover) _coverLogo(logo),
@@ -103,12 +103,13 @@ class PrintService {
               ? null
               : (context) => _watermark(profile.watermarkText!),
         ),
-        // In cover mode the logo is rendered once at the top of the body, so we
-        // omit it from the running header — but keep the header itself so any
-        // title, company name, classification label and accent rule still appear
-        // on every page.
-        header: (context) =>
-            _header(context, profile, title, useCover ? null : logo),
+        // In cover mode the logo is rendered once at the top of the body, so the
+        // running header omits the logo and the (now-redundant) company name —
+        // the cover logo already conveys the brand. The header is still kept so
+        // any title, classification label and accent rule appear on every page.
+        header: (context) => _header(context, profile, title,
+            useCover ? null : logo,
+            hideCompany: useCover),
         footer: (context) => _footer(context, profile, title),
         build: (context) => body,
       ),
@@ -144,15 +145,18 @@ class PrintService {
     pw.Context context,
     PrintProfile profile,
     String title,
-    pw.MemoryImage? logo,
-  ) {
+    pw.MemoryImage? logo, {
+    bool hideCompany = false,
+  }) {
     final primary = PdfColor.fromInt(profile.primaryColor);
 
     final brandRow = <pw.Widget>[];
     if (logo != null) {
       brandRow.add(pw.Container(height: 26, child: pw.Image(logo)));
     }
-    if (profile.companyName != null && profile.companyName!.isNotEmpty) {
+    if (!hideCompany &&
+        profile.companyName != null &&
+        profile.companyName!.isNotEmpty) {
       if (brandRow.isNotEmpty) brandRow.add(pw.SizedBox(width: 8));
       brandRow.add(
         pw.Text(
@@ -221,7 +225,7 @@ class PrintService {
     final primary = PdfColor.fromInt(profile.primaryColor);
 
     // Brand footer: a single centred grey line with a hairline rule above,
-    // matching "SK Meridian LLC — <Title> | Page N of M".
+    // e.g. "Company — <Title> | Page N of M".
     if (profile.footerCentered) {
       final bits = <String>[];
       if (profile.footerText != null && profile.footerText!.isNotEmpty) {

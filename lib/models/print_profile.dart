@@ -82,8 +82,8 @@ class PrintProfile {
   /// Draw a thin accent rule under the header / above the footer.
   final bool accentRule;
 
-  /// Draw a primary-colour underline rule beneath each section heading (the
-  /// SK Meridian brand look).
+  /// Draw a primary-colour underline rule beneath each section heading (a
+  /// branded heading look).
   final bool headingRule;
 
   /// Use a single centred footer line "<footer> — <title> | Page N of M"
