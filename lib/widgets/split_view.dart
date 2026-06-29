@@ -79,7 +79,8 @@ class _SplitViewState extends State<SplitView> {
 
     final sel = _text.selection;
     if (!sel.isValid) return;
-    final upto = _text.text.substring(0, sel.baseOffset.clamp(0, _text.text.length));
+    final upto =
+        _text.text.substring(0, sel.baseOffset.clamp(0, _text.text.length));
     final line = '\n'.allMatches(upto).length;
     final total = '\n'.allMatches(_text.text).length;
     if (line == _lastCursorLine || total == 0) return;
@@ -96,8 +97,7 @@ class _SplitViewState extends State<SplitView> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final portrait =
-        MediaQuery.orientationOf(context) == Orientation.portrait;
+    final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
 
     final source = _SourcePane(
       controller: widget.controller,
@@ -121,9 +121,7 @@ class _SplitViewState extends State<SplitView> {
       Expanded(child: preview),
     ];
 
-    return portrait
-        ? Column(children: children)
-        : Row(children: children);
+    return portrait ? Column(children: children) : Row(children: children);
   }
 }
 

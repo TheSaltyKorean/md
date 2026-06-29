@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
@@ -5,6 +9,7 @@ import 'package:provider/provider.dart';
 import '../models/editor_mode.dart';
 import '../services/file_association_service.dart';
 import '../services/file_service.dart';
+import '../services/single_instance_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
 import '../state/workspace_controller.dart';
@@ -30,11 +35,13 @@ class EditorScreen extends StatefulWidget {
 class _EditorScreenState extends State<EditorScreen> {
   DocumentController? _bannerDoc;
   bool _conflictShown = false;
+  bool _dragging = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _maybePromptAssociation());
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => _maybePromptAssociation());
   }
 
   @override
@@ -172,20 +179,28 @@ class _EditorScreenState extends State<EditorScreen> {
       appBar: AppBar(
         titleSpacing: 0,
         // The open-document tabs sit where the filename would be.
-        title: _TabStrip(workspace: ws, onClose: _closeTab),
+        title: _TabStrip(
+          workspace: ws,
+          onClose: _closeTab,
+          onTabDragEnd: _onTabDragEnd,
+        ),
         actions: _actions(context, ws, active, theme),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(100),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              FormatToolbar(controller: active),
-              _ModeBar(doc: active),
-            ],
-          ),
+          preferredSize: const Size.fromHeight(48),
+          child: FormatToolbar(controller: active),
         ),
       ),
-      body: _body(active),
+      body: DropTarget(
+        onDragEntered: (_) => setState(() => _dragging = true),
+        onDragExited: (_) => setState(() => _dragging = false),
+        onDragDone: (detail) => _onFilesDropped(detail, ws),
+        child: Stack(
+          children: [
+            Positioned.fill(child: _body(active)),
+            if (_dragging) _dropHint(context),
+          ],
+        ),
+      ),
     );
   }
 
@@ -208,6 +223,29 @@ class _EditorScreenState extends State<EditorScreen> {
   ) {
     final cs = Theme.of(context).colorScheme;
     return [
+      // View-mode selector lives on the main menu bar.
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Center(
+          child: SegmentedButton<EditorMode>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            segments: [
+              for (final m in EditorMode.values)
+                ButtonSegment(
+                  value: m,
+                  icon: Icon(m.icon, size: 18),
+                  label: Text(m.label),
+                ),
+            ],
+            selected: {active.mode},
+            onSelectionChanged: (s) => active.setMode(s.first),
+          ),
+        ),
+      ),
       IconButton(
         tooltip: 'Open',
         icon: const Icon(Icons.folder_open_outlined),
@@ -301,8 +339,8 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _saveAs(BuildContext context, DocumentController doc) async {
     final messenger = ScaffoldMessenger.of(context);
     final markdown = doc.currentMarkdown();
-    final path =
-        await _fileService.saveAs(markdown, suggestedName: doc.suggestedFileName);
+    final path = await _fileService.saveAs(markdown,
+        suggestedName: doc.suggestedFileName);
     if (path != null) {
       doc.markSaved(path, markdown);
       messenger
@@ -333,6 +371,88 @@ class _EditorScreenState extends State<EditorScreen> {
     ws.closeAt(index);
   }
 
+  // --- Drag & drop files ------------------------------------------------------
+
+  Future<void> _onFilesDropped(
+      DropDoneDetails detail, WorkspaceController ws) async {
+    setState(() => _dragging = false);
+    for (final dropped in detail.files) {
+      try {
+        final file = File(dropped.path);
+        if (await file.exists()) {
+          final content = await file.readAsString();
+          ws.openDocument(content, path: file.absolute.path);
+        }
+      } catch (_) {/* skip unreadable items */}
+    }
+  }
+
+  Widget _dropHint(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return IgnorePointer(
+      child: Container(
+        color: cs.primary.withValues(alpha: 0.08),
+        alignment: Alignment.center,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          decoration: BoxDecoration(
+            color: cs.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: cs.primary, width: 2),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.file_download_outlined, color: cs.primary),
+              const SizedBox(width: 10),
+              const Text('Drop Markdown files to open'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- Tab drag: reorder or tear off into a new window ------------------------
+
+  void _onTabDragEnd(int index, DraggableDetails details) {
+    if (details.wasAccepted) return; // dropped onto another tab → reordered
+    final size = MediaQuery.sizeOf(context);
+    final o = details.offset;
+    const margin = 48.0;
+    final outside = o.dx < -margin ||
+        o.dy < -margin ||
+        o.dx > size.width + margin ||
+        o.dy > size.height + margin;
+    if (outside) _tearOff(index);
+  }
+
+  /// Tear a tab off into its own standalone window. The in-memory content (and
+  /// dirty state) is handed off via a temp file so unsaved edits aren't lost.
+  Future<void> _tearOff(int index) async {
+    final ws = context.read<WorkspaceController>();
+    if (index < 0 || index >= ws.documents.length) return;
+    final doc = ws.documents[index];
+    final handoff = <String, dynamic>{
+      'path': doc.filePath,
+      'content': doc.currentMarkdown(),
+      'dirty': doc.isDirty || doc.filePath == null,
+    };
+    try {
+      final tmp = File(
+        '${Directory.systemTemp.path}${Platform.pathSeparator}'
+        'mdstudio_handoff_${DateTime.now().microsecondsSinceEpoch}.json',
+      );
+      await tmp.writeAsString(jsonEncode(handoff));
+      await Process.start(
+        Platform.resolvedExecutable,
+        [SingleInstanceService.newWindowFlag, '--handoff', tmp.path],
+        mode: ProcessStartMode.detached,
+      );
+      ws.closeAt(index);
+    } catch (_) {/* spawn failed; leave the tab in place */}
+  }
+
   void _onMenu(BuildContext context, WorkspaceController ws,
       DocumentController active, String value) {
     switch (value) {
@@ -359,10 +479,15 @@ enum _AssocChoice { associate, notNow, never }
 
 /// Horizontal, scrollable strip of open-document tabs plus a "new tab" button.
 class _TabStrip extends StatelessWidget {
-  const _TabStrip({required this.workspace, required this.onClose});
+  const _TabStrip({
+    required this.workspace,
+    required this.onClose,
+    required this.onTabDragEnd,
+  });
 
   final WorkspaceController workspace;
   final ValueChanged<int> onClose;
+  final void Function(int index, DraggableDetails details) onTabDragEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -376,22 +501,61 @@ class _TabStrip extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              itemCount: docs.length,
-              itemBuilder: (context, i) => _Tab(
-                doc: docs[i],
-                selected: i == workspace.activeIndex,
-                onTap: () => workspace.select(i),
-                onClose: () => onClose(i),
-              ),
-            ),
-          ),
+          // New-tab button is left-aligned; the tabs then fill the space to
+          // its right and scroll when they overflow.
           IconButton(
             tooltip: 'New tab',
             icon: const Icon(Icons.add_rounded),
             onPressed: workspace.newDocument,
+          ),
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: docs.length,
+              itemBuilder: (context, i) {
+                final tab = _Tab(
+                  doc: docs[i],
+                  selected: i == workspace.activeIndex,
+                  onTap: () => workspace.select(i),
+                  onClose: () => onClose(i),
+                );
+                return DragTarget<int>(
+                  onWillAcceptWithDetails: (d) => d.data != i,
+                  onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
+                  builder: (context, candidate, rejected) {
+                    return Container(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          left: BorderSide(
+                            color: candidate.isNotEmpty
+                                ? cs.primary
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                      child: Draggable<int>(
+                        data: i,
+                        feedback: Material(
+                          color: Colors.transparent,
+                          elevation: 6,
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 220),
+                            child: Container(
+                              color: cs.surfaceContainerHigh,
+                              child: tab,
+                            ),
+                          ),
+                        ),
+                        childWhenDragging: Opacity(opacity: 0.3, child: tab),
+                        onDragEnd: (details) => onTabDragEnd(i, details),
+                        child: tab,
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -415,80 +579,55 @@ class _Tab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 220),
-        padding: const EdgeInsets.only(left: 14, right: 6),
-        decoration: BoxDecoration(
-          color: selected ? cs.surface : Colors.transparent,
-          border: Border(
-            bottom: BorderSide(
-              color: selected ? cs.primary : Colors.transparent,
-              width: 2,
+    final path = doc.filePath;
+    final tooltip = path != null
+        ? '${doc.title}\n${p.dirname(path)}'
+        : 'Unsaved — not yet saved to disk';
+    return Tooltip(
+      message: tooltip,
+      waitDuration: const Duration(milliseconds: 500),
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 220),
+          padding: const EdgeInsets.only(left: 14, right: 6),
+          decoration: BoxDecoration(
+            color: selected ? cs.surface : Colors.transparent,
+            border: Border(
+              bottom: BorderSide(
+                color: selected ? cs.primary : Colors.transparent,
+                width: 2,
+              ),
             ),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (doc.isDirty)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: Icon(Icons.circle, size: 8, color: cs.primary),
-              ),
-            Flexible(
-              child: Text(
-                doc.title,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                  color: selected ? cs.onSurface : cs.onSurfaceVariant,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (doc.isDirty)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(Icons.circle, size: 8, color: cs.primary),
+                ),
+              Flexible(
+                child: Text(
+                  doc.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                    color: selected ? cs.onSurface : cs.onSurfaceVariant,
+                  ),
                 ),
               ),
-            ),
-            IconButton(
-              tooltip: 'Close',
-              iconSize: 16,
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.close_rounded),
-              onPressed: onClose,
-            ),
-          ],
+              IconButton(
+                tooltip: 'Close',
+                iconSize: 16,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close_rounded),
+                onPressed: onClose,
+              ),
+            ],
+          ),
         ),
-      ),
-    );
-  }
-}
-
-/// The per-document view-mode selector shown beneath the tab strip.
-class _ModeBar extends StatelessWidget {
-  const _ModeBar({required this.doc});
-
-  final DocumentController doc;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      height: 52,
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: cs.outlineVariant)),
-      ),
-      alignment: Alignment.centerLeft,
-      child: SegmentedButton<EditorMode>(
-        showSelectedIcon: false,
-        segments: [
-          for (final m in EditorMode.values)
-            ButtonSegment(
-              value: m,
-              icon: Icon(m.icon, size: 18),
-              label: Text(m.label),
-            ),
-        ],
-        selected: {doc.mode},
-        onSelectionChanged: (s) => doc.setMode(s.first),
       ),
     );
   }

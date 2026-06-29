@@ -47,8 +47,8 @@ class FileAssociationService {
         return res.stdout.toString().contains(progId);
       }
       if (Platform.isLinux) {
-        final res =
-            await Process.run('xdg-mime', ['query', 'default', 'text/markdown']);
+        final res = await Process.run(
+            'xdg-mime', ['query', 'default', 'text/markdown']);
         return res.stdout.toString().contains('markdown_studio');
       }
     } catch (_) {/* tools absent → treat as not associated */}
@@ -80,16 +80,14 @@ class FileAssociationService {
       ..writeln('[HKEY_CURRENT_USER\\Software\\Classes\\$progId]')
       ..writeln('@="Markdown Document"')
       ..writeln()
-      ..writeln(
-          '[HKEY_CURRENT_USER\\Software\\Classes\\$progId\\DefaultIcon]')
+      ..writeln('[HKEY_CURRENT_USER\\Software\\Classes\\$progId\\DefaultIcon]')
       ..writeln('@="\\"$exe\\",0"')
       ..writeln()
       ..writeln(
           '[HKEY_CURRENT_USER\\Software\\Classes\\$progId\\shell\\open\\command]')
       ..writeln('@="\\"$exe\\" \\"%1\\""')
       ..writeln()
-      ..writeln(
-          '[HKEY_CURRENT_USER\\Software\\Classes\\.md\\OpenWithProgids]')
+      ..writeln('[HKEY_CURRENT_USER\\Software\\Classes\\.md\\OpenWithProgids]')
       ..writeln('"$progId"=hex(0):');
 
     final file = File('${Directory.systemTemp.path}\\md_assoc.reg');

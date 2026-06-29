@@ -1,3 +1,4 @@
+import 'package:flutter/widgets.dart' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/services/file_association_service.dart';
@@ -9,6 +10,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   testWidgets('App boots and shows the mode selector', (tester) async {
+    // Desktop-sized surface (this is a desktop-first app; the default 800x600
+    // test surface is narrower than any real window).
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     // Pre-decide the association prompt so the boot stays hermetic (no OS calls).
     SharedPreferences.setMockInitialValues({'assoc_prompt_done': true});
     final prefs = await SharedPreferences.getInstance();

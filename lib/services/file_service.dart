@@ -39,7 +39,8 @@ class FileService {
         content = await File(file.path!).readAsString();
       }
       if (content != null) {
-        docs.add(OpenedDocument(path: file.path ?? file.name, content: content));
+        docs.add(
+            OpenedDocument(path: file.path ?? file.name, content: content));
       }
     }
     return docs;

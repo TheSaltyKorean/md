@@ -124,8 +124,7 @@ class _PrintDialogState extends State<PrintDialog> {
                       IconButton(
                         tooltip: 'Edit profile',
                         icon: const Icon(Icons.edit_rounded),
-                        onPressed: () =>
-                            _editProfile(selected, isNew: false),
+                        onPressed: () => _editProfile(selected, isNew: false),
                       ),
                       IconButton(
                         tooltip: 'New profile',
@@ -155,17 +154,19 @@ class _PrintDialogState extends State<PrintDialog> {
                     children: [
                       if (_selectedId != profilesService.defaultId)
                         ActionChip(
-                          avatar: const Icon(Icons.star_outline_rounded,
-                              size: 18),
+                          avatar:
+                              const Icon(Icons.star_outline_rounded, size: 18),
                           label: const Text('Set as default'),
                           onPressed: () =>
                               profilesService.setDefault(_selectedId),
                         ),
                       if (widget.docPath != null)
                         _AssignChip(
-                          assigned: profilesService.assignedId(widget.docPath) ==
-                              _selectedId,
-                          onToggle: (assign) => profilesService.assignToDocument(
+                          assigned:
+                              profilesService.assignedId(widget.docPath) ==
+                                  _selectedId,
+                          onToggle: (assign) =>
+                              profilesService.assignToDocument(
                             widget.docPath!,
                             assign ? _selectedId : null,
                           ),

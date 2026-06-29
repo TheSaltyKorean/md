@@ -28,20 +28,31 @@ class FormatToolbar extends StatelessWidget {
         child: Row(
           children: [
             const SizedBox(width: 4),
-            _btn(context, Icons.format_bold, 'Bold', () => _inline(AppFlowyRichTextKeys.bold, '**', '**')),
-            _btn(context, Icons.format_italic, 'Italic', () => _inline(AppFlowyRichTextKeys.italic, '*', '*')),
-            _btn(context, Icons.format_underlined, 'Underline', () => _inline(AppFlowyRichTextKeys.underline, '<u>', '</u>')),
-            _btn(context, Icons.format_strikethrough, 'Strikethrough', () => _inline(AppFlowyRichTextKeys.strikethrough, '~~', '~~')),
-            _btn(context, Icons.code, 'Inline code', () => _inline(AppFlowyRichTextKeys.code, '`', '`')),
+            _btn(context, Icons.format_bold, 'Bold',
+                () => _inline(AppFlowyRichTextKeys.bold, '**', '**')),
+            _btn(context, Icons.format_italic, 'Italic',
+                () => _inline(AppFlowyRichTextKeys.italic, '*', '*')),
+            _btn(context, Icons.format_underlined, 'Underline',
+                () => _inline(AppFlowyRichTextKeys.underline, '<u>', '</u>')),
+            _btn(context, Icons.format_strikethrough, 'Strikethrough',
+                () => _inline(AppFlowyRichTextKeys.strikethrough, '~~', '~~')),
+            _btn(context, Icons.code, 'Inline code',
+                () => _inline(AppFlowyRichTextKeys.code, '`', '`')),
             _divider(cs),
             _btn(context, Icons.title, 'Heading 1', () => _heading(1, '# ')),
-            _btn(context, Icons.text_fields, 'Heading 2', () => _heading(2, '## ')),
-            _btn(context, Icons.text_format, 'Heading 3', () => _heading(3, '### ')),
+            _btn(context, Icons.text_fields, 'Heading 2',
+                () => _heading(2, '## ')),
+            _btn(context, Icons.text_format, 'Heading 3',
+                () => _heading(3, '### ')),
             _divider(cs),
-            _btn(context, Icons.format_list_bulleted, 'Bulleted list', () => _block('bulleted_list', '- ')),
-            _btn(context, Icons.format_list_numbered, 'Numbered list', () => _block('numbered_list', '1. ')),
-            _btn(context, Icons.checklist, 'Checklist', () => _block('todo_list', '- [ ] ')),
-            _btn(context, Icons.format_quote, 'Quote', () => _block('quote', '> ')),
+            _btn(context, Icons.format_list_bulleted, 'Bulleted list',
+                () => _block('bulleted_list', '- ')),
+            _btn(context, Icons.format_list_numbered, 'Numbered list',
+                () => _block('numbered_list', '1. ')),
+            _btn(context, Icons.checklist, 'Checklist',
+                () => _block('todo_list', '- [ ] ')),
+            _btn(context, Icons.format_quote, 'Quote',
+                () => _block('quote', '> ')),
             const SizedBox(width: 4),
           ],
         ),
@@ -57,7 +68,8 @@ class FormatToolbar extends StatelessWidget {
         ),
       );
 
-  Widget _btn(BuildContext context, IconData icon, String tip, VoidCallback onTap) {
+  Widget _btn(
+      BuildContext context, IconData icon, String tip, VoidCallback onTap) {
     return IconButton(
       tooltip: tip,
       iconSize: 20,
@@ -152,8 +164,8 @@ class FormatToolbar extends StatelessWidget {
     final newText = text.replaceRange(start, end, '$left$selected$right');
     c.value = value.copyWith(
       text: newText,
-      selection: TextSelection.collapsed(
-          offset: end + left.length + right.length),
+      selection:
+          TextSelection.collapsed(offset: end + left.length + right.length),
       composing: TextRange.empty,
     );
   }

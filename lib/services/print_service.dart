@@ -20,8 +20,8 @@ class PrintService {
   }) async {
     await Printing.layoutPdf(
       name: title,
-      onLayout: (format) =>
-          _buildPdf(markdown: markdown, profile: profile, title: title, format: format),
+      onLayout: (format) => _buildPdf(
+          markdown: markdown, profile: profile, title: title, format: format),
     );
   }
 
@@ -138,8 +138,8 @@ class PrintService {
       );
     }
 
-    final headerTitle = profile.headerText ??
-        (profile.showTitleInHeader ? title : null);
+    final headerTitle =
+        profile.headerText ?? (profile.showTitleInHeader ? title : null);
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -263,7 +263,8 @@ class PrintService {
       }
     }
 
-    final mono = await safe(PdfGoogleFonts.robotoMonoRegular, pw.Font.courier());
+    final mono =
+        await safe(PdfGoogleFonts.robotoMonoRegular, pw.Font.courier());
 
     switch (family) {
       case 'Lato':
@@ -279,7 +280,8 @@ class PrintService {
       case 'Merriweather':
         return PdfFontSet(
           base: await safe(PdfGoogleFonts.merriweatherRegular, pw.Font.times()),
-          bold: await safe(PdfGoogleFonts.merriweatherBold, pw.Font.timesBold()),
+          bold:
+              await safe(PdfGoogleFonts.merriweatherBold, pw.Font.timesBold()),
           italic: await safe(
               PdfGoogleFonts.merriweatherItalic, pw.Font.timesItalic()),
           boldItalic: await safe(
@@ -290,8 +292,8 @@ class PrintService {
         return PdfFontSet(
           base:
               await safe(PdfGoogleFonts.montserratRegular, pw.Font.helvetica()),
-          bold:
-              await safe(PdfGoogleFonts.montserratBold, pw.Font.helveticaBold()),
+          bold: await safe(
+              PdfGoogleFonts.montserratBold, pw.Font.helveticaBold()),
           italic: await safe(
               PdfGoogleFonts.montserratItalic, pw.Font.helveticaOblique()),
           boldItalic: await safe(PdfGoogleFonts.montserratBoldItalic,
@@ -301,7 +303,8 @@ class PrintService {
       case 'Open Sans':
         return PdfFontSet(
           base: await safe(PdfGoogleFonts.openSansRegular, pw.Font.helvetica()),
-          bold: await safe(PdfGoogleFonts.openSansBold, pw.Font.helveticaBold()),
+          bold:
+              await safe(PdfGoogleFonts.openSansBold, pw.Font.helveticaBold()),
           italic: await safe(
               PdfGoogleFonts.openSansItalic, pw.Font.helveticaOblique()),
           boldItalic: await safe(PdfGoogleFonts.openSansBoldItalic,

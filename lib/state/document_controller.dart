@@ -101,16 +101,31 @@ class DocumentController extends ChangeNotifier {
 
   // --- Public commands --------------------------------------------------------
 
-  void loadMarkdown(String content, {String? path}) {
+  /// Load [content] into both representations. When [markDirty] is true (used by
+  /// tab tear-off handoff), the document is flagged as having unsaved edits and
+  /// the on-disk version is used as the external-change baseline so those edits
+  /// aren't silently lost.
+  void loadMarkdown(String content, {String? path, bool markDirty = false}) {
     _suppressDirty = true;
     sourceController.text = content;
     _setEditorState(EditorState(document: markdownToDocument(content)));
     _filePath = path;
-    _dirty = false;
     _suppressDirty = false;
-    _lastSyncedContent = content;
     _pendingExternalContent = null;
     _startWatching(path);
+    if (markDirty) {
+      _dirty = true;
+      String? disk;
+      if (path != null) {
+        try {
+          disk = File(path).readAsStringSync();
+        } catch (_) {/* file may not exist */}
+      }
+      _lastSyncedContent = disk ?? content;
+    } else {
+      _dirty = false;
+      _lastSyncedContent = content;
+    }
     notifyListeners();
   }
 

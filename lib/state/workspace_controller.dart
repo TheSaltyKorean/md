@@ -47,8 +47,10 @@ class WorkspaceController extends ChangeNotifier {
   /// Open a loaded document. If the same file is already open, just focus it;
   /// otherwise add a new tab. If the only open tab is a pristine "Untitled"
   /// document, replace it instead of stacking an empty tab.
-  void openDocument(String content, {String? path}) {
-    if (path != null) {
+  void openDocument(String content, {String? path, bool markDirty = false}) {
+    // For a clean open of an already-open file, just focus it. (Handoffs with
+    // unsaved edits always open their own tab.)
+    if (path != null && !markDirty) {
       final existing = _docs.indexWhere((d) => d.filePath == path);
       if (existing >= 0) {
         _activeIndex = existing;
@@ -60,13 +62,14 @@ class WorkspaceController extends ChangeNotifier {
     if (_docs.length == 1 &&
         _docs.first.filePath == null &&
         !_docs.first.isDirty) {
-      _docs.first.loadMarkdown(content, path: path);
+      _docs.first.loadMarkdown(content, path: path, markDirty: markDirty);
       _activeIndex = 0;
       notifyListeners();
       return;
     }
 
-    final doc = _newDoc()..loadMarkdown(content, path: path);
+    final doc = _newDoc()
+      ..loadMarkdown(content, path: path, markDirty: markDirty);
     _docs.add(doc);
     _activeIndex = _docs.length - 1;
     notifyListeners();
@@ -75,6 +78,19 @@ class WorkspaceController extends ChangeNotifier {
   void select(int index) {
     if (index < 0 || index >= _docs.length || index == _activeIndex) return;
     _activeIndex = index;
+    notifyListeners();
+  }
+
+  /// Move the tab at [oldIndex] to [newIndex] (drag-to-reorder), keeping the
+  /// same document active.
+  void reorder(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= _docs.length) return;
+    if (oldIndex == newIndex) return;
+    final active = _docs[_activeIndex];
+    final doc = _docs.removeAt(oldIndex);
+    final target = newIndex.clamp(0, _docs.length);
+    _docs.insert(target, doc);
+    _activeIndex = _docs.indexOf(active);
     notifyListeners();
   }
 

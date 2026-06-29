@@ -54,6 +54,12 @@ dependencies:
   # Watch the open file for external changes (git pull, sync, other editors).
   watcher: ^1.1.0
 
+  # Drag-and-drop files into the app (desktop).
+  desktop_drop: ^0.7.1
+
+  # Focus/raise the existing window when a file is opened into it (desktop).
+  window_manager: ^0.4.3
+
 # AppFlowy Editor depends on intl ^0.19.0, but the Flutter SDK's
 # flutter_localizations pins intl to 0.20.2. AppFlowy works fine with 0.20.x, so
 # we override the constraint to let both resolve together.

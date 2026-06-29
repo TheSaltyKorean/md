@@ -93,7 +93,8 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   }
 
   PrintProfile _assemble() => widget.profile.copyWith(
-        name: _name.text.trim().isEmpty ? 'Untitled profile' : _name.text.trim(),
+        name:
+            _name.text.trim().isEmpty ? 'Untitled profile' : _name.text.trim(),
         companyName: _trimOrNull(_company),
         headerText: _trimOrNull(_header),
         footerText: _trimOrNull(_footer),
@@ -152,7 +153,6 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             ),
           ),
           const SizedBox(height: 20),
-
           _section('Branding'),
           _logoRow(cs),
           const SizedBox(height: 16),
@@ -179,7 +179,6 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 20),
-
           _section('Header & footer'),
           TextField(
             controller: _header,
@@ -216,7 +215,6 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 20),
-
           _section('Confidentiality'),
           TextField(
             controller: _confidential,
@@ -234,7 +232,6 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             ),
           ),
           const SizedBox(height: 20),
-
           _section('Layout'),
           Row(
             children: [

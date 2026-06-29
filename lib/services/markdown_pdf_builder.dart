@@ -94,8 +94,8 @@ class MarkdownPdfBuilder {
       padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
       child: pw.RichText(
         text: pw.TextSpan(
-          children: _inline(el.children, color: _primary, sizeOverride: size,
-              boldDefault: true),
+          children: _inline(el.children,
+              color: _primary, sizeOverride: size, boldDefault: true),
         ),
       ),
     );
@@ -111,10 +111,8 @@ class MarkdownPdfBuilder {
   }
 
   pw.Widget _blockquote(md.Element el) {
-    final children = (el.children ?? [])
-        .map(_block)
-        .whereType<pw.Widget>()
-        .toList();
+    final children =
+        (el.children ?? []).map(_block).whereType<pw.Widget>().toList();
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 8),
       padding: const pw.EdgeInsets.fromLTRB(12, 4, 8, 4),
@@ -230,7 +228,8 @@ class MarkdownPdfBuilder {
       fontSize: 10.5,
       color: PdfColors.white,
     );
-    final cellStyle = pw.TextStyle(font: fonts.base, fontSize: 10.5, color: _text);
+    final cellStyle =
+        pw.TextStyle(font: fonts.base, fontSize: 10.5, color: _text);
 
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
@@ -242,7 +241,8 @@ class MarkdownPdfBuilder {
           if (cell is! md.Element) continue;
           cells.add(
             pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              padding:
+                  const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               child: pw.Text(cell.textContent,
                   style: isHead ? headerStyle : cellStyle),
             ),
@@ -250,9 +250,7 @@ class MarkdownPdfBuilder {
         }
         rows.add(
           pw.TableRow(
-            decoration: isHead
-                ? pw.BoxDecoration(color: _primary)
-                : null,
+            decoration: isHead ? pw.BoxDecoration(color: _primary) : null,
             children: cells,
           ),
         );
@@ -433,9 +431,8 @@ class MarkdownPdfBuilder {
       fontSize: size ?? 11,
       color: color ?? _text,
       lineSpacing: 2.5,
-      decoration: decorations.isEmpty
-          ? null
-          : pw.TextDecoration.combine(decorations),
+      decoration:
+          decorations.isEmpty ? null : pw.TextDecoration.combine(decorations),
     );
   }
 }
