@@ -4,6 +4,7 @@ import UIKit
 class SceneDelegate: FlutterSceneDelegate {
   private var channel: FlutterMethodChannel?
   private var pendingFiles: [[String: Any?]] = []
+  private var dartReady = false
 
   override func scene(
     _ scene: UIScene,
@@ -17,6 +18,7 @@ class SceneDelegate: FlutterSceneDelegate {
         binaryMessenger: controller.binaryMessenger)
       channel?.setMethodCallHandler { [weak self] call, reply in
         if call.method == "getInitialFile" {
+          self?.dartReady = true // Dart's handler is now registered.
           reply(self?.pendingFiles.isEmpty == false ? self?.pendingFiles : nil)
           self?.pendingFiles = []
         } else {
@@ -34,7 +36,9 @@ class SceneDelegate: FlutterSceneDelegate {
   override func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
     for context in URLContexts {
       let payload = args(for: context.url)
-      if let channel = channel {
+      // Only push once Dart has registered its handler; otherwise queue it for
+      // the getInitialFile pull so an open during startup isn't dropped.
+      if dartReady, let channel = channel {
         channel.invokeMethod("openFile", arguments: payload)
       } else {
         pendingFiles.append(payload)

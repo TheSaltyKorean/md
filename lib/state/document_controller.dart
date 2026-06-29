@@ -44,9 +44,12 @@ class DocumentController extends ChangeNotifier {
   String get title =>
       _filePath != null ? p.basename(_filePath!) : (_displayName ?? 'Untitled');
 
-  /// A brand-new, never-loaded tab (no path, no display name, not edited) — safe
-  /// to replace when opening a file rather than stacking an empty tab.
-  bool get isPristine => _filePath == null && _displayName == null && !_dirty;
+  /// A brand-new, never-loaded/saved tab — safe to replace when opening a file
+  /// rather than stacking an empty tab. Cleared once any content is loaded,
+  /// edited, or saved (even a pathless mobile save).
+  bool _pristine = true;
+  bool get isPristine =>
+      _pristine && _filePath == null && _displayName == null && !_dirty;
 
   // --- View mode (per document) ----------------------------------------------
   // Documents open in read-only Preview by default; the user switches to Edit
@@ -102,6 +105,7 @@ class DocumentController extends ChangeNotifier {
   }
 
   void _markDirty() {
+    _pristine = false;
     if (_dirty) return;
     _dirty = true;
     notifyListeners();
@@ -124,6 +128,7 @@ class DocumentController extends ChangeNotifier {
     _setEditorState(EditorState(document: markdownToDocument(content)));
     _filePath = path;
     _displayName = displayName;
+    _pristine = false;
     _suppressDirty = false;
     _pendingExternalContent = null;
     _startWatching(path);
@@ -157,6 +162,7 @@ class DocumentController extends ChangeNotifier {
   /// flag but leaves [filePath] unchanged so the next save re-prompts.
   void markCleanSaved(String content) {
     _dirty = false;
+    _pristine = false;
     _lastSyncedContent = content;
     notifyListeners();
   }

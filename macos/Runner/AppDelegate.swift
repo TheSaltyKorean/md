@@ -35,13 +35,25 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+    deliver([filename])
+    return true
+  }
+
+  // AppKit delivers a multi-file open (Finder/Dock multi-select) here.
+  override func application(_ sender: NSApplication, openFiles filenames: [String]) {
+    deliver(filenames)
+    sender.reply(toOpenOrPrint: .success)
+  }
+
+  private func deliver(_ filenames: [String]) {
     // Only push once Dart has registered its handler; otherwise queue every path
     // for the getInitialFile pull so launch-time multi-selects aren't dropped.
     if dartReady, let channel = channel {
-      channel.invokeMethod("openFile", arguments: ["path": filename])
+      for filename in filenames {
+        channel.invokeMethod("openFile", arguments: ["path": filename])
+      }
     } else {
-      pendingPaths.append(filename)
+      pendingPaths.append(contentsOf: filenames)
     }
-    return true
   }
 }
