@@ -1,38 +1,36 @@
 #!/usr/bin/env bash
-# codex-gate-hook.sh — Claude Code PreToolUse hook.
+# codex-gate-hook.sh — Claude Code PreToolUse hook (fail-closed).
 #
-# Blocks any attempt to merge a PR into `main` (or push to main) unless
-# tool/codex-gate.sh confirms a genuine Codex all-clear for that PR. Wire it in
-# .claude/settings.json as a PreToolUse hook for the Bash and PowerShell tools.
+# Blocks ALL raw PR merges and pushes to `main`. Merges must instead go through
+# `tool/codex-merge.sh`, which enforces the Codex all-clear gate. This keeps the
+# hook free of fragile selector parsing: it doesn't need to know which PR — it
+# simply refuses every direct merge path.
 #
-# Exit 0 = allow; exit 2 = block (stderr is shown to the agent).
+# Wire in .claude/settings.json as a PreToolUse hook for the shell tools.
+# Exit 0 = allow; exit 2 = block (stderr shown to the agent).
 set -uo pipefail
 
-input="$(cat)"   # PreToolUse JSON; we grep it raw to avoid needing a JSON parser.
+input="$(cat)"   # PreToolUse JSON; grepped raw (no JSON parser needed).
 
-# Only gate merge-to-main actions.
-if ! echo "$input" | grep -Eq 'gh[[:space:]]+pr[[:space:]]+merge|/pulls/[0-9]+/merge|git[[:space:]]+push[^|]*\bmain\b'; then
+raw_merge='gh[[:space:]]+pr[[:space:]]+merge|/pulls/[0-9]+/merge'
+push_main='git[[:space:]]+push[^|&;]*\bmain\b'
+
+# Allow the sanctioned wrapper through — but only when it's NOT also smuggling a
+# raw merge/push in the same command (defends against comment-injection bypass).
+if echo "$input" | grep -q 'codex-merge\.sh' \
+   && ! echo "$input" | grep -Eq "$raw_merge|$push_main"; then
   exit 0
 fi
 
-dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Resolve the PR number from the command, else from the current branch.
-pr="$(echo "$input" | grep -oE 'gh[[:space:]]+pr[[:space:]]+merge[[:space:]]+[0-9]+' | grep -oE '[0-9]+' | head -1)"
-[ -z "$pr" ] && pr="$(echo "$input" | grep -oE '/pulls/[0-9]+/merge' | grep -oE '[0-9]+' | head -1)"
-[ -z "$pr" ] && pr="$(gh pr view --json number --jq .number 2>/dev/null || true)"
-
-if [ -z "$pr" ]; then
-  echo "codex-gate: refusing a merge/push to main — could not determine the PR to verify the Codex all-clear." >&2
+if echo "$input" | grep -Eq "$raw_merge"; then
+  echo "codex-gate: BLOCKED. Merge PRs only via: bash tool/codex-merge.sh <PR> [args]" >&2
+  echo "(it verifies the Codex all-clear gate; raw 'gh pr merge' is not allowed)." >&2
   exit 2
 fi
 
-if out="$("$dir/codex-gate.sh" "$pr" 2>&1)"; then
-  echo "codex-gate: $out — merge allowed." >&2
-  exit 0
+if echo "$input" | grep -Eq "$push_main"; then
+  echo "codex-gate: BLOCKED. No direct pushes to main — open a PR and merge via tool/codex-merge.sh." >&2
+  exit 2
 fi
 
-echo "codex-gate: BLOCKED merge of PR #$pr." >&2
-echo "$out" >&2
-echo "Run the Codex loop to a 👍 first. If findings are intentionally accepted, the USER must approve, then add the 'codex-accepted' label to the PR." >&2
-exit 2
+exit 0

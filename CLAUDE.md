@@ -33,9 +33,15 @@ See `README.md` for full feature/build/store docs. High level:
      gate as "passed/satisfied/complete" unless `tool/codex-gate.sh <PR>` prints
      `GREEN`. Report honestly — e.g. "merged with N accepted findings", never
      "all-clear", when findings remain.
-   - **Enforcement:** `.claude/settings.json` runs `tool/codex-gate-hook.sh`
-     before every shell tool call; it **blocks `gh pr merge` / push-to-main**
-     unless `tool/codex-gate.sh` returns GREEN. Don't try to evade the hook.
+   - **Enforcement (fail-closed):** `.claude/settings.json` runs
+     `tool/codex-gate-hook.sh` before every shell tool call. It **blocks all raw
+     `gh pr merge` and pushes to `main`.** The *only* sanctioned merge path is
+     **`bash tool/codex-merge.sh <PR> [args]`**, which runs `tool/codex-gate.sh`
+     and merges only when it prints GREEN. Don't try to evade the hook; if it
+     blocks you, fix the gate state, don't work around it.
+   - The gate's all-clear = a **literal 👍 (`+1`)** from the Codex bot on a
+     `@codex review` request that is **newer than the PR head commit**, with no
+     later findings (it paginates and ignores non-`+1` reactions).
    - **Accepted findings:** if the user *explicitly* decides to merge with an
      open finding, that decision must be recorded on the PR, and only then may
      the **`codex-accepted`** label be added (which the gate honours). Never add
