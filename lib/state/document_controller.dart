@@ -41,7 +41,9 @@ class DocumentController extends ChangeNotifier {
   String get title => _filePath == null ? 'Untitled' : p.basename(_filePath!);
 
   // --- View mode (per document) ----------------------------------------------
-  EditorMode _mode = EditorMode.wysiwyg;
+  // Documents open in read-only Preview by default; the user switches to Edit
+  // (WYSIWYG) or Split to make changes.
+  EditorMode _mode = EditorMode.preview;
   EditorMode get mode => _mode;
 
   // --- Representations --------------------------------------------------------

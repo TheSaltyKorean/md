@@ -8,6 +8,7 @@ import '../services/file_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
 import '../state/workspace_controller.dart';
+import '../widgets/format_toolbar.dart';
 import '../widgets/preview_view.dart';
 import '../widgets/print_dialog.dart';
 import '../widgets/split_view.dart';
@@ -169,30 +170,16 @@ class _EditorScreenState extends State<EditorScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        titleSpacing: 8,
-        title: Row(
-          children: [
-            Flexible(
-              child: Text(active.title, overflow: TextOverflow.ellipsis),
-            ),
-            if (active.isDirty)
-              Padding(
-                padding: const EdgeInsets.only(left: 6),
-                child: Icon(Icons.circle,
-                    size: 9, color: Theme.of(context).colorScheme.primary),
-              ),
-          ],
-        ),
+        titleSpacing: 0,
+        // The open-document tabs sit where the filename would be.
+        title: _TabStrip(workspace: ws, onClose: _closeTab),
         actions: _actions(context, ws, active, theme),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(96),
+          preferredSize: const Size.fromHeight(100),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _TabStrip(
-                workspace: ws,
-                onClose: _closeTab,
-              ),
+              FormatToolbar(controller: active),
               _ModeBar(doc: active),
             ],
           ),
