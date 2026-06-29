@@ -28,9 +28,11 @@ head_sha="$(api "repos/$REPO/pulls/$PR" --jq '.head.sha')" || red "PR lookup fai
 head_date="$(api "repos/$REPO/commits/$head_sha" --jq '.commit.committer.date')" || red "head commit lookup failed."
 [ -n "$head_date" ] || red "could not read head commit date."
 
-# Latest "@codex review" request across all pages.
+# Latest "@codex review" request across all pages. Exclude the Codex bot itself:
+# its review comments contain "@codex review" boilerplate and must never be
+# mistaken for the human request that authorises the review.
 comments="$(api --paginate "repos/$REPO/issues/$PR/comments" \
-  --jq '.[] | select((.body|test("@codex";"i")) and (.body|test("review";"i"))) | "\(.created_at)\t\(.id)"')" \
+  --jq ".[] | select(.user.login != \"$BOT\") | select((.body|test(\"@codex\";\"i\")) and (.body|test(\"review\";\"i\"))) | \"\(.created_at)\t\(.id)\"")" \
   || red "comments lookup failed (fail-closed)."
 latest="$(printf '%s\n' "$comments" | grep -v '^$' | sort | tail -1)"
 [ -n "$latest" ] || red "no '@codex review' request comment found."
@@ -62,17 +64,24 @@ thumbs="$(printf '%s\n' "$reacts" | grep -cx '+1' | tr -d ' ')"
 # Comment-based all-clear: Codex signals a clean review by posting a comment such
 # as "Codex Review: Didn't find any major issues" that names the reviewed commit
 # ("Reviewed commit: <sha>"). Only the Codex bot can author a comment as $BOT, so
-# this is trustworthy; we additionally require it to name the CURRENT head SHA so
-# a clean review of an older commit can't green a newer head. This binds to the
-# exact SHA (stronger than the reaction path's date proxy).
-short_sha="${head_sha:0:9}"
+# this is trustworthy. To accept it we require ALL of:
+#   * the comment is NEWER than the latest request (a fresh response to it, not a
+#     stale clean comment carried over from an earlier cycle), AND
+#   * the SHA parsed from its "Reviewed commit:" line is a prefix of the CURRENT
+#     head SHA (exact binding, not a loose substring search anywhere in the body).
+# Combined with the "no findings after the request" check below, a re-requested
+# review can't go green on a stale clean comment.
 clean_lines="$(api --paginate "repos/$REPO/issues/$PR/comments" \
-  --jq ".[] | select(.user.login==\"$BOT\") | select(.body|test(\"find any major issues|no major issues\";\"i\")) | (.body|gsub(\"[\\n\\r]+\";\" \"))")" \
+  --jq ".[] | select(.user.login==\"$BOT\") | select(.body|test(\"find any major issues|no major issues\";\"i\")) | \"\(.created_at)\t\" + (.body|gsub(\"[\\n\\r]+\";\" \"))")" \
   || red "clean-review comment lookup failed (fail-closed)."
 clean_on_head=0
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
-  case "$line" in *"$short_sha"*) clean_on_head=1; break;; esac
+while IFS=$'\t' read -r cdate cbody; do
+  [ -n "$cdate" ] || continue
+  [[ "$cdate" > "$req_date" ]] || continue   # fresh: posted after the latest request
+  rsha="$(printf '%s' "$cbody" \
+    | sed -nE 's/.*[Rr]eviewed[[:space:]_]*commit[^0-9a-fA-F]*([0-9a-fA-F]{7,40}).*/\1/p' | head -1)"
+  [ -n "$rsha" ] || continue
+  case "$head_sha" in "$rsha"*) clean_on_head=1; break;; esac
 done <<EOF
 $clean_lines
 EOF
@@ -104,7 +113,7 @@ if [ "${thumbs:-0}" -gt 0 ]; then
   exit 0
 fi
 if [ "${clean_on_head:-0}" -gt 0 ]; then
-  echo "GREEN $head_sha: Codex all-clear (clean-review comment naming head $short_sha); no later findings."
+  echo "GREEN $head_sha: Codex all-clear (fresh clean-review comment whose 'Reviewed commit' is the head); no later findings."
   exit 0
 fi
-red "no Codex all-clear yet: neither a 👍 reaction nor a clean-review comment naming the current head ($short_sha)."
+red "no Codex all-clear yet: neither a 👍 reaction nor a fresh clean-review comment whose 'Reviewed commit' matches the current head."
