@@ -23,6 +23,9 @@ class SingleInstanceService {
   ServerSocket? _server;
   void Function(List<String> paths)? _onPaths;
 
+  /// Paths forwarded before [onPaths] was registered (primary still starting up).
+  final List<List<String>> _bufferedForwards = [];
+
   bool get isSupported =>
       !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
@@ -40,8 +43,10 @@ class SingleInstanceService {
       _server!.listen(_handleClient);
       return true;
     } catch (_) {
-      // Port held by a foreign service (no handshake) — run standalone.
-      return true;
+      // Lost a bind race: another instance may have just started. Retry the
+      // handshake before falling back to standalone.
+      if (await _verifiedPrimaryExists()) return false;
+      return true; // port held by a foreign service — run standalone
     }
   }
 
@@ -64,8 +69,15 @@ class SingleInstanceService {
   }
 
   /// Register a callback invoked when another instance forwards file paths (an
-  /// empty list means "just focus the window").
-  void onPaths(void Function(List<String> paths) handler) => _onPaths = handler;
+  /// empty list means "just focus the window"). Drains anything that arrived
+  /// before registration.
+  void onPaths(void Function(List<String> paths) handler) {
+    _onPaths = handler;
+    for (final paths in _bufferedForwards) {
+      handler(paths);
+    }
+    _bufferedForwards.clear();
+  }
 
   void _handleClient(Socket client) {
     // Greet first so a probing instance can verify this is Markdown Studio.
@@ -80,7 +92,13 @@ class SingleInstanceService {
             .map((e) => e.trim())
             .where((e) => e.isNotEmpty)
             .toList();
-        _onPaths?.call(paths); // notify even when empty (focus request)
+        // Notify even when empty (focus request); buffer if the handler isn't
+        // registered yet (primary still starting up).
+        if (_onPaths != null) {
+          _onPaths!(paths);
+        } else {
+          _bufferedForwards.add(paths);
+        }
         client.destroy();
       },
       onError: (_) => client.destroy(),

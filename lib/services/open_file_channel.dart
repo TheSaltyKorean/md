@@ -21,10 +21,16 @@ class OpenFileChannel {
 
   Future<void> init() async {
     _channel.setMethodCallHandler(_handle);
-    // Pull any file the app was launched to open.
+    // Pull any files the app was launched to open (one tab per file).
     try {
       final initial = await _channel.invokeMethod<dynamic>('getInitialFile');
-      if (initial is Map) await _open(initial);
+      if (initial is List) {
+        for (final item in initial) {
+          if (item is Map) await _open(item);
+        }
+      } else if (initial is Map) {
+        await _open(initial);
+      }
     } catch (_) {/* channel not implemented on this platform */}
   }
 

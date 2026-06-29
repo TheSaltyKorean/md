@@ -3,7 +3,7 @@ import UIKit
 
 class SceneDelegate: FlutterSceneDelegate {
   private var channel: FlutterMethodChannel?
-  private var pendingFile: [String: Any?]?
+  private var pendingFiles: [[String: Any?]] = []
 
   override func scene(
     _ scene: UIScene,
@@ -17,27 +17,27 @@ class SceneDelegate: FlutterSceneDelegate {
         binaryMessenger: controller.binaryMessenger)
       channel?.setMethodCallHandler { [weak self] call, reply in
         if call.method == "getInitialFile" {
-          reply(self?.pendingFile as Any?)
-          self?.pendingFile = nil
+          reply(self?.pendingFiles.isEmpty == false ? self?.pendingFiles : nil)
+          self?.pendingFiles = []
         } else {
           reply(FlutterMethodNotImplemented)
         }
       }
     }
-    // Cold-start URL: Dart hasn't registered its handler yet, so queue it for
-    // the getInitialFile pull rather than invoking openFile (which would drop).
-    if let url = connectionOptions.urlContexts.first?.url {
-      pendingFile = args(for: url)
+    // Cold-start URLs: Dart hasn't registered its handler yet, so queue them all
+    // for the getInitialFile pull rather than invoking openFile (which drops).
+    for context in connectionOptions.urlContexts {
+      pendingFiles.append(args(for: context.url))
     }
   }
 
   override func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
-    if let url = URLContexts.first?.url {
-      let payload = args(for: url)
+    for context in URLContexts {
+      let payload = args(for: context.url)
       if let channel = channel {
         channel.invokeMethod("openFile", arguments: payload)
       } else {
-        pendingFile = payload
+        pendingFiles.append(payload)
       }
     }
     super.scene(scene, openURLContexts: URLContexts)

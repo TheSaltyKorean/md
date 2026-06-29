@@ -4,7 +4,7 @@ import FlutterMacOS
 @main
 class AppDelegate: FlutterAppDelegate {
   private var channel: FlutterMethodChannel?
-  private var pendingPath: String?
+  private var pendingPaths: [String] = []
   private var dartReady = false
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -23,12 +23,9 @@ class AppDelegate: FlutterAppDelegate {
       channel?.setMethodCallHandler { [weak self] call, result in
         if call.method == "getInitialFile" {
           self?.dartReady = true // Dart's handler is now registered.
-          if let path = self?.pendingPath {
-            result(["path": path])
-            self?.pendingPath = nil
-          } else {
-            result(nil)
-          }
+          let files = self?.pendingPaths.map { ["path": $0] } ?? []
+          result(files.isEmpty ? nil : files)
+          self?.pendingPaths = []
         } else {
           result(FlutterMethodNotImplemented)
         }
@@ -38,12 +35,12 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-    // Only push once Dart has registered its handler; otherwise queue it for the
-    // getInitialFile pull so a launch-time open isn't dropped.
+    // Only push once Dart has registered its handler; otherwise queue every path
+    // for the getInitialFile pull so launch-time multi-selects aren't dropped.
     if dartReady, let channel = channel {
       channel.invokeMethod("openFile", arguments: ["path": filename])
     } else {
-      pendingPath = filename
+      pendingPaths.append(filename)
     }
     return true
   }

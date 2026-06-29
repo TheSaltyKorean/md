@@ -27,7 +27,10 @@ Future<void> main(List<String> args) async {
   if (single.isSupported && !forceNewWindow) {
     final isPrimary = await single.tryBecomePrimary();
     if (!isPrimary) {
-      await single.forward(_fileArgs(args));
+      // Resolve to absolute paths so the primary (different cwd) opens the
+      // right files.
+      final paths = _fileArgs(args).map((a) => File(a).absolute.path).toList();
+      await single.forward(paths);
       exit(0);
     }
   }

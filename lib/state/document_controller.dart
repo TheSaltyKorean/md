@@ -44,6 +44,10 @@ class DocumentController extends ChangeNotifier {
   String get title =>
       _filePath != null ? p.basename(_filePath!) : (_displayName ?? 'Untitled');
 
+  /// A brand-new, never-loaded tab (no path, no display name, not edited) — safe
+  /// to replace when opening a file rather than stacking an empty tab.
+  bool get isPristine => _filePath == null && _displayName == null && !_dirty;
+
   // --- View mode (per document) ----------------------------------------------
   // Documents open in read-only Preview by default; the user switches to Edit
   // (WYSIWYG) or Split to make changes.

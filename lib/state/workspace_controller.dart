@@ -64,9 +64,7 @@ class WorkspaceController extends ChangeNotifier {
       }
     }
 
-    if (_docs.length == 1 &&
-        _docs.first.filePath == null &&
-        !_docs.first.isDirty) {
+    if (_docs.length == 1 && _docs.first.isPristine) {
       _docs.first.loadMarkdown(content,
           path: path, displayName: displayName, markDirty: markDirty);
       _activeIndex = 0;
