@@ -71,6 +71,10 @@ dependencies:
 # we override the constraint to let both resolve together.
 dependency_overrides:
   intl: 0.20.2
+  # path_provider_foundation 2.6.0 reintroduced a native-assets impl reported to
+  # break macOS App Store uploads / crash iOS; pin to the method-channel line
+  # until it's resolved upstream.
+  path_provider_foundation: ">=2.4.1 <2.6.0"
 
 dev_dependencies:
   flutter_test:
