@@ -177,6 +177,16 @@ number must increase with every store upload.
   Flathub.
 - See [Linux deployment](https://docs.flutter.dev/deployment/linux).
 
+## Security & known limitations
+
+- **`file_picker` Android CVE-22 (tracked, accepted):** the path-traversal fix
+  is only in `file_picker` 11.x, which is incompatible with `appflowy_editor`
+  6.2.0 (it still calls the v10 API). We're pinned to 10.3.x and will upgrade
+  once AppFlowy supports v11. Impact is Android-only and requires selecting a
+  file from a malicious content provider; mobile opens read bytes and don't
+  trust the resolved path. Tracked in
+  [#2](https://github.com/TheSaltyKorean/md/issues/2).
+
 ## License
 
 Source-available under the **PolyForm Noncommercial License 1.0.0** (see

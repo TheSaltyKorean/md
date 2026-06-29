@@ -37,6 +37,20 @@ See `README.md` for full feature/build/store docs. High level:
 5. **Printing must stay functional**, including the themeable header/footer and
    the per-document branding-profile system.
 
+## Known security limitation — re-check before related edits
+
+`file_picker` is pinned to **10.3.x** with a **known Android CVE-22** (path
+traversal), because `appflowy_editor` 6.2.0 still calls the file_picker v10 API
+and the fix is only in v11. **Tracked in issue #2.**
+
+> **Standing instruction:** whenever you touch `file_picker`, `appflowy_editor`,
+> `pubspec.yaml` dependencies, or any file open/save flow, first check whether
+> the fix can now be applied — i.e. has `appflowy_editor` released a version that
+> uses the file_picker **v11** API? If yes, upgrade `file_picker` to >= 11.0.2,
+> adapt the `FilePicker.platform` → static API change, verify the build, and
+> **close issue #2**. If still blocked, leave the pin and the documentation in
+> place.
+
 ## Toolchain
 
 - **Flutter is pinned to 3.41.9** (see `.fvmrc`). Flutter **3.44+** is NOT yet

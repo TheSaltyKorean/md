@@ -35,3 +35,4 @@ rationale. Update this whenever a new rule or significant decision is made.
 - 2026-06-29: SDK relocated to `C:\git\flutter-sdk`; native platform folders generated; first PR + Codex loop.
 - 2026-06-29: Seeded "Work" profile genericised from a company name (public repo); kept `com.skmeridian` bundle id.
 - 2026-06-29: Added external-change handling — file watcher (desktop) + **auto-reload toggle**. On+clean = silent reload; On+dirty or Off = Reload/Keep-mine banner; save is last-write-wins by the user's choice.
+- 2026-06-29: PR #1 ran a **9-round Codex loop** (findings 10→7→6→6→3→5→5→5→3, all fixed). One P1 accepted+documented: `file_picker` Android CVE-22 can't be cleared (fix is v11, AppFlowy 6.2.0 needs v10 API; 10.3.11 retracted) — tracked in issue #2. Merged into main per the user's "accept + document, merge now" decision.
