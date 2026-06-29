@@ -99,6 +99,29 @@ class FileAssociationService {
   }
 
   Future<bool> _associateLinux() async {
+    final home = Platform.environment['HOME'];
+    if (home == null) return false;
+
+    // Install a desktop entry so the MIME default points at a real handler
+    // (otherwise xdg-mime default references a non-existent .desktop file).
+    final appsDir = Directory('$home/.local/share/applications');
+    await appsDir.create(recursive: true);
+    final exe = Platform.resolvedExecutable;
+    final desktop = File('${appsDir.path}/markdown_studio.desktop');
+    await desktop.writeAsString('''[Desktop Entry]
+Type=Application
+Name=Markdown Studio
+Comment=Markdown viewer and WYSIWYG editor
+Exec="$exe" %f
+Icon=markdown_studio
+Terminal=false
+Categories=Office;TextEditor;Utility;
+MimeType=text/markdown;text/x-markdown;
+''');
+    try {
+      await Process.run('update-desktop-database', [appsDir.path]);
+    } catch (_) {/* optional, may be absent */}
+
     var ok = false;
     for (final mime in ['text/markdown', 'text/x-markdown']) {
       final res = await Process.run(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
@@ -99,6 +100,10 @@ class _PrintDialogState extends State<PrintDialog> {
                     children: [
                       Expanded(
                         child: DropdownButtonFormField<String>(
+                          // Key by selection so the field rebuilds with a valid
+                          // value after a profile is created or deleted (avoids
+                          // a stale/duplicate-value assertion).
+                          key: ValueKey('profile-dd-$_selectedId'),
                           initialValue: _selectedId,
                           decoration: const InputDecoration(
                             labelText: 'Branding profile',
@@ -185,6 +190,8 @@ class _PrintDialogState extends State<PrintDialog> {
                 profile: selected,
                 title: widget.title,
                 format: format,
+                baseDir:
+                    widget.docPath != null ? p.dirname(widget.docPath!) : null,
               ),
               canChangePageFormat: true,
               canChangeOrientation: true,

@@ -138,6 +138,15 @@ class DocumentController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Mark the document saved when there is no re-writable path to track (e.g.
+  /// a mobile Save As that wrote via the platform picker). Clears the dirty
+  /// flag but leaves [filePath] unchanged so the next save re-prompts.
+  void markCleanSaved(String content) {
+    _dirty = false;
+    _lastSyncedContent = content;
+    notifyListeners();
+  }
+
   void setMode(EditorMode next) {
     if (next == _mode) return;
     _suppressDirty = true;

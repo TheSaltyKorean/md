@@ -57,9 +57,12 @@ class FileService {
     }
   }
 
-  /// Show a save dialog. On mobile the bytes are written by the picker; on
-  /// desktop we write the returned path ourselves. Returns the path or null.
-  Future<String?> saveAs(String content, {String? suggestedName}) async {
+  /// Show a save dialog. On desktop we write the chosen path ourselves and
+  /// return it as a re-writable [SaveResult.path]. On mobile the picker writes
+  /// the bytes itself and may return a content URI that is *not* re-writable via
+  /// dart:io, so we report success with a null path (the caller then treats the
+  /// document as saved-without-a-tracked-path and re-prompts on the next save).
+  Future<SaveResult> saveAs(String content, {String? suggestedName}) async {
     final bytes = Uint8List.fromList(utf8.encode(content));
     final path = await FilePicker.platform.saveFile(
       dialogTitle: 'Save Markdown file',
@@ -68,16 +71,29 @@ class FileService {
       allowedExtensions: _extensions,
       bytes: bytes, // required for Android/iOS to actually write
     );
-    if (path == null) return null;
+    if (path == null) return SaveResult.cancelled;
 
-    // On desktop, saveFile only returns a path and we must write it ourselves.
-    // On mobile the bytes were already written and `path` may be a content URI,
-    // so a failed write here is expected and harmless.
+    if (Platform.isAndroid || Platform.isIOS) {
+      // Bytes already written by the picker; the returned location isn't a
+      // re-writable dart:io path, so don't track it as the document's path.
+      return const SaveResult(saved: true, path: null);
+    }
+
     try {
       await File(path).writeAsString(content);
+      return SaveResult(saved: true, path: path);
     } catch (e) {
-      debugPrint('desktop write skipped/failed (ok on mobile): $e');
+      debugPrint('save failed: $e');
+      return SaveResult.cancelled;
     }
-    return path;
   }
+}
+
+/// Outcome of a Save As. On desktop [path] is a re-writable file path; on mobile
+/// it is null even when [saved] is true (the picker owns the destination).
+class SaveResult {
+  const SaveResult({required this.saved, this.path});
+  final bool saved;
+  final String? path;
+  static const SaveResult cancelled = SaveResult(saved: false);
 }

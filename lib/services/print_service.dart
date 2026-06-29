@@ -48,12 +48,14 @@ class PrintService {
     required PrintProfile profile,
     required String title,
     required PdfPageFormat format,
+    String? baseDir,
   }) =>
       _buildPdf(
         markdown: markdown,
         profile: profile,
         title: title,
         format: format,
+        baseDir: baseDir,
       );
 
   // --- PDF assembly -----------------------------------------------------------
@@ -63,10 +65,12 @@ class PrintService {
     required PrintProfile profile,
     required String title,
     required PdfPageFormat format,
+    String? baseDir,
   }) async {
     final fonts = await _resolveFonts(profile.fontFamily);
     final logo = await _loadLogo(profile.logoPath);
-    final builder = MarkdownPdfBuilder(profile: profile, fonts: fonts);
+    final builder =
+        MarkdownPdfBuilder(profile: profile, fonts: fonts, baseDir: baseDir);
     final content = builder.build(markdown);
 
     final margin = profile.marginCm * PdfPageFormat.cm;

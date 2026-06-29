@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:markdown/markdown.dart' as md;
+import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
@@ -28,10 +29,14 @@ class PdfFontSet {
 /// according to a [PrintProfile]. The widgets are designed to be dropped into a
 /// [pw.MultiPage] so headers/footers/watermarks are applied by the caller.
 class MarkdownPdfBuilder {
-  MarkdownPdfBuilder({required this.profile, required this.fonts});
+  MarkdownPdfBuilder(
+      {required this.profile, required this.fonts, this.baseDir});
 
   final PrintProfile profile;
   final PdfFontSet fonts;
+
+  /// Directory of the source document, used to resolve relative image paths.
+  final String? baseDir;
 
   PdfColor get _primary => PdfColor.fromInt(profile.primaryColor);
   PdfColor get _text => PdfColor.fromInt(profile.textColor);
@@ -271,7 +276,11 @@ class MarkdownPdfBuilder {
     final alt = el.attributes['alt'] ?? '';
     if (src != null && !src.startsWith('http')) {
       try {
-        final bytes = File(src).readAsBytesSync();
+        // Resolve relative image paths against the document's folder.
+        final resolved = (baseDir != null && !p.isAbsolute(src))
+            ? p.join(baseDir!, src)
+            : src;
+        final bytes = File(resolved).readAsBytesSync();
         return pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 6),
           child: pw.Image(pw.MemoryImage(bytes), fit: pw.BoxFit.contain),

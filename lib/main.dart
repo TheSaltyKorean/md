@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app.dart';
 import 'services/file_association_service.dart';
+import 'services/open_file_channel.dart';
 import 'services/print_profile_service.dart';
 import 'services/single_instance_service.dart';
 import 'state/theme_controller.dart';
@@ -41,6 +43,12 @@ Future<void> main(List<String> args) async {
       await _openPaths(paths, workspace);
       await _bringToFront();
     });
+  }
+
+  // On Android/iOS/macOS, document opens arrive as intents/URLs rather than
+  // argv — wire up the platform channel that receives them.
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+    await OpenFileChannel(workspace).init();
   }
 
   // A torn-off tab is handed off via a temp JSON file carrying its (possibly

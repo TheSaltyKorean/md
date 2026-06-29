@@ -31,9 +31,12 @@ class PreviewView extends StatelessWidget {
       onTapLink: (text, href, title) async {
         if (href == null) return;
         final uri = Uri.tryParse(href);
-        if (uri != null && await canLaunchUrl(uri)) {
+        if (uri == null) return;
+        // Launch directly: canLaunchUrl can falsely return false on Android 11+
+        // due to package visibility, making links appear dead.
+        try {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
-        }
+        } catch (_) {/* no handler available */}
       },
     );
   }

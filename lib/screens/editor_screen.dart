@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../models/editor_mode.dart';
 import '../services/file_association_service.dart';
@@ -32,22 +34,43 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> {
+class _EditorScreenState extends State<EditorScreen> with WindowListener {
   DocumentController? _bannerDoc;
   bool _conflictShown = false;
   bool _dragging = false;
 
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
   @override
   void initState() {
     super.initState();
+    if (_isDesktop) {
+      windowManager.addListener(this);
+      // Intercept the window-close button so we can confirm unsaved changes.
+      windowManager.setPreventClose(true);
+    }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
   }
 
   @override
   void dispose() {
+    if (_isDesktop) windowManager.removeListener(this);
     _bannerDoc?.removeListener(_onActiveDocChanged);
     super.dispose();
+  }
+
+  @override
+  void onWindowClose() async {
+    final ws = context.read<WorkspaceController>();
+    final anyDirty = ws.documents.any((d) => d.isDirty);
+    if (anyDirty && mounted) {
+      final ok = await _confirmDiscard(context, 'One or more open documents');
+      if (!ok) return; // keep the window open
+    }
+    await windowManager.setPreventClose(false);
+    await windowManager.destroy();
   }
 
   /// On first eligible launch, offer to register the app as the `.md` handler.
@@ -171,47 +194,67 @@ class _EditorScreenState extends State<EditorScreen> {
       _bannerDoc?.removeListener(_onActiveDocChanged);
       _bannerDoc = active;
       _bannerDoc!.addListener(_onActiveDocChanged);
-      _conflictShown = false;
-      _scheduleBannerCheck();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        // Dismiss any banner belonging to the previously active document so its
+        // Reload/Keep-mine actions can't act on the wrong tab.
+        ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+        _conflictShown = false;
+        _runBannerCheck();
+      });
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        // The open-document tabs sit where the filename would be.
-        title: _TabStrip(
-          workspace: ws,
-          onClose: _closeTab,
-          onTabDragEnd: _onTabDragEnd,
+    final anyDirty = ws.documents.any((d) => d.isDirty);
+    return PopScope(
+      // Guard the Android back gesture when there are unsaved changes.
+      canPop: !anyDirty,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop) return;
+        final navigator = Navigator.of(context);
+        final ok = await _confirmDiscard(context, 'One or more open documents');
+        if (ok && mounted) navigator.maybePop();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          titleSpacing: 0,
+          // The open-document tabs sit where the filename would be.
+          title: _TabStrip(
+            workspace: ws,
+            onClose: _closeTab,
+            onTabDragEnd: _onTabDragEnd,
+          ),
+          actions: _actions(context, ws, active, theme),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(48),
+            child: FormatToolbar(controller: active),
+          ),
         ),
-        actions: _actions(context, ws, active, theme),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(48),
-          child: FormatToolbar(controller: active),
-        ),
-      ),
-      body: DropTarget(
-        onDragEntered: (_) => setState(() => _dragging = true),
-        onDragExited: (_) => setState(() => _dragging = false),
-        onDragDone: (detail) => _onFilesDropped(detail, ws),
-        child: Stack(
-          children: [
-            Positioned.fill(child: _body(active)),
-            if (_dragging) _dropHint(context),
-          ],
+        body: DropTarget(
+          onDragEntered: (_) => setState(() => _dragging = true),
+          onDragExited: (_) => setState(() => _dragging = false),
+          onDragDone: (detail) => _onFilesDropped(detail, ws),
+          child: Stack(
+            children: [
+              Positioned.fill(child: _body(active)),
+              if (_dragging) _dropHint(context),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _body(DocumentController doc) {
+    // Key by the document so switching tabs recreates the view's State (e.g.
+    // SplitView re-attaches its text listener to the new document's controller).
+    final key = ValueKey(doc);
     switch (doc.mode) {
       case EditorMode.wysiwyg:
-        return WysiwygView(controller: doc);
+        return WysiwygView(key: key, controller: doc);
       case EditorMode.split:
-        return SplitView(controller: doc);
+        return SplitView(key: key, controller: doc);
       case EditorMode.preview:
-        return PreviewView(markdown: doc.currentMarkdown());
+        return PreviewView(key: key, markdown: doc.currentMarkdown());
     }
   }
 
@@ -339,12 +382,17 @@ class _EditorScreenState extends State<EditorScreen> {
   Future<void> _saveAs(BuildContext context, DocumentController doc) async {
     final messenger = ScaffoldMessenger.of(context);
     final markdown = doc.currentMarkdown();
-    final path = await _fileService.saveAs(markdown,
+    final result = await _fileService.saveAs(markdown,
         suggestedName: doc.suggestedFileName);
-    if (path != null) {
-      doc.markSaved(path, markdown);
-      messenger
-          .showSnackBar(SnackBar(content: Text('Saved ${p.basename(path)}')));
+    if (!result.saved) return;
+    if (result.path != null) {
+      doc.markSaved(result.path!, markdown);
+      messenger.showSnackBar(
+          SnackBar(content: Text('Saved ${p.basename(result.path!)}')));
+    } else {
+      // Mobile: saved via the platform picker, no re-writable path to track.
+      doc.markCleanSaved(markdown);
+      messenger.showSnackBar(const SnackBar(content: Text('Saved')));
     }
   }
 
