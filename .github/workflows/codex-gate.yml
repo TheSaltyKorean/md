@@ -15,7 +15,8 @@ name: codex-gate
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
-  workflow_dispatch:
+  # No workflow_dispatch: a manual run has no PR context and must never mint a
+  # passing gate. Re-evaluate after Codex's 👍 via `gh run rerun <run-id>`.
 
 permissions:
   contents: read
@@ -36,5 +37,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           PR="${{ github.event.pull_request.number }}"
-          if [ -z "$PR" ]; then echo "No PR number; nothing to gate."; exit 0; fi
+          # Fail closed: a gate run without a PR context must not pass.
+          if [ -z "$PR" ]; then echo "No PR context — failing closed."; exit 1; fi
           bash tool/codex-gate.sh "$PR" "${{ github.repository }}"
