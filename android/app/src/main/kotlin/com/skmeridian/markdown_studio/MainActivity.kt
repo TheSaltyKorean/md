@@ -11,30 +11,37 @@ class MainActivity : FlutterActivity() {
     private val channelName = "markdown_studio/open_file"
     private var channel: MethodChannel? = null
 
-    // Holds a file from the launch intent until Dart asks for it.
-    private var pendingFile: Map<String, Any?>? = null
+    // Files received before Dart registered its handler (queued for getInitialFile).
+    private val pendingFiles = mutableListOf<Map<String, Any?>>()
+    private var dartReady = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         channel!!.setMethodCallHandler { call, result ->
             if (call.method == "getInitialFile") {
-                result.success(pendingFile)
-                pendingFile = null
+                dartReady = true
+                result.success(if (pendingFiles.isEmpty()) null else ArrayList(pendingFiles))
+                pendingFiles.clear()
             } else {
                 result.notImplemented()
             }
         }
         // The intent that launched the activity (cold start).
-        readIntent(intent)?.let { pendingFile = it }
+        readIntent(intent)?.let { pendingFiles.add(it) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        // Already running: push straight to Dart.
         readIntent(intent)?.let { data ->
-            channel?.invokeMethod("openFile", data) ?: run { pendingFile = data }
+            // Only push once Dart's handler is registered; otherwise queue it so
+            // an open during startup isn't dropped (Flutter buffers only one).
+            if (dartReady) {
+                channel?.invokeMethod("openFile", data)
+            } else {
+                pendingFiles.add(data)
+            }
         }
     }
 

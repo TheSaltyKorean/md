@@ -112,7 +112,7 @@ class FileAssociationService {
 Type=Application
 Name=Markdown Studio
 Comment=Markdown viewer and WYSIWYG editor
-Exec="$exe" %f
+Exec="$exe" %F
 Icon=markdown_studio
 Terminal=false
 Categories=Office;TextEditor;Utility;

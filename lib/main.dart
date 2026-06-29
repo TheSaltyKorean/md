@@ -109,7 +109,7 @@ Future<void> _openHandoff(String handoffPath, WorkspaceController ws) async {
       markDirty: raw['dirty'] as bool? ?? false,
     );
     try {
-      await file.delete();
+      await file.parent.delete(recursive: true); // remove the private temp dir
     } catch (_) {/* leave temp file if locked */}
   } catch (_) {
     // Malformed handoff; ignore.

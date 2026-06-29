@@ -118,14 +118,14 @@ class FormatToolbar extends StatelessWidget {
     if (node == null) return;
     final isSame = node.type == HeadingBlockKeys.type &&
         node.attributes[HeadingBlockKeys.level] == level;
-    final delta = (node.delta ?? Delta()).toJson();
     es.formatNode(
       selection,
+      // Use each updated node's own delta (the selection may span blocks).
       (node) => node.copyWith(
         type: isSame ? ParagraphBlockKeys.type : HeadingBlockKeys.type,
         attributes: {
           HeadingBlockKeys.level: level,
-          blockComponentDelta: delta,
+          blockComponentDelta: (node.delta ?? Delta()).toJson(),
         },
       ),
     );

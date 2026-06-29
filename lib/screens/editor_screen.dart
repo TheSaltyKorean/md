@@ -528,11 +528,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       'dirty': doc.isDirty || doc.filePath == null,
       'name': doc.filePath == null ? doc.title : null,
     };
+    // Write the handoff (which may contain unsaved draft content) to a private,
+    // unpredictable temp directory rather than a world-readable path in /tmp.
+    Directory? tmpDir;
     try {
-      final tmp = File(
-        '${Directory.systemTemp.path}${Platform.pathSeparator}'
-        'mdstudio_handoff_${DateTime.now().microsecondsSinceEpoch}.json',
-      );
+      tmpDir = await Directory.systemTemp.createTemp('mdstudio_handoff_');
+      final tmp = File('${tmpDir.path}${Platform.pathSeparator}handoff.json');
       await tmp.writeAsString(jsonEncode(handoff));
       await Process.start(
         Platform.resolvedExecutable,
@@ -540,7 +541,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         mode: ProcessStartMode.detached,
       );
       ws.closeAt(index);
-    } catch (_) {/* spawn failed; leave the tab in place */}
+    } catch (_) {
+      // Spawn failed; clean up the temp dir and leave the tab in place.
+      try {
+        await tmpDir?.delete(recursive: true);
+      } catch (_) {}
+    }
   }
 
   void _onMenu(BuildContext context, WorkspaceController ws,

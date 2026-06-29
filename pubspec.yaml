@@ -37,6 +37,9 @@ dependencies:
   pdf: ^3.11.1
 
   # --- File open/save across desktop & mobile ---
+  # Pinned to 10.x: AppFlowy 6.2.0 still calls the file_picker 10 API
+  # (`FilePicker.platform`), so file_picker 11 fails to compile AppFlowy.
+  # Revisit once AppFlowy migrates to the 11 API.
   file_picker: ^10.3.10
 
   # --- Persisted settings (theme mode, last file, etc.) ---
