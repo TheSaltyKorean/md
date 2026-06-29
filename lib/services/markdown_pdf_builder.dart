@@ -52,6 +52,8 @@ class MarkdownPdfBuilder {
 
   PdfColor get _primary => PdfColor.fromInt(profile.primaryColor);
   PdfColor get _text => PdfColor.fromInt(profile.textColor);
+  PdfColor get _accent =>
+      PdfColor.fromInt(profile.accentColor ?? profile.primaryColor);
 
   List<pw.Widget> build(String markdown) {
     final document = md.Document(
@@ -110,14 +112,30 @@ class MarkdownPdfBuilder {
   }
 
   pw.Widget _heading(md.Element el, double size, {double spacingTop = 10}) {
+    final text = pw.RichText(
+      text: pw.TextSpan(
+        children: _inline(el.children,
+            color: _primary, sizeOverride: size, boldDefault: true),
+      ),
+    );
+    // Brand look: a primary-colour underline rule beneath section headings
+    // (h2/h3), but not the document title (h1) or minor sub-headings.
+    if (profile.headingRule && size >= 15 && size <= 19) {
+      return pw.Padding(
+        padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 2.5), child: text),
+            pw.Container(height: 1, color: _primary),
+          ],
+        ),
+      );
+    }
     return pw.Padding(
       padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
-      child: pw.RichText(
-        text: pw.TextSpan(
-          children: _inline(el.children,
-              color: _primary, sizeOverride: size, boldDefault: true),
-        ),
-      ),
+      child: text,
     );
   }
 
@@ -393,7 +411,8 @@ class MarkdownPdfBuilder {
                 code: code,
                 strike: strike,
                 underline: underline,
-                color: color,
+                // Brand look: bold emphasis takes the primary colour.
+                color: color ?? (profile.headingRule ? _primary : null),
                 sizeOverride: sizeOverride,
                 boldDefault: boldDefault));
             break;
@@ -450,9 +469,10 @@ class MarkdownPdfBuilder {
                 style: _textStyle(
                   bold: bold || boldDefault,
                   italic: italic,
-                  color: _primary,
+                  color: _accent,
                   size: sizeOverride,
-                  underline: true,
+                  // Brand links are coloured but not underlined.
+                  underline: !profile.headingRule,
                 ),
               ),
             );

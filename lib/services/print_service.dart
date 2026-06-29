@@ -73,6 +73,14 @@ class PrintService {
         MarkdownPdfBuilder(profile: profile, fonts: fonts, baseDir: baseDir);
     final content = builder.build(markdown);
 
+    // Brand "cover" mode: the logo appears once at the top of the document
+    // (not as a running header), like the SK Meridian brief.
+    final useCover = profile.coverLogo && logo != null;
+    final body = <pw.Widget>[
+      if (useCover) _coverLogo(logo),
+      ...content,
+    ];
+
     final margin = profile.marginCm * PdfPageFormat.cm;
     final doc = pw.Document(title: title);
 
@@ -95,13 +103,29 @@ class PrintService {
               ? null
               : (context) => _watermark(profile.watermarkText!),
         ),
-        header: (context) => _header(context, profile, title, logo),
-        footer: (context) => _footer(context, profile),
-        build: (context) => content,
+        // In cover mode the logo is rendered once at the top of the body, so we
+        // omit it from the running header — but keep the header itself so any
+        // title, company name, classification label and accent rule still appear
+        // on every page.
+        header: (context) =>
+            _header(context, profile, title, useCover ? null : logo),
+        footer: (context) => _footer(context, profile, title),
+        build: (context) => body,
       ),
     );
 
     return doc.save();
+  }
+
+  pw.Widget _coverLogo(pw.MemoryImage logo) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 10),
+      child: pw.Container(
+        height: 30,
+        alignment: pw.Alignment.centerLeft,
+        child: pw.Image(logo, fit: pw.BoxFit.contain),
+      ),
+    );
   }
 
   pw.Widget _watermark(String text) {
@@ -193,8 +217,39 @@ class PrintService {
     );
   }
 
-  pw.Widget _footer(pw.Context context, PrintProfile profile) {
+  pw.Widget _footer(pw.Context context, PrintProfile profile, String title) {
     final primary = PdfColor.fromInt(profile.primaryColor);
+
+    // Brand footer: a single centred grey line with a hairline rule above,
+    // matching "SK Meridian LLC — <Title> | Page N of M".
+    if (profile.footerCentered) {
+      final bits = <String>[];
+      if (profile.footerText != null && profile.footerText!.isNotEmpty) {
+        bits.add(profile.footerText!);
+      }
+      if (title.isNotEmpty) bits.add(title);
+      var line = bits.join('  —  ');
+      if (profile.showPageNumbers) {
+        line = line.isEmpty
+            ? 'Page ${context.pageNumber} of ${context.pagesCount}'
+            : '$line  |  Page ${context.pageNumber} of ${context.pagesCount}';
+      }
+      return pw.Container(
+        decoration: const pw.BoxDecoration(
+          border: pw.Border(
+            top: pw.BorderSide(color: PdfColor.fromInt(0xFFD8DAE6), width: 0.5),
+          ),
+        ),
+        padding: const pw.EdgeInsets.only(top: 5),
+        alignment: pw.Alignment.center,
+        child: pw.Text(
+          line,
+          style: const pw.TextStyle(
+              fontSize: 7.5, color: PdfColor.fromInt(0xFF8A8DA0)),
+        ),
+      );
+    }
+
     final parts = <String>[];
     if (profile.footerText != null && profile.footerText!.isNotEmpty) {
       parts.add(profile.footerText!);
@@ -271,6 +326,16 @@ class PrintService {
         await safe(PdfGoogleFonts.robotoMonoRegular, pw.Font.courier());
 
     switch (family) {
+      case 'Inter':
+        return PdfFontSet(
+          base: await safe(PdfGoogleFonts.interRegular, pw.Font.helvetica()),
+          bold: await safe(PdfGoogleFonts.interBold, pw.Font.helveticaBold()),
+          italic: await safe(
+              PdfGoogleFonts.interItalic, pw.Font.helveticaOblique()),
+          boldItalic: await safe(
+              PdfGoogleFonts.interBoldItalic, pw.Font.helveticaBoldOblique()),
+          mono: mono,
+        );
       case 'Lato':
         return PdfFontSet(
           base: await safe(PdfGoogleFonts.latoRegular, pw.Font.helvetica()),
@@ -341,6 +406,7 @@ class PrintService {
 
   /// Font families offered in the profile editor.
   static const List<String> availableFonts = [
+    'Inter',
     'Roboto',
     'Lato',
     'Open Sans',

@@ -133,6 +133,13 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  /// Stop all file watchers (used on app shutdown for a prompt exit).
+  void disposeWatchers() {
+    for (final d in _docs) {
+      d.stopWatching();
+    }
+  }
+
   @override
   void dispose() {
     for (final d in _docs) {

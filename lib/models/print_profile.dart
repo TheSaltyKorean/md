@@ -29,6 +29,10 @@ class PrintProfile {
     this.confidentialLabel,
     this.marginCm = 2.0,
     this.accentRule = true,
+    this.headingRule = false,
+    this.footerCentered = false,
+    this.coverLogo = false,
+    this.accentColor,
   });
 
   /// Stable identifier (also used as the per-document association key).
@@ -78,6 +82,21 @@ class PrintProfile {
   /// Draw a thin accent rule under the header / above the footer.
   final bool accentRule;
 
+  /// Draw a primary-colour underline rule beneath each section heading (the
+  /// SK Meridian brand look).
+  final bool headingRule;
+
+  /// Use a single centred footer line "<footer> — <title> | Page N of M"
+  /// (grey, hairline top) instead of the split left/right footer.
+  final bool footerCentered;
+
+  /// Place the logo once at the top of the document (cover) rather than as a
+  /// running header repeated on every page.
+  final bool coverLogo;
+
+  /// ARGB colour for links / secondary accents. Null = use [primaryColor].
+  final int? accentColor;
+
   PrintProfile copyWith({
     String? id,
     String? name,
@@ -96,6 +115,10 @@ class PrintProfile {
     Object? confidentialLabel = _sentinel,
     double? marginCm,
     bool? accentRule,
+    bool? headingRule,
+    bool? footerCentered,
+    bool? coverLogo,
+    Object? accentColor = _sentinel,
   }) {
     return PrintProfile(
       id: id ?? this.id,
@@ -122,6 +145,11 @@ class PrintProfile {
           : confidentialLabel as String?,
       marginCm: marginCm ?? this.marginCm,
       accentRule: accentRule ?? this.accentRule,
+      headingRule: headingRule ?? this.headingRule,
+      footerCentered: footerCentered ?? this.footerCentered,
+      coverLogo: coverLogo ?? this.coverLogo,
+      accentColor:
+          accentColor == _sentinel ? this.accentColor : accentColor as int?,
     );
   }
 
@@ -143,6 +171,10 @@ class PrintProfile {
         'confidentialLabel': confidentialLabel,
         'marginCm': marginCm,
         'accentRule': accentRule,
+        'headingRule': headingRule,
+        'footerCentered': footerCentered,
+        'coverLogo': coverLogo,
+        'accentColor': accentColor,
       };
 
   factory PrintProfile.fromJson(Map<String, dynamic> json) => PrintProfile(
@@ -164,8 +196,15 @@ class PrintProfile {
         showTitleInHeader: json['showTitleInHeader'] as bool? ?? true,
         watermarkText: json['watermarkText'] as String?,
         confidentialLabel: json['confidentialLabel'] as String?,
-        marginCm: (json['marginCm'] as num?)?.toDouble() ?? 2.0,
+        // Clamp to the editor's slider range so an imported value stays
+        // representable/adjustable in the profile editor.
+        marginCm:
+            ((json['marginCm'] as num?)?.toDouble() ?? 2.0).clamp(1.0, 3.5),
         accentRule: json['accentRule'] as bool? ?? true,
+        headingRule: json['headingRule'] as bool? ?? false,
+        footerCentered: json['footerCentered'] as bool? ?? false,
+        coverLogo: json['coverLogo'] as bool? ?? false,
+        accentColor: (json['accentColor'] as num?)?.toInt(),
       );
 
   static String encodeList(List<PrintProfile> profiles) =>

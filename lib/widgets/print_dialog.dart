@@ -1,3 +1,9 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:printing/printing.dart';
@@ -69,6 +75,107 @@ class _PrintDialogState extends State<PrintDialog> {
   String _newId() =>
       'profile_${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
 
+  Future<void> _importProfile() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final service = context.read<PrintProfileService>();
+    final result = await FilePicker.platform.pickFiles(
+      dialogTitle: 'Import print profile (.json)',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    PrintProfile profile;
+    try {
+      final file = result.files.single;
+      final text = file.bytes != null
+          ? utf8.decode(file.bytes!, allowMalformed: true)
+          : await File(file.path!).readAsString();
+      final map = jsonDecode(text);
+      if (map is! Map<String, dynamic> ||
+          map['id'] is! String ||
+          map['name'] is! String) {
+        throw const FormatException('missing required fields');
+      }
+      // fromJson clamps/validates layout values (margin, colours, enums).
+      profile = PrintProfile.fromJson(map);
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(
+          content: Text('Import failed: not a valid profile JSON')));
+      return;
+    }
+
+    // A logo path from another machine won't resolve here — drop it.
+    var logoCleared = false;
+    if (profile.logoPath != null && !File(profile.logoPath!).existsSync()) {
+      profile = profile.copyWith(logoPath: null);
+      logoCleared = true;
+    }
+
+    if (!mounted) return;
+    // Confirm before overwriting an existing profile with the same id.
+    if (service.profiles.any((p) => p.id == profile.id)) {
+      final replace = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Replace profile?'),
+          content:
+              Text('A profile "${profile.name}" already exists. Replace it?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Replace')),
+          ],
+        ),
+      );
+      if (replace != true || !mounted) return;
+    }
+
+    await service.upsert(profile);
+    if (!mounted) return;
+    setState(() {
+      _selectedId = profile.id;
+      _previewEpoch++;
+    });
+    messenger.showSnackBar(SnackBar(
+        content: Text(logoCleared
+            ? 'Imported "${profile.name}" (logo not found here — cleared)'
+            : 'Imported "${profile.name}"')));
+  }
+
+  Future<void> _exportProfile(PrintProfile profile) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final json = const JsonEncoder.withIndent('  ').convert(profile.toJson());
+    final safe = profile.name.replaceAll(RegExp(r'[^\w\-. ]'), '_');
+    final path = await FilePicker.platform.saveFile(
+      dialogTitle: 'Export print profile',
+      fileName: '$safe.print-profile.json',
+      type: FileType.custom,
+      allowedExtensions: const ['json'],
+      bytes: Uint8List.fromList(utf8.encode(json)),
+    );
+    if (path == null) return;
+    // On desktop, saveFile only returns a path — we write the file ourselves, so
+    // a write failure must be surfaced. On mobile/web the bytes were already
+    // written by saveFile, and File access to the returned URI may not work.
+    String? error;
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      try {
+        await File(path).writeAsString(json);
+      } catch (e) {
+        error = '$e';
+      }
+    }
+    if (!mounted) return;
+    messenger.showSnackBar(SnackBar(
+        content: Text(error == null
+            ? 'Exported "${profile.name}"'
+            : 'Export failed: $error')));
+  }
+
   @override
   Widget build(BuildContext context) {
     final profilesService = context.watch<PrintProfileService>();
@@ -131,24 +238,44 @@ class _PrintDialogState extends State<PrintDialog> {
                         icon: const Icon(Icons.edit_rounded),
                         onPressed: () => _editProfile(selected, isNew: false),
                       ),
-                      IconButton(
-                        tooltip: 'New profile',
-                        icon: const Icon(Icons.add_rounded),
-                        onPressed: () => _editProfile(
-                          PrintProfile(id: _newId(), name: 'New profile'),
-                          isNew: true,
-                        ),
+                      // Less-common actions in an overflow menu so the row can't
+                      // overflow on narrow widths.
+                      PopupMenuButton<String>(
+                        tooltip: 'Profile actions',
+                        onSelected: (v) async {
+                          switch (v) {
+                            case 'new':
+                              await _editProfile(
+                                  PrintProfile(
+                                      id: _newId(), name: 'New profile'),
+                                  isNew: true);
+                              break;
+                            case 'import':
+                              await _importProfile();
+                              break;
+                            case 'export':
+                              await _exportProfile(selected);
+                              break;
+                            case 'delete':
+                              await profilesService.delete(selected.id);
+                              if (mounted) setState(() => _previewEpoch++);
+                              break;
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                              value: 'new', child: Text('New profile')),
+                          const PopupMenuItem(
+                              value: 'import', child: Text('Import… (.json)')),
+                          const PopupMenuItem(
+                              value: 'export', child: Text('Export… (.json)')),
+                          if (profiles.length > 1)
+                            PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Delete',
+                                    style: TextStyle(color: cs.error))),
+                        ],
                       ),
-                      if (profiles.length > 1)
-                        IconButton(
-                          tooltip: 'Delete profile',
-                          icon: Icon(Icons.delete_outline_rounded,
-                              color: cs.error),
-                          onPressed: () async {
-                            await profilesService.delete(selected.id);
-                            setState(() => _previewEpoch++);
-                          },
-                        ),
                     ],
                   ),
                   const SizedBox(height: 4),

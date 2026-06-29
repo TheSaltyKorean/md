@@ -71,6 +71,7 @@ Future<void> main(List<String> args) async {
         ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
         ChangeNotifierProvider<WorkspaceController>.value(value: workspace),
         Provider(create: (_) => FileAssociationService(prefs)),
+        Provider<SingleInstanceService>.value(value: single),
       ],
       child: const MarkdownStudioApp(),
     ),

@@ -65,13 +65,22 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   @override
   void onWindowClose() async {
     final ws = context.read<WorkspaceController>();
+    final single = context.read<SingleInstanceService>();
     final anyDirty = ws.documents.any((d) => d.isDirty);
     if (anyDirty && mounted) {
       final ok = await _confirmDiscard(context, 'One or more open documents');
       if (!ok) return; // keep the window open
     }
-    await windowManager.setPreventClose(false);
-    await windowManager.destroy();
+    // Release the long-lived event sources (single-instance ServerSocket + file
+    // watchers) first, then exit the process directly. windowManager.destroy()
+    // alone leaves the Flutter engine lingering for many seconds on Windows;
+    // exit(0) terminates immediately. All preference writes are awaited at their
+    // call sites, so nothing is mid-write here.
+    try {
+      await single.dispose();
+    } catch (_) {}
+    ws.disposeWatchers();
+    exit(0);
   }
 
   /// On first eligible launch, offer to register the app as the `.md` handler.

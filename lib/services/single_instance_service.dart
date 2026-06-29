@@ -106,6 +106,15 @@ class SingleInstanceService {
     );
   }
 
+  /// Close the coordination server so it stops keeping the Dart VM alive (call
+  /// on app shutdown for a prompt exit).
+  Future<void> dispose() async {
+    try {
+      await _server?.close();
+    } catch (_) {}
+    _server = null;
+  }
+
   /// Send file paths to the primary instance. An empty list is a focus request.
   Future<void> forward(List<String> paths) async {
     try {
