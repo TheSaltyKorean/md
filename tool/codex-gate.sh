@@ -37,6 +37,13 @@ latest="$(printf '%s\n' "$comments" | grep -v '^$' | sort | tail -1)"
 req_date="${latest%%$'\t'*}"
 req_id="${latest##*$'\t'}"
 
+# NOTE (residual limitation): this compares against the head commit's committer
+# date, not the moment that SHA became the PR head. A crafted local commit with a
+# back-dated committer time pushed after an old 👍 could slip past this single
+# check. The findings path below binds acceptance/review to the exact head SHA;
+# the clean-👍 path can't (reactions carry no SHA), so this date check is the
+# best available proxy there. The server-side gate (trusted base ref) is the
+# real guarantee.
 [[ "$req_date" > "$head_date" ]] || \
   red "newest '@codex review' ($req_date) is not after the head commit ($head_date) — re-request review after pushing."
 
@@ -52,10 +59,23 @@ reacts="$(api --paginate "repos/$REPO/issues/comments/$req_id/reactions" \
   --jq ".[] | select(.user.login==\"$BOT\") | .content")" || red "reactions lookup failed (fail-closed)."
 thumbs="$(printf '%s\n' "$reacts" | grep -cx '+1' | tr -d ' ')"
 
+latest_review_date="$(printf '%s\n' "$reviews" | grep -v '^$' | sort | tail -1 | cut -f1)"
+
 if api --paginate "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx 'codex-accepted'; then
+  # The accepted findings must be on the CURRENT head…
   [ "$latest_review_sha" = "$head_sha" ] || \
     red "'codex-accepted' is set but Codex's latest review is not on the current head ($head_sha) — re-review and re-accept."
-  echo "GREEN $head_sha: accepted findings ('codex-accepted') on the current head (req $req_id)."
+  # …and the acceptance must be FRESH: the label was (re)applied after the latest
+  # Codex review (so new findings can't ride in under a stale label).
+  label_time="$(api --paginate "repos/$REPO/issues/$PR/timeline" \
+    --jq '.[] | select(.event=="labeled" and .label.name=="codex-accepted") | .created_at' \
+    2>/dev/null | grep -v '^$' | sort | tail -1)" || red "timeline lookup failed (fail-closed)."
+  [ -n "$label_time" ] || red "'codex-accepted' present but no labeling event found."
+  if [ -n "$latest_review_date" ]; then
+    [[ "$label_time" > "$latest_review_date" ]] || \
+      red "'codex-accepted' ($label_time) predates the latest Codex review ($latest_review_date) — re-accept after the new review."
+  fi
+  echo "GREEN $head_sha: accepted findings ('codex-accepted', re-accepted after the latest review)."
   exit 0
 fi
 

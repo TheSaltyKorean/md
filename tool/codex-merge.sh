@@ -15,8 +15,14 @@ dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 for a in "$@"; do
   case "$a" in
-    -R|--repo|-R=*|--repo=*)
+    -R|--repo|-R=*|--repo=*|-R*)
       echo "codex-merge: refusing repo-redirecting flag '$a' (gate and merge must use the same repo)." >&2
+      exit 1 ;;
+    --auto|--auto=*)
+      echo "codex-merge: refusing '--auto' — auto-merge can land a later, unreviewed SHA after the gate passed." >&2
+      exit 1 ;;
+    --match-head-commit|--match-head-commit=*)
+      echo "codex-merge: refusing caller-supplied '--match-head-commit' — the wrapper sets it to the validated SHA." >&2
       exit 1 ;;
   esac
 done

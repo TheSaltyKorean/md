@@ -1,12 +1,19 @@
 name: codex-gate
 
-# Required status check that gates merges into `main`: it passes only when
+# Required status check gating merges into `main`. Passes only when
 # tool/codex-gate.sh confirms a genuine Codex all-clear (👍) for the PR — or the
-# `codex-accepted` label is present on the current head. Runs on every PR update;
-# re-run it (gh run rerun) after Codex posts its 👍 to flip it green.
+# `codex-accepted` label (applied after the latest review) is present.
+#
+# SECURITY: uses `pull_request_target` and checks out the **base** ref, so the
+# gate script comes from the protected branch, NOT the PR. A PR therefore cannot
+# edit the gate to `exit 0`. The job runs only read-only API queries and never
+# checks out or executes PR-supplied code.
+#
+# After Codex posts its 👍, re-run this check (`gh run rerun <run-id>`) so it
+# re-evaluates and turns green.
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
@@ -19,12 +26,15 @@ jobs:
   codex-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout the trusted base ref (not the PR)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          persist-credentials: false
       - name: Verify Codex all-clear
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           PR="${{ github.event.pull_request.number }}"
-          if [ -z "$PR" ]; then echo "No PR number in context; nothing to gate."; exit 0; fi
-          echo "Checking Codex gate for PR #$PR in ${{ github.repository }}…"
+          if [ -z "$PR" ]; then echo "No PR number; nothing to gate."; exit 0; fi
           bash tool/codex-gate.sh "$PR" "${{ github.repository }}"
