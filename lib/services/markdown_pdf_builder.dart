@@ -8,6 +8,18 @@ import 'package:pdf/widgets.dart' as pw;
 
 import '../models/print_profile.dart';
 
+/// Parses `<u>…</u>` inline HTML into a `u` element so the PDF renderer can
+/// underline it (package:markdown otherwise leaves the raw tags as text).
+class _UnderlineSyntax extends md.InlineSyntax {
+  _UnderlineSyntax() : super(r'<u>([\s\S]*?)</u>');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text('u', match[1] ?? ''));
+    return true;
+  }
+}
+
 /// A bundle of fonts (regular/bold/italic/mono) used to render a PDF.
 class PdfFontSet {
   const PdfFontSet({
@@ -45,6 +57,9 @@ class MarkdownPdfBuilder {
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
+      // The toolbar / AppFlowy round-trip emit <u>…</u>; package:markdown leaves
+      // inline HTML as text, so parse it into a 'u' element ourselves.
+      inlineSyntaxes: [_UnderlineSyntax()],
     );
     final nodes = document.parseLines(const LineSplitter().convert(markdown));
     return nodes.map(_block).whereType<pw.Widget>().toList();
@@ -188,7 +203,8 @@ class MarkdownPdfBuilder {
 
   pw.Widget _list(md.Element el, {int depth = 0}) {
     final ordered = el.tag == 'ol';
-    var index = 1;
+    // Honour an explicit start (e.g. "5. Continue" -> <ol start="5">).
+    var index = ordered ? (int.tryParse(el.attributes['start'] ?? '') ?? 1) : 1;
     final items = <pw.Widget>[];
     for (final child in el.children ?? const <md.Node>[]) {
       if (child is md.Element && child.tag == 'li') {
@@ -216,7 +232,11 @@ class MarkdownPdfBuilder {
       } else if (c is md.Element && c.tag == 'p') {
         inlineNodes.addAll(c.children ?? const []);
       } else if (c is md.Element && c.tag == 'input') {
-        checkbox = c.attributes['checked'] == 'true' ? '[x]' : '[ ]';
+        // GFM task lists mark checked items by the presence of the attribute,
+        // whose value isn't guaranteed to be the string 'true'.
+        final checked = c.attributes.containsKey('checked') &&
+            c.attributes['checked'] != 'false';
+        checkbox = checked ? '[x]' : '[ ]';
       } else {
         inlineNodes.add(c);
       }

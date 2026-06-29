@@ -110,10 +110,12 @@ Future<void> _openHandoff(String handoffPath, WorkspaceController ws) async {
       markDirty: raw['dirty'] as bool? ?? false,
     );
     try {
-      // Only recursively remove our own private handoff dir; otherwise (a stray
-      // --handoff path) delete just the file so we can't wipe an arbitrary dir.
+      // Only recursively remove our own private handoff dir — it must be a
+      // mdstudio_handoff_* directory *inside* the system temp root. Otherwise
+      // (a stray/crafted --handoff path) delete just the file.
       final dir = file.parent;
-      if (p.basename(dir.path).startsWith('mdstudio_handoff_')) {
+      final inTemp = p.isWithin(Directory.systemTemp.path, dir.path);
+      if (inTemp && p.basename(dir.path).startsWith('mdstudio_handoff_')) {
         await dir.delete(recursive: true);
       } else {
         await file.delete();

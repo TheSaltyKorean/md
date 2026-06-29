@@ -478,8 +478,14 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         final file = File(dropped.path);
         if (await file.exists()) {
           final content = await file.readAsString();
-          ws.openDocument(content,
-              path: file.absolute.path, displayName: dropped.name);
+          // For a security-scoped (sandboxed, external) drop, don't track the
+          // path: later unscoped dart:io save/watch would fail. Open it as an
+          // untitled doc carrying the content + name instead.
+          ws.openDocument(
+            content,
+            path: accessing ? null : file.absolute.path,
+            displayName: dropped.name,
+          );
         }
       } catch (_) {
         /* skip unreadable items */
