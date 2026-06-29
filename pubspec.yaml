@@ -51,6 +51,9 @@ dependencies:
   # Path manipulation (basename, extension, join).
   path: ^1.9.0
 
+  # App-owned storage dir (so picked logos survive in the macOS sandbox).
+  path_provider: ^2.1.4
+
   # Open links from rendered Markdown in the system browser.
   url_launcher: ^6.3.1
 

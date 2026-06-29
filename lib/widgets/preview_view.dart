@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 
 /// Renders Markdown to a styled, scrollable, read-only view. Used both for the
@@ -27,6 +28,10 @@ class PreviewView extends StatelessWidget {
       controller: controller,
       selectable: true,
       padding: padding,
+      // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
+      // ourselves and render it underlined (matches the PDF export).
+      inlineSyntaxes: [_UnderlineSyntax()],
+      builders: {'u': _UnderlineElementBuilder()},
       styleSheet: _styleSheet(theme),
       onTapLink: (text, href, title) async {
         if (href == null) return;
@@ -75,6 +80,29 @@ class PreviewView extends StatelessWidget {
       tableBorder: TableBorder.all(color: cs.outlineVariant),
       tableHead: const TextStyle(fontWeight: FontWeight.bold),
       a: TextStyle(color: cs.primary, decoration: TextDecoration.underline),
+    );
+  }
+}
+
+/// Parses `<u>…</u>` inline HTML into a `u` element for the preview renderer.
+class _UnderlineSyntax extends md.InlineSyntax {
+  _UnderlineSyntax() : super(r'<u>([\s\S]*?)</u>');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text('u', match[1] ?? ''));
+    return true;
+  }
+}
+
+/// Renders the `u` element produced by [_UnderlineSyntax] as underlined text.
+class _UnderlineElementBuilder extends MarkdownElementBuilder {
+  @override
+  Widget? visitText(md.Text text, TextStyle? preferredStyle) {
+    return Text(
+      text.text,
+      style: (preferredStyle ?? const TextStyle())
+          .copyWith(decoration: TextDecoration.underline),
     );
   }
 }

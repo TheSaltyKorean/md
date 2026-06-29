@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/print_profile.dart';
 import '../services/print_service.dart';
@@ -115,9 +117,27 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     final result = await FilePicker.platform.pickFiles(
       dialogTitle: 'Choose a logo image',
       type: FileType.image,
+      withData: true,
     );
-    if (result != null && result.files.single.path != null) {
-      setState(() => _logoPath = result.files.single.path);
+    if (result == null) return;
+    final picked = result.files.single;
+    try {
+      final bytes = picked.bytes ?? await File(picked.path!).readAsBytes();
+      // Copy into app-owned storage so the path stays readable across launches
+      // (a raw picker path loses access in the macOS sandbox after relaunch).
+      final supportDir = await getApplicationSupportDirectory();
+      final logosDir = Directory(p.join(supportDir.path, 'profile_logos'));
+      await logosDir.create(recursive: true);
+      final ext = p.extension(picked.name);
+      final dest = File(p.join(
+          logosDir.path, '${DateTime.now().microsecondsSinceEpoch}$ext'));
+      await dest.writeAsBytes(bytes);
+      if (mounted) setState(() => _logoPath = dest.path);
+    } catch (_) {
+      // Fall back to the raw path if copying fails.
+      if (picked.path != null && mounted) {
+        setState(() => _logoPath = picked.path);
+      }
     }
   }
 
