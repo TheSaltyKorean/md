@@ -466,13 +466,29 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       DropDoneDetails detail, WorkspaceController ws) async {
     setState(() => _dragging = false);
     for (final dropped in detail.files) {
+      final bookmark = dropped.extraAppleBookmark;
+      var accessing = false;
       try {
+        // Sandboxed macOS drops from outside the container need security-scoped
+        // access via the bookmark desktop_drop attaches.
+        if (Platform.isMacOS && bookmark != null && bookmark.isNotEmpty) {
+          accessing = await DesktopDrop.instance
+              .startAccessingSecurityScopedResource(bookmark: bookmark);
+        }
         final file = File(dropped.path);
         if (await file.exists()) {
           final content = await file.readAsString();
-          ws.openDocument(content, path: file.absolute.path);
+          ws.openDocument(content,
+              path: file.absolute.path, displayName: dropped.name);
         }
-      } catch (_) {/* skip unreadable items */}
+      } catch (_) {
+        /* skip unreadable items */
+      } finally {
+        if (accessing && bookmark != null) {
+          await DesktopDrop.instance
+              .stopAccessingSecurityScopedResource(bookmark: bookmark);
+        }
+      }
     }
   }
 

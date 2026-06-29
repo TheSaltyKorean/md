@@ -340,6 +340,7 @@ class MarkdownPdfBuilder {
     bool italic = false,
     bool code = false,
     bool strike = false,
+    bool underline = false,
     bool boldDefault = false,
     PdfColor? color,
     double? sizeOverride,
@@ -357,6 +358,7 @@ class MarkdownPdfBuilder {
               italic: italic,
               code: code,
               strike: strike,
+              underline: underline,
               color: color,
               size: sizeOverride,
             ),
@@ -370,6 +372,7 @@ class MarkdownPdfBuilder {
                 italic: italic,
                 code: code,
                 strike: strike,
+                underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
                 boldDefault: boldDefault));
@@ -380,6 +383,7 @@ class MarkdownPdfBuilder {
                 italic: true,
                 code: code,
                 strike: strike,
+                underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
                 boldDefault: boldDefault));
@@ -390,6 +394,19 @@ class MarkdownPdfBuilder {
                 italic: italic,
                 code: code,
                 strike: true,
+                underline: underline,
+                color: color,
+                sizeOverride: sizeOverride,
+                boldDefault: boldDefault));
+            break;
+          case 'u':
+          case 'ins':
+            spans.addAll(_inline(n.children,
+                bold: bold,
+                italic: italic,
+                code: code,
+                strike: strike,
+                underline: true,
                 color: color,
                 sizeOverride: sizeOverride,
                 boldDefault: boldDefault));
@@ -429,6 +446,7 @@ class MarkdownPdfBuilder {
                 italic: italic,
                 code: code,
                 strike: strike,
+                underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
                 boldDefault: boldDefault));

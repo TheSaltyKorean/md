@@ -195,8 +195,9 @@ class DocumentController extends ChangeNotifier {
     return sourceController.text;
   }
 
-  String get suggestedFileName =>
-      _filePath != null ? p.basename(_filePath!) : 'untitled.md';
+  String get suggestedFileName => _filePath != null
+      ? p.basename(_filePath!)
+      : (_displayName ?? 'untitled.md');
 
   // --- External-change resolution (called by the UI) --------------------------
 
