@@ -21,13 +21,27 @@ See `README.md` for full feature/build/store docs. High level:
 
 ## Standing rules (from the user — always follow)
 
-1. **Codex review loop before every merge.** A PR must pass a Codex review loop
-   *before* it is merged. Never merge a PR until Codex has given the all-clear.
+1. **Codex review loop before every merge — enforced by a hook.** A PR must pass
+   a Codex review loop *before* it is merged. Never merge until Codex has given a
+   literal all-clear.
    - Codex requires a **PR** to run (it cannot review a bare branch).
    - The loop: tag **`@codex`** in a PR comment → **poll the PR every ~5 minutes**
-     for Codex's reply → address/resolve its feedback (push fixes, resolve
-     threads) → tag `@codex` again → repeat **until Codex reports no issues**.
-   - Only after the all-clear: merge.
+     → address/resolve its feedback (push fixes) → tag `@codex` again → repeat
+     **until Codex reacts 👍 (its no-suggestions signal)**.
+   - **"All-clear" means Codex literally returned 👍.** A Codex *review* (even a
+     `COMMENTED` one) with open findings is NOT an all-clear. Do not describe the
+     gate as "passed/satisfied/complete" unless `tool/codex-gate.sh <PR>` prints
+     `GREEN`. Report honestly — e.g. "merged with N accepted findings", never
+     "all-clear", when findings remain.
+   - **Enforcement:** `.claude/settings.json` runs `tool/codex-gate-hook.sh`
+     before every shell tool call; it **blocks `gh pr merge` / push-to-main**
+     unless `tool/codex-gate.sh` returns GREEN. Don't try to evade the hook.
+   - **Accepted findings:** if the user *explicitly* decides to merge with an
+     open finding, that decision must be recorded on the PR, and only then may
+     the **`codex-accepted`** label be added (which the gate honours). Never add
+     that label without explicit user approval, and never re-review only part of
+     a change — re-run Codex on the **final** head before merge so nothing slips
+     through unreviewed (this exact gap shipped a P1 once; don't repeat it).
 2. **Tooling lives under `C:\git`, not the `C:\` root.** e.g. the Flutter SDK is
    at `C:\git\flutter-sdk` (not `C:\flutter-sdk`). Keep build tooling out of the
    drive root.
