@@ -78,12 +78,17 @@ class PrintProfileService extends ChangeNotifier {
   }
 
   Future<void> _persistProfiles() =>
-      _pending = _prefs.setString(_profilesKey, PrintProfile.encodeList(_profiles));
+      _prefs.setString(_profilesKey, PrintProfile.encodeList(_profiles));
 
   Future<void> _persistDocMap() =>
-      _pending = _prefs.setString(_docMapKey, jsonEncode(_docMap));
+      _prefs.setString(_docMapKey, jsonEncode(_docMap));
 
-  Future<void> upsert(PrintProfile profile) async {
+  // Public mutators set [_pending] to their ENTIRE operation future (not just the
+  // last write), so a fire-and-forget call followed by an immediate app close can
+  // be drained fully — multi-write transactions like delete() persist completely.
+
+  Future<void> upsert(PrintProfile profile) => _pending = _upsert(profile);
+  Future<void> _upsert(PrintProfile profile) async {
     final idx = _profiles.indexWhere((p) => p.id == profile.id);
     if (idx >= 0) {
       _profiles[idx] = profile;
@@ -94,12 +99,13 @@ class PrintProfileService extends ChangeNotifier {
     await _persistProfiles();
   }
 
-  Future<void> delete(String id) async {
+  Future<void> delete(String id) => _pending = _delete(id);
+  Future<void> _delete(String id) async {
     if (_profiles.length <= 1) return; // always keep at least one
     _profiles.removeWhere((p) => p.id == id);
     if (_defaultId == id) {
       _defaultId = _profiles.first.id;
-      await (_pending = _prefs.setString(_defaultKey, _defaultId));
+      await _prefs.setString(_defaultKey, _defaultId);
     }
     _docMap.removeWhere((_, v) => v == id);
     notifyListeners();
@@ -107,14 +113,17 @@ class PrintProfileService extends ChangeNotifier {
     await _persistDocMap();
   }
 
-  Future<void> setDefault(String id) async {
+  Future<void> setDefault(String id) => _pending = _setDefault(id);
+  Future<void> _setDefault(String id) async {
     _defaultId = id;
     notifyListeners();
-    await (_pending = _prefs.setString(_defaultKey, id));
+    await _prefs.setString(_defaultKey, id);
   }
 
   /// Associate a document with a profile (or clear it when [id] is null).
-  Future<void> assignToDocument(String docPath, String? id) async {
+  Future<void> assignToDocument(String docPath, String? id) =>
+      _pending = _assignToDocument(docPath, id);
+  Future<void> _assignToDocument(String docPath, String? id) async {
     if (id == null) {
       _docMap.remove(docPath);
     } else {

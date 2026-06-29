@@ -147,8 +147,11 @@ class MarkdownPdfBuilder {
   }
 
   Map<String, String> _parseStyle(String attrs) {
-    // Accept both double- and single-quoted style attributes.
-    final m = RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''').firstMatch(attrs);
+    // Accept both double- and single-quoted style attributes; HTML attribute
+    // names are case-insensitive (style=/STYLE=).
+    final m = RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''',
+            caseSensitive: false)
+        .firstMatch(attrs);
     final out = <String, String>{};
     if (m == null) return out;
     final decls = m.group(2) ?? m.group(3) ?? '';
@@ -197,7 +200,9 @@ class MarkdownPdfBuilder {
 
   PdfColor? _cssColor(String? v) {
     if (v == null) return null;
-    final m = RegExp(r'#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})').firstMatch(v.trim());
+    // Six-digit alternative first: otherwise "#111344" matches the 3-digit
+    // branch and captures only "111" (→ #111111).
+    final m = RegExp(r'#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b').firstMatch(v.trim());
     if (m == null) return null;
     var hex = m.group(1)!;
     if (hex.length == 3) {
@@ -228,8 +233,15 @@ class MarkdownPdfBuilder {
       case 'h6':
         return _heading(node, 11);
       case 'p':
-        return _divBlock(node.textContent) ??
-            _paragraph(node.children ?? const []);
+        final pc = node.children ?? const <md.Node>[];
+        // Only treat a paragraph as raw <div> HTML when its content is pure text
+        // (no inline children). Otherwise an inline-code example like
+        // `<div></div>` would be flattened by textContent and mis-rendered.
+        if (pc.isNotEmpty && pc.every((c) => c is md.Text)) {
+          final div = _divBlock(node.textContent);
+          if (div != null) return div;
+        }
+        return _paragraph(pc);
       case 'hr':
         return pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 8),
