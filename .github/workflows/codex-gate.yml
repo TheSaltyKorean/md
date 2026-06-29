@@ -1,0 +1,30 @@
+name: codex-gate
+
+# Required status check that gates merges into `main`: it passes only when
+# tool/codex-gate.sh confirms a genuine Codex all-clear (👍) for the PR — or the
+# `codex-accepted` label is present on the current head. Runs on every PR update;
+# re-run it (gh run rerun) after Codex posts its 👍 to flip it green.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  codex-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Codex all-clear
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          if [ -z "$PR" ]; then echo "No PR number in context; nothing to gate."; exit 0; fi
+          echo "Checking Codex gate for PR #$PR in ${{ github.repository }}…"
+          bash tool/codex-gate.sh "$PR" "${{ github.repository }}"
