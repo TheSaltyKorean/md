@@ -1,23 +1,34 @@
 #!/usr/bin/env bash
 # codex-merge.sh — the ONLY sanctioned way to merge a PR into main.
 #
-# Verifies the Codex all-clear gate, then merges. The PreToolUse hook blocks raw
-# `gh pr merge` / pushes to main, so all merges must go through here.
+# Verifies the Codex all-clear gate, then merges the EXACT head SHA the gate
+# validated (via --match-head-commit), so a commit pushed between the check and
+# the merge can't ride in unreviewed. Repo-redirecting flags are rejected so the
+# gate and the merge always act on the same repository.
 #
 # Usage: bash tool/codex-merge.sh <pr-number> [extra gh pr merge args...]
-#   e.g. bash tool/codex-merge.sh 4 --merge --delete-branch
 set -uo pipefail
 
 PR="${1:?usage: codex-merge.sh <pr-number> [gh pr merge args...]}"
 shift || true
 dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-if ! bash "$dir/codex-gate.sh" "$PR"; then
-  echo "codex-merge: refusing to merge PR #$PR — gate is not GREEN (see reason above)." >&2
-  exit 1
-fi
+for a in "$@"; do
+  case "$a" in
+    -R|--repo|-R=*|--repo=*)
+      echo "codex-merge: refusing repo-redirecting flag '$a' (gate and merge must use the same repo)." >&2
+      exit 1 ;;
+  esac
+done
+
+out="$(bash "$dir/codex-gate.sh" "$PR")" || { echo "$out" >&2; echo "codex-merge: refusing PR #$PR — gate not GREEN." >&2; exit 1; }
+echo "$out" >&2
+
+# Bind the merge to the exact SHA the gate validated.
+sha="$(printf '%s' "$out" | sed -n 's/^GREEN \([0-9a-f]\{7,\}\):.*/\1/p' | head -1)"
+[ -n "$sha" ] || { echo "codex-merge: could not extract the validated head SHA — aborting." >&2; exit 1; }
 
 args=("$@")
 [ ${#args[@]} -gt 0 ] || args=(--merge)
-echo "codex-merge: gate GREEN — merging PR #$PR (${args[*]})."
-exec gh pr merge "$PR" "${args[@]}"
+echo "codex-merge: gate GREEN — merging PR #$PR at $sha (${args[*]})." >&2
+exec gh pr merge "$PR" --match-head-commit "$sha" "${args[@]}"
