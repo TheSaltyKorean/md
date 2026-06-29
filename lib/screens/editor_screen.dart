@@ -206,6 +206,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
 
     final anyDirty = ws.documents.any((d) => d.isDirty);
+    // On narrow (phone) widths the mode selector moves to its own bar and most
+    // actions collapse into the overflow menu so the app bar can't overflow.
+    final isNarrow = MediaQuery.sizeOf(context).width < 720;
     return PopScope(
       // Guard the Android back gesture when there are unsaved changes.
       canPop: !anyDirty,
@@ -225,10 +228,16 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
             onClose: _closeTab,
             onTabDragEnd: _onTabDragEnd,
           ),
-          actions: _actions(context, ws, active, theme),
+          actions: _actions(context, ws, active, theme, isNarrow),
           bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(48),
-            child: FormatToolbar(controller: active),
+            preferredSize: Size.fromHeight(isNarrow ? 96 : 48),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isNarrow) _ModeBar(doc: active),
+                FormatToolbar(controller: active),
+              ],
+            ),
           ),
         ),
         body: DropTarget(
@@ -265,10 +274,53 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     WorkspaceController ws,
     DocumentController active,
     ThemeController theme,
+    bool isNarrow,
   ) {
     final cs = Theme.of(context).colorScheme;
+    final themeIcon = Icon(switch (theme.mode) {
+      ThemeMode.system => Icons.brightness_auto_outlined,
+      ThemeMode.light => Icons.light_mode_outlined,
+      ThemeMode.dark => Icons.dark_mode_outlined,
+    });
+    final autoReloadButton = IconButton(
+      isSelected: ws.autoReload,
+      tooltip: ws.autoReload
+          ? 'Auto-reload on: external changes load automatically'
+          : 'Auto-reload off: you save manually',
+      icon: const Icon(Icons.sync_disabled_outlined),
+      selectedIcon: Icon(Icons.sync_outlined, color: cs.primary),
+      onPressed: () => ws.setAutoReload(!ws.autoReload),
+    );
+
+    if (isNarrow) {
+      // Phone layout: keep Save + auto-reload + theme; everything else in menu.
+      return [
+        IconButton(
+          tooltip: 'Save',
+          icon: const Icon(Icons.save_outlined),
+          onPressed: () => _save(context, active),
+        ),
+        autoReloadButton,
+        IconButton(
+            tooltip: 'Theme: ${theme.mode.name}',
+            icon: themeIcon,
+            onPressed: theme.cycle),
+        PopupMenuButton<String>(
+          onSelected: (value) => _onMenu(context, ws, active, value),
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'open', child: Text('Open…')),
+            PopupMenuItem(value: 'new', child: Text('New tab')),
+            PopupMenuItem(value: 'save', child: Text('Save')),
+            PopupMenuItem(value: 'saveAs', child: Text('Save As…')),
+            PopupMenuItem(value: 'print', child: Text('Print / Export PDF')),
+            PopupMenuItem(value: 'about', child: Text('About')),
+          ],
+        ),
+      ];
+    }
+
     return [
-      // View-mode selector lives on the main menu bar.
+      // View-mode selector lives on the main menu bar (wide layouts).
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
         child: Center(
@@ -306,24 +358,11 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         icon: const Icon(Icons.print_outlined),
         onPressed: () => _print(context, active),
       ),
+      autoReloadButton,
       IconButton(
-        isSelected: ws.autoReload,
-        tooltip: ws.autoReload
-            ? 'Auto-reload on: external changes load automatically'
-            : 'Auto-reload off: you save manually',
-        icon: const Icon(Icons.sync_disabled_outlined),
-        selectedIcon: Icon(Icons.sync_outlined, color: cs.primary),
-        onPressed: () => ws.setAutoReload(!ws.autoReload),
-      ),
-      IconButton(
-        tooltip: 'Theme: ${theme.mode.name}',
-        icon: Icon(switch (theme.mode) {
-          ThemeMode.system => Icons.brightness_auto_outlined,
-          ThemeMode.light => Icons.light_mode_outlined,
-          ThemeMode.dark => Icons.dark_mode_outlined,
-        }),
-        onPressed: theme.cycle,
-      ),
+          tooltip: 'Theme: ${theme.mode.name}',
+          icon: themeIcon,
+          onPressed: theme.cycle),
       PopupMenuButton<String>(
         onSelected: (value) => _onMenu(context, ws, active, value),
         itemBuilder: (_) => const [
@@ -400,9 +439,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   }
 
   Future<void> _print(BuildContext context, DocumentController doc) async {
-    final title = doc.filePath != null
-        ? p.basenameWithoutExtension(doc.filePath!)
-        : 'Untitled';
+    // Use the file name, or the display name for pathless (mobile) documents.
+    final title = p.basenameWithoutExtension(doc.filePath ?? doc.title);
     await PrintDialog.show(
       context,
       markdown: doc.currentMarkdown(),
@@ -508,11 +546,20 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   void _onMenu(BuildContext context, WorkspaceController ws,
       DocumentController active, String value) {
     switch (value) {
+      case 'open':
+        _open(context, ws);
+        break;
       case 'new':
         ws.newDocument();
         break;
+      case 'save':
+        _save(context, active);
+        break;
       case 'saveAs':
         _saveAs(context, active);
+        break;
+      case 'print':
+        _print(context, active);
         break;
       case 'about':
         showAboutDialog(
@@ -528,6 +575,49 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 }
 
 enum _AssocChoice { associate, notNow, never }
+
+/// View-mode selector shown on its own bar on narrow (phone) layouts.
+class _ModeBar extends StatelessWidget {
+  const _ModeBar({required this.doc});
+
+  final DocumentController doc;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      height: 48,
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      alignment: Alignment.centerLeft,
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: cs.outlineVariant)),
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Center(
+          child: SegmentedButton<EditorMode>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            segments: [
+              for (final m in EditorMode.values)
+                ButtonSegment(
+                  value: m,
+                  icon: Icon(m.icon, size: 18),
+                  label: Text(m.label),
+                ),
+            ],
+            selected: {doc.mode},
+            onSelectionChanged: (s) => doc.setMode(s.first),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Horizontal, scrollable strip of open-document tabs plus a "new tab" button.
 class _TabStrip extends StatelessWidget {
@@ -563,8 +653,31 @@ class _TabStrip extends StatelessWidget {
           Expanded(
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              itemCount: docs.length,
+              // One extra slot for an end drop target so a tab can be dropped
+              // after the last one.
+              itemCount: docs.length + 1,
               itemBuilder: (context, i) {
+                if (i == docs.length) {
+                  return DragTarget<int>(
+                    onWillAcceptWithDetails: (d) => true,
+                    onAcceptWithDetails: (d) =>
+                        workspace.reorder(d.data, docs.length),
+                    builder: (context, candidate, rejected) => Container(
+                      width: 64,
+                      alignment: Alignment.centerLeft,
+                      decoration: BoxDecoration(
+                        border: Border(
+                          left: BorderSide(
+                            color: candidate.isNotEmpty
+                                ? cs.primary
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }
                 final tab = _Tab(
                   doc: docs[i],
                   selected: i == workspace.activeIndex,

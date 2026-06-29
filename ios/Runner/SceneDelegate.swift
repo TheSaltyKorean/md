@@ -24,27 +24,29 @@ class SceneDelegate: FlutterSceneDelegate {
         }
       }
     }
+    // Cold-start URL: Dart hasn't registered its handler yet, so queue it for
+    // the getInitialFile pull rather than invoking openFile (which would drop).
     if let url = connectionOptions.urlContexts.first?.url {
-      handle(url)
+      pendingFile = args(for: url)
     }
   }
 
   override func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) {
     if let url = URLContexts.first?.url {
-      handle(url)
+      let payload = args(for: url)
+      if let channel = channel {
+        channel.invokeMethod("openFile", arguments: payload)
+      } else {
+        pendingFile = payload
+      }
     }
     super.scene(scene, openURLContexts: URLContexts)
   }
 
-  private func handle(_ url: URL) {
+  private func args(for url: URL) -> [String: Any?] {
     let accessed = url.startAccessingSecurityScopedResource()
     defer { if accessed { url.stopAccessingSecurityScopedResource() } }
     let content = try? String(contentsOf: url, encoding: .utf8)
-    let args: [String: Any?] = ["content": content, "name": url.lastPathComponent]
-    if let channel = channel {
-      channel.invokeMethod("openFile", arguments: args)
-    } else {
-      pendingFile = args
-    }
+    return ["content": content, "name": url.lastPathComponent]
   }
 }

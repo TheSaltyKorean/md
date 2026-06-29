@@ -77,6 +77,22 @@ void main() {
     expect(ws.documents.length, 1);
   });
 
+  test('Reorder inserts before the target and supports the end', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    ws.openDocument('a', path: '/a.md');
+    ws.openDocument('b', path: '/b.md');
+    ws.openDocument('c', path: '/c.md');
+    expect(ws.documents.map((d) => d.filePath), ['/a.md', '/b.md', '/c.md']);
+
+    ws.reorder(0, 2); // move A before C
+    expect(ws.documents.map((d) => d.filePath), ['/b.md', '/a.md', '/c.md']);
+
+    ws.reorder(0, 3); // move B to the end
+    expect(ws.documents.map((d) => d.filePath), ['/a.md', '/c.md', '/b.md']);
+  });
+
   test('Auto-reload defaults on and persists when toggled', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();

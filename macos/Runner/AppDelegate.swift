@@ -5,6 +5,7 @@ import FlutterMacOS
 class AppDelegate: FlutterAppDelegate {
   private var channel: FlutterMethodChannel?
   private var pendingPath: String?
+  private var dartReady = false
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
     return true
@@ -21,6 +22,7 @@ class AppDelegate: FlutterAppDelegate {
         binaryMessenger: controller.engine.binaryMessenger)
       channel?.setMethodCallHandler { [weak self] call, result in
         if call.method == "getInitialFile" {
+          self?.dartReady = true // Dart's handler is now registered.
           if let path = self?.pendingPath {
             result(["path": path])
             self?.pendingPath = nil
@@ -36,7 +38,9 @@ class AppDelegate: FlutterAppDelegate {
   }
 
   override func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-    if let channel = channel {
+    // Only push once Dart has registered its handler; otherwise queue it for the
+    // getInitialFile pull so a launch-time open isn't dropped.
+    if dartReady, let channel = channel {
       channel.invokeMethod("openFile", arguments: ["path": filename])
     } else {
       pendingPath = filename
