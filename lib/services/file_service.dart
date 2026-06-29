@@ -5,13 +5,17 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
-/// A document loaded from disk.
+/// A document loaded from disk. [path] is a re-writable filesystem path on
+/// desktop; on mobile it is null (the picker returns a cache/URI that must not
+/// be written back), and [name] carries the display name instead.
 class OpenedDocument {
-  const OpenedDocument({required this.path, required this.content});
-  final String path;
+  const OpenedDocument({required this.content, this.path, this.name});
+  final String? path;
   final String content;
+  final String? name;
 
-  String get fileName => p.basename(path);
+  String get displayName =>
+      name ?? (path != null ? p.basename(path!) : 'Untitled');
 }
 
 /// Cross-platform open / save of Markdown files using `file_picker` + dart:io.
@@ -30,6 +34,7 @@ class FileService {
     );
     if (result == null || result.files.isEmpty) return const [];
 
+    final isMobile = Platform.isAndroid || Platform.isIOS;
     final docs = <OpenedDocument>[];
     for (final file in result.files) {
       String? content;
@@ -39,8 +44,13 @@ class FileService {
         content = await File(file.path!).readAsString();
       }
       if (content != null) {
-        docs.add(
-            OpenedDocument(path: file.path ?? file.name, content: content));
+        // On mobile the picker path is a cache/URI that must not be written
+        // back, so don't track it as a re-writable path.
+        docs.add(OpenedDocument(
+          content: content,
+          path: isMobile ? null : file.path,
+          name: file.name,
+        ));
       }
     }
     return docs;

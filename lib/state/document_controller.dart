@@ -38,7 +38,11 @@ class DocumentController extends ChangeNotifier {
   bool _dirty = false;
   bool get isDirty => _dirty;
 
-  String get title => _filePath == null ? 'Untitled' : p.basename(_filePath!);
+  /// Display name for documents with no re-writable path (e.g. mobile opens).
+  String? _displayName;
+
+  String get title =>
+      _filePath != null ? p.basename(_filePath!) : (_displayName ?? 'Untitled');
 
   // --- View mode (per document) ----------------------------------------------
   // Documents open in read-only Preview by default; the user switches to Edit
@@ -105,11 +109,17 @@ class DocumentController extends ChangeNotifier {
   /// tab tear-off handoff), the document is flagged as having unsaved edits and
   /// the on-disk version is used as the external-change baseline so those edits
   /// aren't silently lost.
-  void loadMarkdown(String content, {String? path, bool markDirty = false}) {
+  void loadMarkdown(
+    String content, {
+    String? path,
+    String? displayName,
+    bool markDirty = false,
+  }) {
     _suppressDirty = true;
     sourceController.text = content;
     _setEditorState(EditorState(document: markdownToDocument(content)));
     _filePath = path;
+    _displayName = displayName;
     _suppressDirty = false;
     _pendingExternalContent = null;
     _startWatching(path);
@@ -192,6 +202,10 @@ class DocumentController extends ChangeNotifier {
 
   void keepMineAfterExternalChange() {
     _pendingExternalContent = null;
+    // The buffer now diverges from the (advanced) on-disk baseline, so mark it
+    // dirty — otherwise it would look clean and the kept version could be lost
+    // on close without a prompt.
+    _dirty = true;
     notifyListeners();
   }
 

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -210,9 +211,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       canPop: !anyDirty,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        final navigator = Navigator.of(context);
         final ok = await _confirmDiscard(context, 'One or more open documents');
-        if (ok && mounted) navigator.maybePop();
+        // canPop stays false (docs still dirty), so popping the route would just
+        // re-trigger this guard. Exit the app explicitly instead.
+        if (ok) await SystemNavigator.pop();
       },
       child: Scaffold(
         appBar: AppBar(
@@ -359,7 +361,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   Future<void> _open(BuildContext context, WorkspaceController ws) async {
     final opened = await _fileService.open();
     for (final doc in opened) {
-      ws.openDocument(doc.content, path: doc.path);
+      ws.openDocument(doc.content,
+          path: doc.path, displayName: doc.displayName);
     }
   }
 
@@ -485,6 +488,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       'path': doc.filePath,
       'content': doc.currentMarkdown(),
       'dirty': doc.isDirty || doc.filePath == null,
+      'name': doc.filePath == null ? doc.title : null,
     };
     try {
       final tmp = File(

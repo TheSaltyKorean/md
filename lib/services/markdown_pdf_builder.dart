@@ -107,10 +107,40 @@ class MarkdownPdfBuilder {
   }
 
   pw.Widget _paragraph(List<md.Node> children) {
+    // Markdown images parse as <img> inside a paragraph; pull them out and
+    // render them as block images (inline spans can't host them).
+    final hasImage = children.any((n) => n is md.Element && n.tag == 'img');
+    if (!hasImage) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.only(bottom: 8),
+        child: pw.RichText(text: pw.TextSpan(children: _inline(children))),
+      );
+    }
+
+    final widgets = <pw.Widget>[];
+    final run = <md.Node>[];
+    void flushRun() {
+      if (run.isEmpty) return;
+      widgets
+          .add(pw.RichText(text: pw.TextSpan(children: _inline(List.of(run)))));
+      run.clear();
+    }
+
+    for (final n in children) {
+      if (n is md.Element && n.tag == 'img') {
+        flushRun();
+        widgets.add(_image(n));
+      } else {
+        run.add(n);
+      }
+    }
+    flushRun();
+
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 8),
-      child: pw.RichText(
-        text: pw.TextSpan(children: _inline(children)),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: widgets,
       ),
     );
   }

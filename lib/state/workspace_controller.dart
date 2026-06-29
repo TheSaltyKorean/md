@@ -47,7 +47,12 @@ class WorkspaceController extends ChangeNotifier {
   /// Open a loaded document. If the same file is already open, just focus it;
   /// otherwise add a new tab. If the only open tab is a pristine "Untitled"
   /// document, replace it instead of stacking an empty tab.
-  void openDocument(String content, {String? path, bool markDirty = false}) {
+  void openDocument(
+    String content, {
+    String? path,
+    String? displayName,
+    bool markDirty = false,
+  }) {
     // For a clean open of an already-open file, just focus it. (Handoffs with
     // unsaved edits always open their own tab.)
     if (path != null && !markDirty) {
@@ -62,14 +67,16 @@ class WorkspaceController extends ChangeNotifier {
     if (_docs.length == 1 &&
         _docs.first.filePath == null &&
         !_docs.first.isDirty) {
-      _docs.first.loadMarkdown(content, path: path, markDirty: markDirty);
+      _docs.first.loadMarkdown(content,
+          path: path, displayName: displayName, markDirty: markDirty);
       _activeIndex = 0;
       notifyListeners();
       return;
     }
 
     final doc = _newDoc()
-      ..loadMarkdown(content, path: path, markDirty: markDirty);
+      ..loadMarkdown(content,
+          path: path, displayName: displayName, markDirty: markDirty);
     _docs.add(doc);
     _activeIndex = _docs.length - 1;
     notifyListeners();
@@ -88,7 +95,10 @@ class WorkspaceController extends ChangeNotifier {
     if (oldIndex == newIndex) return;
     final active = _docs[_activeIndex];
     final doc = _docs.removeAt(oldIndex);
-    final target = newIndex.clamp(0, _docs.length);
+    // Removing a lower index shifts the target left by one, so insert before the
+    // highlighted tab in both directions.
+    final target =
+        (oldIndex < newIndex ? newIndex - 1 : newIndex).clamp(0, _docs.length);
     _docs.insert(target, doc);
     _activeIndex = _docs.indexOf(active);
     notifyListeners();

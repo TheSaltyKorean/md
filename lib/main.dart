@@ -102,6 +102,7 @@ Future<void> _openHandoff(String handoffPath, WorkspaceController ws) async {
     ws.openDocument(
       raw['content'] as String? ?? '',
       path: raw['path'] as String?,
+      displayName: raw['name'] as String?,
       markDirty: raw['dirty'] as bool? ?? false,
     );
     try {

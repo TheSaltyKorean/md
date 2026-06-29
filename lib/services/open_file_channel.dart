@@ -37,11 +37,12 @@ class OpenFileChannel {
   Future<void> _open(Map data) async {
     final content = data['content'] as String?;
     final path = data['path'] as String?;
+    final name = data['name'] as String?;
 
     if (content != null) {
-      // Android content URIs aren't re-writable dart:io paths, so don't track
-      // one — open the content as an untitled document.
-      _workspace.openDocument(content);
+      // Android/iOS content isn't a re-writable dart:io path, so don't track
+      // one — open the content with its display name.
+      _workspace.openDocument(content, displayName: name);
       return;
     }
     if (path != null) {
