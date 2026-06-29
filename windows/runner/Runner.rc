@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.skmeridian" "\0"
+            VALUE "CompanyName", "com.markdownstudio" "\0"
             VALUE "FileDescription", "markdown_studio" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "markdown_studio" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.skmeridian. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.markdownstudio. All rights reserved." "\0"
             VALUE "OriginalFilename", "markdown_studio.exe" "\0"
             VALUE "ProductName", "markdown_studio" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

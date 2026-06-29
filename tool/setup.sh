@@ -14,7 +14,7 @@ flutter --version
 # lib/ or pubspec.yaml. Change --org to your reverse-domain identifier; it
 # becomes the base of your app/bundle ID for the stores.
 echo "==> Generating native platform projects..."
-flutter create --org com.skmeridian --project-name markdown_studio \
+flutter create --org com.markdownstudio --project-name markdown_studio \
   --platforms=android,ios,linux,macos .
 
 echo "==> Fetching packages..."

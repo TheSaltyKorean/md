@@ -27,12 +27,12 @@ rationale. Update this whenever a new rule or significant decision is made.
 
 - **Flutter pinned to 3.41.9** (`.fvmrc`). 3.44+ breaks AppFlowy (`TextInputClient.onFocusReceived` not implemented by `appflowy_editor` 6.2.0). Revisit when AppFlowy supports 3.44+.
 - `intl` overridden to `0.20.2` (reconciles AppFlowy with `flutter_localizations`).
-- Org/bundle id base: `com.skmeridian`.
+- Org/bundle id base: `com.markdownstudio`.
 
 ## Status log
 
 - 2026-06-28: Initial app built; `flutter analyze` clean, `flutter test` green on 3.41.9.
 - 2026-06-29: SDK relocated to `C:\git\flutter-sdk`; native platform folders generated; first PR + Codex loop.
-- 2026-06-29: Seeded "Work" profile genericised from a company name (public repo); kept `com.skmeridian` bundle id.
+- 2026-06-29: Seeded "Work" profile genericised from a company name (public repo); kept `com.markdownstudio` bundle id.
 - 2026-06-29: Added external-change handling — file watcher (desktop) + **auto-reload toggle**. On+clean = silent reload; On+dirty or Off = Reload/Keep-mine banner; save is last-write-wins by the user's choice.
 - 2026-06-29: PR #1 ran a **9-round Codex loop** (findings 10→7→6→6→3→5→5→5→3, all fixed). One P1 accepted+documented: `file_picker` Android CVE-22 can't be cleared (fix is v11, AppFlowy 6.2.0 needs v10 API; 10.3.11 retracted) — tracked in issue #2. Merged into main per the user's "accept + document, merge now" decision.
