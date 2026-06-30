@@ -559,16 +559,35 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     );
   }
 
-  /// Insert [block] as its own paragraph, padding with surrounding blank lines.
+  /// Insert [block] as a standalone block, guaranteeing a **blank line** on each
+  /// side. A single newline isn't enough: `Paragraph\n---` parses as a setext
+  /// heading underline, and a table glued to the previous line won't parse, so
+  /// we top the separation up to two newlines (an empty line) where there's
+  /// adjacent text.
   void _insertSourceBlock(String block) {
     final c = controller.sourceController;
     final value = c.value;
     final sel = value.selection;
     final text = value.text;
     final pos = sel.isValid ? sel.start : text.length;
-    final before = pos > 0 && text[pos - 1] != '\n' ? '\n' : '';
-    final after = pos < text.length && text[pos] != '\n' ? '\n' : '';
-    final insert = '$before$block\n$after';
+
+    // Number of newlines already present immediately before/after the caret.
+    var nlBefore = 0;
+    for (var i = pos - 1; i >= 0 && text[i] == '\n' && nlBefore < 2; i--) {
+      nlBefore++;
+    }
+    var nlAfter = 0;
+    for (var i = pos; i < text.length && text[i] == '\n' && nlAfter < 2; i++) {
+      nlAfter++;
+    }
+
+    // No leading blank line needed at the very start of the document.
+    final before = pos == 0 ? '' : '\n' * (2 - nlBefore);
+    // At end of document a single trailing newline is plenty.
+    final after =
+        pos >= text.length ? '\n' : '\n' * (2 - nlAfter);
+
+    final insert = '$before$block$after';
     final newText = text.replaceRange(pos, pos, insert);
     c.value = value.copyWith(
       text: newText,

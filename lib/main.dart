@@ -150,13 +150,16 @@ Future<void> _bringToFront() async {
     await windowManager.show();
     // Windows blocks background apps from stealing focus, so a plain focus()
     // call often just flashes the taskbar. Briefly forcing always-on-top pulls
-    // the window to the foreground; we drop it again right away so it behaves
-    // like a normal window afterwards. The reset runs in a finally so a throw
-    // in show()/focus() can't leave the window stuck topmost for the session.
+    // the window to the foreground. This is best-effort: if a platform/WM
+    // rejects always-on-top we must still fall through to show()/focus() (the
+    // original behavior), and we drop topmost again afterwards in a finally so a
+    // later throw can't leave the window stuck above everything.
     var topped = false;
     try {
       await windowManager.setAlwaysOnTop(true);
       topped = true;
+    } catch (_) {/* unsupported — fall back to a plain focus below */}
+    try {
       await windowManager.show();
       await windowManager.focus();
     } finally {
