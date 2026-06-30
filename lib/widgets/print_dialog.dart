@@ -54,6 +54,10 @@ class _PrintDialogState extends State<PrintDialog> {
   late String _selectedId;
   int _previewEpoch = 0;
 
+  /// The page format currently shown in the preview (updated as the user
+  /// changes size/orientation). "Save as PDF" exports at this format.
+  PdfPageFormat _previewFormat = PdfPageFormat.a4;
+
   @override
   void initState() {
     super.initState();
@@ -195,7 +199,8 @@ class _PrintDialogState extends State<PrintDialog> {
         markdown: widget.markdown,
         profile: profile,
         title: widget.title,
-        format: PdfPageFormat.a4,
+        // Match the size/orientation the user is previewing.
+        format: _previewFormat,
         baseDir: widget.docPath != null ? p.dirname(widget.docPath!) : null,
       );
     } catch (e) {
@@ -269,72 +274,74 @@ class _PrintDialogState extends State<PrintDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          // Key by selection so the field rebuilds with a valid
-                          // value after a profile is created or deleted (avoids
-                          // a stale/duplicate-value assertion).
-                          key: ValueKey('profile-dd-$_selectedId'),
-                          initialValue: _selectedId,
-                          decoration: const InputDecoration(
-                            labelText: 'Branding profile',
-                            isDense: true,
+                  DropdownButtonFormField<String>(
+                    // Key by selection so the field rebuilds with a valid value
+                    // after a profile is created or deleted (avoids a
+                    // stale/duplicate-value assertion).
+                    key: ValueKey('profile-dd-$_selectedId'),
+                    initialValue: _selectedId,
+                    decoration: const InputDecoration(
+                      labelText: 'Branding profile',
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final p in profiles)
+                        DropdownMenuItem(
+                          value: p.id,
+                          child: Text(
+                            p.id == profilesService.defaultId
+                                ? '${p.name}  (default)'
+                                : p.name,
                           ),
-                          items: [
-                            for (final p in profiles)
-                              DropdownMenuItem(
-                                value: p.id,
-                                child: Text(
-                                  p.id == profilesService.defaultId
-                                      ? '${p.name}  (default)'
-                                      : p.name,
-                                ),
-                              ),
-                          ],
-                          onChanged: (v) => setState(() {
-                            _selectedId = v ?? _selectedId;
-                            _previewEpoch++;
-                          }),
-                        ),
-                      ),
-                      // Direct action buttons (no overflow menu) so import /
-                      // export / new / delete are one tap away.
-                      IconButton(
-                        tooltip: 'Edit profile',
-                        icon: const Icon(Icons.edit_rounded),
-                        onPressed: () => _editProfile(selected, isNew: false),
-                      ),
-                      IconButton(
-                        tooltip: 'New profile',
-                        icon: const Icon(Icons.add_rounded),
-                        onPressed: () => _editProfile(
-                          PrintProfile(id: _newId(), name: 'New profile'),
-                          isNew: true,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Import… (.json)',
-                        icon: const Icon(Icons.upload_file_rounded),
-                        onPressed: _importProfile,
-                      ),
-                      IconButton(
-                        tooltip: 'Export… (.json)',
-                        icon: const Icon(Icons.download_rounded),
-                        onPressed: () => _exportProfile(selected),
-                      ),
-                      if (profiles.length > 1)
-                        IconButton(
-                          tooltip: 'Delete profile',
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          color: cs.error,
-                          onPressed: () async {
-                            await profilesService.delete(selected.id);
-                            if (mounted) setState(() => _previewEpoch++);
-                          },
                         ),
                     ],
+                    onChanged: (v) => setState(() {
+                      _selectedId = v ?? _selectedId;
+                      _previewEpoch++;
+                    }),
+                  ),
+                  const SizedBox(height: 4),
+                  // Action buttons on their own scrollable row so they never
+                  // overflow the dropdown on narrow (phone) widths.
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        IconButton(
+                          tooltip: 'Edit profile',
+                          icon: const Icon(Icons.edit_rounded),
+                          onPressed: () => _editProfile(selected, isNew: false),
+                        ),
+                        IconButton(
+                          tooltip: 'New profile',
+                          icon: const Icon(Icons.add_rounded),
+                          onPressed: () => _editProfile(
+                            PrintProfile(id: _newId(), name: 'New profile'),
+                            isNew: true,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Import… (.json)',
+                          icon: const Icon(Icons.upload_file_rounded),
+                          onPressed: _importProfile,
+                        ),
+                        IconButton(
+                          tooltip: 'Export… (.json)',
+                          icon: const Icon(Icons.download_rounded),
+                          onPressed: () => _exportProfile(selected),
+                        ),
+                        if (profiles.length > 1)
+                          IconButton(
+                            tooltip: 'Delete profile',
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            color: cs.error,
+                            onPressed: () async {
+                              await profilesService.delete(selected.id);
+                              if (mounted) setState(() => _previewEpoch++);
+                            },
+                          ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Wrap(
@@ -370,14 +377,20 @@ class _PrintDialogState extends State<PrintDialog> {
           Expanded(
             child: PdfPreview(
               key: ValueKey('preview-$_selectedId-$_previewEpoch'),
-              build: (format) => _service.generate(
-                markdown: widget.markdown,
-                profile: selected,
-                title: widget.title,
-                format: format,
-                baseDir:
-                    widget.docPath != null ? p.dirname(widget.docPath!) : null,
-              ),
+              build: (format) {
+                // Remember the page size/orientation the user is currently
+                // previewing so "Save as PDF" matches it (not always A4).
+                _previewFormat = format;
+                return _service.generate(
+                  markdown: widget.markdown,
+                  profile: selected,
+                  title: widget.title,
+                  format: format,
+                  baseDir: widget.docPath != null
+                      ? p.dirname(widget.docPath!)
+                      : null,
+                );
+              },
               canChangePageFormat: true,
               canChangeOrientation: true,
               allowPrinting: true,

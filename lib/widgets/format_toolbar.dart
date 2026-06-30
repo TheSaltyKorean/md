@@ -38,6 +38,10 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
 
   late Offset _offset;
 
+  /// Last measured size of the palette, used to clamp it on-screen. Updated
+  /// after each layout; the seed is a reasonable estimate for the first frame.
+  Size _measured = const Size(280, 48);
+
   DocumentController get controller => widget.controller;
 
   @override
@@ -46,18 +50,28 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     _offset = context.read<WorkspaceController>().toolbarOffset ?? _dock;
   }
 
-  Size get _paletteSize =>
-      _paletteKey.currentContext?.size ?? const Size(280, 48);
+  /// The largest top-left offset that still keeps the whole palette on-screen.
+  Offset get _maxOffset => Offset(
+        (widget.area.width - _measured.width).clamp(0.0, double.infinity),
+        (widget.area.height - _measured.height).clamp(0.0, double.infinity),
+      );
+
+  void _measureAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final size = _paletteKey.currentContext?.size;
+      if (size != null && size != _measured) {
+        setState(() => _measured = size);
+      }
+    });
+  }
 
   void _onPanUpdate(DragUpdateDetails d) {
     setState(() {
-      final size = _paletteSize;
-      final maxX = (widget.area.width - size.width).clamp(0.0, double.infinity);
-      final maxY =
-          (widget.area.height - size.height).clamp(0.0, double.infinity);
+      final max = _maxOffset;
       _offset = Offset(
-        (_offset.dx + d.delta.dx).clamp(0.0, maxX),
-        (_offset.dy + d.delta.dy).clamp(0.0, maxY),
+        (_offset.dx + d.delta.dx).clamp(0.0, max.dx),
+        (_offset.dy + d.delta.dy).clamp(0.0, max.dy),
       );
     });
   }
@@ -69,11 +83,12 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // Keep the palette on-screen if the window shrank since it was last placed.
-    final left = _offset.dx
-        .clamp(0.0, (widget.area.width - 48).clamp(0.0, double.infinity));
-    final top = _offset.dy
-        .clamp(0.0, (widget.area.height - 48).clamp(0.0, double.infinity));
+    _measureAfterLayout();
+    // Keep the whole palette on-screen if the window shrank since it was last
+    // placed — clamp by its actual measured size, not a fixed margin.
+    final max = _maxOffset;
+    final left = _offset.dx.clamp(0.0, max.dx);
+    final top = _offset.dy.clamp(0.0, max.dy);
     final maxWidth =
         (widget.area.width - 16).clamp(120.0, 640.0).toDouble();
 
@@ -150,6 +165,22 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
       _btn(Icons.link, 'Insert link', _link),
       _btn(Icons.horizontal_rule, 'Divider', _divider2),
       _btn(Icons.grid_on, 'Insert table', _table),
+      // Alignment and colour are block/inline attributes that standard Markdown
+      // can't represent, so they only apply in the WYSIWYG block editor (and are
+      // dropped when the document is saved to .md or shown as source). Hidden in
+      // the source modes where they'd silently do nothing.
+      if (controller.mode == EditorMode.wysiwyg) ...[
+        _divider(cs),
+        _btn(Icons.format_align_left, 'Align left', () => _align('left')),
+        _btn(Icons.format_align_center, 'Align center',
+            () => _align('center')),
+        _btn(Icons.format_align_right, 'Align right', () => _align('right')),
+        _divider(cs),
+        _btn(Icons.format_color_text, 'Text colour',
+            () => _color(AppFlowyRichTextKeys.textColor)),
+        _btn(Icons.border_color, 'Highlight colour',
+            () => _color(AppFlowyRichTextKeys.backgroundColor)),
+      ],
     ];
   }
 
@@ -338,6 +369,86 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     ]).node;
     final transaction = es.transaction..insertNode(insertedPath, table);
     es.apply(transaction);
+  }
+
+  // --- Alignment / colour (WYSIWYG-only — not representable in Markdown) -------
+
+  void _align(String align) {
+    if (controller.mode != EditorMode.wysiwyg) return;
+    final es = controller.editorState;
+    final selection = es.selection;
+    if (selection == null) return;
+    es.updateNode(
+      selection,
+      (node) => node.copyWith(
+        attributes: {...node.attributes, blockComponentAlign: align},
+      ),
+    );
+  }
+
+  Future<void> _color(String attribute) async {
+    if (controller.mode != EditorMode.wysiwyg) return;
+    final es = controller.editorState;
+    final selection = es.selection;
+    if (selection == null || selection.isCollapsed) return;
+    final hex = await _promptColor(context);
+    if (hex == null || !mounted) return;
+    // An empty result clears the attribute.
+    await es.formatDelta(selection, {attribute: hex.isEmpty ? null : hex});
+  }
+
+  Future<String?> _promptColor(BuildContext context) {
+    const swatches = <String, int>{
+      'Black': 0xFF000000,
+      'Red': 0xFFD32F2F,
+      'Orange': 0xFFF57C00,
+      'Yellow': 0xFFFBC02D,
+      'Green': 0xFF388E3C,
+      'Blue': 0xFF1976D2,
+      'Purple': 0xFF7B1FA2,
+      'Grey': 0xFF757575,
+    };
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pick a colour'),
+        content: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final e in swatches.entries)
+              Tooltip(
+                message: e.key,
+                child: InkWell(
+                  onTap: () => Navigator.pop(
+                    ctx,
+                    '0x${e.value.toRadixString(16).toUpperCase().padLeft(8, '0')}',
+                  ),
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: Color(e.value),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.black26),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ''),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<String?> _promptUrl(BuildContext context) async {
