@@ -92,7 +92,12 @@ class MarkdownPdfBuilder {
   List<pw.Widget> _renderDivSequence(String raw) {
     final out = <pw.Widget>[];
     void addText(String s) {
-      final t = s.trim();
+      // Text between divs is raw HTML too — normalise <br>, strip tags, decode
+      // entities so it doesn't leak literal markup.
+      final t = _decodeEntities(s
+              .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+              .replaceAll(RegExp(r'<[^>]*>'), ''))
+          .trim();
       if (t.isEmpty) return;
       out.add(pw.RichText(text: pw.TextSpan(children: _inline([md.Text(t)]))));
     }
@@ -141,12 +146,19 @@ class MarkdownPdfBuilder {
   /// becomes a signature/blank line; a div with text becomes a styled label.
   /// Returns null for an empty, borderless/structural div.
   pw.Widget? _htmlDiv(String attrs, String content) {
+    final decls = _styleDecls(attrs);
     if (_divOpen.hasMatch(content)) {
       final inner = _renderDivSequence(content);
-      return inner.isEmpty
-          ? null
-          : pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start, children: inner);
+      if (inner.isEmpty) return null;
+      final col = pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start, children: inner);
+      // Apply the wrapper div's own vertical spacing around the inner content.
+      final mt = _marginPt(decls, 'top');
+      final mb = _marginPt(decls, 'bottom');
+      return (mt > 0 || mb > 0)
+          ? pw.Padding(
+              padding: pw.EdgeInsets.only(top: mt, bottom: mb), child: col)
+          : col;
     }
     final style = _parseStyle(attrs);
     // Inline markup inside a label (<b>…</b>) and HTML whitespace entities are
@@ -162,9 +174,9 @@ class MarkdownPdfBuilder {
     final text = _decodeEntities(stripped);
     // Resolve the effective bottom border (shorthand merged with longhand
     // overrides; null when invisible). Margins honour the shorthand + bottom.
-    final border = _resolveBorder(style);
-    final gapTop = _marginPt(style, 'top');
-    final gapBottom = _marginPt(style, 'bottom');
+    final border = _resolveBorder(decls);
+    final gapTop = _marginPt(decls, 'top');
+    final gapBottom = _marginPt(decls, 'bottom');
 
     if (text.isEmpty) {
       // Invisible border (none/hidden/0-width/transparent): if the div still
@@ -176,14 +188,17 @@ class MarkdownPdfBuilder {
       final thickness = border.$1 < 0.4 ? 0.4 : border.$1;
       final height = _lengthPt(style['height']) ?? 36;
       final line = pw.Container(height: thickness, color: border.$2);
-      // Width may be a percentage (weighted flex) or a fixed length.
+      // Width may be a percentage (weighted flex) or a fixed length. An explicit
+      // fixed width is honoured even when zero (a collapsed/hidden rule).
       final widthPt = _lengthPt(style['width']);
       final widthPct = _percent(style['width']);
       final pw.Widget sized;
-      if (widthPt != null && widthPt > 0) {
-        sized = pw.Align(
-            alignment: pw.Alignment.centerLeft,
-            child: pw.SizedBox(width: widthPt, child: line));
+      if (widthPt != null) {
+        sized = widthPt <= 0
+            ? pw.SizedBox()
+            : pw.Align(
+                alignment: pw.Alignment.centerLeft,
+                child: pw.SizedBox(width: widthPt, child: line));
       } else {
         final pct = (widthPct ?? 60).clamp(1.0, 100.0);
         sized = pct >= 99
@@ -210,20 +225,29 @@ class MarkdownPdfBuilder {
     );
   }
 
-  Map<String, String> _parseStyle(String attrs) {
-    // Accept both double- and single-quoted style attributes; HTML attribute
-    // names are case-insensitive (style=/STYLE=).
+  /// Declarations from a style attribute, in source order (so shorthand vs
+  /// longhand precedence can follow CSS "later wins" rules).
+  List<MapEntry<String, String>> _styleDecls(String attrs) {
     final m = RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''',
             caseSensitive: false)
         .firstMatch(attrs);
-    final out = <String, String>{};
+    final out = <MapEntry<String, String>>[];
     if (m == null) return out;
-    final decls = m.group(2) ?? m.group(3) ?? '';
-    for (final decl in decls.split(';')) {
+    for (final decl in (m.group(2) ?? m.group(3) ?? '').split(';')) {
       final i = decl.indexOf(':');
       if (i <= 0) continue;
-      out[decl.substring(0, i).trim().toLowerCase()] =
-          decl.substring(i + 1).trim();
+      out.add(MapEntry(decl.substring(0, i).trim().toLowerCase(),
+          decl.substring(i + 1).trim()));
+    }
+    return out;
+  }
+
+  /// Style as a property map (last declaration wins) for simple single-value
+  /// lookups like width/height/font-size/color.
+  Map<String, String> _parseStyle(String attrs) {
+    final out = <String, String>{};
+    for (final e in _styleDecls(attrs)) {
+      out[e.key] = e.value;
     }
     return out;
   }
@@ -277,37 +301,39 @@ class MarkdownPdfBuilder {
   /// overrides (later declaration wins) and follows CSS visibility rules: a
   /// border needs a drawable *style* keyword (a width or colour alone leaves the
   /// style at `none`), a positive width, and a non-transparent colour.
-  (double, PdfColor)? _resolveBorder(Map<String, String> style) {
+  (double, PdfColor)? _resolveBorder(List<MapEntry<String, String>> decls) {
     double? width;
     String? styleKw;
     PdfColor? color;
     var transparent = false;
 
-    void apply(String? v) {
-      if (v == null) return;
-      final w = _firstBorderWidth(v);
-      if (w != null) width = w;
-      final s = RegExp(r'\b(none|hidden|solid|dashed|dotted|double|groove|ridge|inset|outset)\b',
-              caseSensitive: false)
-          .firstMatch(v);
-      if (s != null) styleKw = s.group(0)!.toLowerCase();
-      final c = _cssColor(v);
-      if (c != null) color = c;
-      if (_isTransparent(v)) transparent = true;
-    }
-
-    apply(style['border-bottom']);
-    // Longhand overrides win over the shorthand.
-    if (style.containsKey('border-bottom-width')) {
-      width = _lengthPt(style['border-bottom-width']);
-    }
-    if (style.containsKey('border-bottom-style')) {
-      styleKw = style['border-bottom-style']!.trim().toLowerCase();
-    }
-    if (style.containsKey('border-bottom-color')) {
-      final v = style['border-bottom-color']!;
-      color = _cssColor(v);
-      transparent = _isTransparent(v);
+    // Walk declarations in source order so a later shorthand overrides an
+    // earlier longhand (and vice versa), matching CSS.
+    for (final e in decls) {
+      switch (e.key) {
+        case 'border-bottom':
+          final w = _firstBorderWidth(e.value);
+          if (w != null) width = w;
+          final s = RegExp(
+                  r'\b(none|hidden|solid|dashed|dotted|double|groove|ridge|inset|outset)\b',
+                  caseSensitive: false)
+              .firstMatch(e.value);
+          if (s != null) styleKw = s.group(0)!.toLowerCase();
+          final c = _cssColor(e.value);
+          if (c != null) color = c;
+          transparent = _isTransparent(e.value);
+          break;
+        case 'border-bottom-width':
+          width = _lengthPt(e.value);
+          break;
+        case 'border-bottom-style':
+          styleKw = e.value.trim().toLowerCase();
+          break;
+        case 'border-bottom-color':
+          color = _cssColor(e.value);
+          transparent = _isTransparent(e.value);
+          break;
+      }
     }
 
     if (styleKw == null || !_borderStyles.contains(styleKw)) return null;
@@ -334,33 +360,37 @@ class MarkdownPdfBuilder {
   bool _isTransparent(String v) {
     final s = v.toLowerCase();
     if (RegExp(r'\btransparent\b').hasMatch(s)) return true;
-    final h = RegExp(r'#[0-9a-f]{6}([0-9a-f]{2})\b').firstMatch(s);
-    if (h != null && h.group(1) == '00') return true;
+    final h8 = RegExp(r'#[0-9a-f]{6}([0-9a-f]{2})\b').firstMatch(s);
+    if (h8 != null && h8.group(1) == '00') return true;
+    final h4 = RegExp(r'#[0-9a-f]{3}([0-9a-f])\b').firstMatch(s); // #RGBA
+    if (h4 != null && h4.group(1) == '0') return true;
     if (RegExp(r'(rgba|hsla)\([^)]*,\s*0?\.?0+\s*\)').hasMatch(s)) return true;
     return false;
   }
 
-  /// Top/bottom margin in pt from the longhand or the `margin` shorthand.
-  double _marginPt(Map<String, String> style, String side) {
-    final lh = _lengthPt(style['margin-$side']);
-    if (lh != null) return lh;
-    final sh = style['margin'];
-    if (sh == null) return 0;
-    final p = sh
-        .trim()
-        .split(RegExp(r'\s+'))
-        .map((t) => _lengthPt(t) ?? 0)
-        .toList();
-    if (p.isEmpty) return 0;
-    // 1: all; 2: v/h; 3: t/h/b; 4: t/r/b/l.
-    if (side == 'top') return p[0];
-    switch (p.length) {
-      case 1:
-      case 2:
-        return p[0];
-      default:
-        return p.length >= 3 ? p[2] : p[0];
+  /// Top/bottom margin in pt, honouring source order between the `margin`
+  /// shorthand and the `margin-top`/`margin-bottom` longhand (later wins).
+  double _marginPt(List<MapEntry<String, String>> decls, String side) {
+    double value = 0;
+    for (final e in decls) {
+      if (e.key == 'margin-$side') {
+        value = _lengthPt(e.value) ?? value;
+      } else if (e.key == 'margin') {
+        final p = e.value
+            .trim()
+            .split(RegExp(r'\s+'))
+            .map((t) => _lengthPt(t) ?? 0)
+            .toList();
+        if (p.isEmpty) continue;
+        // 1: all; 2: v/h; 3: t/h/b; 4: t/r/b/l.
+        if (side == 'top') {
+          value = p[0];
+        } else {
+          value = p.length >= 3 ? p[2] : p[0];
+        }
+      }
     }
+    return value;
   }
 
   /// Decode the common named + numeric HTML entities so exported-HTML labels
@@ -415,12 +445,14 @@ class MarkdownPdfBuilder {
     PdfColor rgb(int r, int g, int b) => PdfColor.fromInt(
         0xFF000000 | (r.clamp(0, 255) << 16) | (g.clamp(0, 255) << 8) | b.clamp(0, 255));
 
-    // #RRGGBB(AA) / #RGB — 6/8 before 3 so "#111344" isn't read as "#111".
-    final hex =
-        RegExp(r'#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b').firstMatch(s);
+    // #RRGGBB(AA) / #RGB(A) — longest first so "#111344" isn't read as "#111".
+    final hex = RegExp(r'#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})\b')
+        .firstMatch(s);
     if (hex != null) {
       var h = hex.group(1)!;
-      if (h.length == 3) h = h.split('').map((c) => '$c$c').join();
+      if (h.length == 3 || h.length == 4) {
+        h = h.split('').map((c) => '$c$c').join(); // RGB(A) -> RRGGBB(AA)
+      }
       if (h.length == 8) h = h.substring(0, 6); // drop alpha
       final n = int.parse(h, radix: 16);
       return PdfColor.fromInt(0xFF000000 | n);
