@@ -67,8 +67,11 @@ thumbs="$(printf '%s\n' "$reacts" | grep -cx '+1' | tr -d ' ')"
 # this is trustworthy. To accept it we require ALL of:
 #   * the comment is NEWER than the latest request (a fresh response to it, not a
 #     stale clean comment carried over from an earlier cycle), AND
-#   * the SHA parsed from its "Reviewed commit:" line is a prefix of the CURRENT
-#     head SHA (exact binding, not a loose substring search anywhere in the body).
+#   * the SHA parsed from its "Reviewed commit:" line resolves (via the API) to
+#     EXACTLY the current head SHA. Codex abbreviates the SHA, so we expand it
+#     through the commits endpoint and compare the full 40-char result — a short
+#     prefix is never matched loosely, and an ambiguous abbreviation makes the
+#     API error (fail-closed) rather than match.
 # Combined with the "no findings after the request" check below, a re-requested
 # review can't go green on a stale clean comment.
 clean_lines="$(api --paginate "repos/$REPO/issues/$PR/comments" \
@@ -81,7 +84,10 @@ while IFS=$'\t' read -r cdate cbody; do
   rsha="$(printf '%s' "$cbody" \
     | sed -nE 's/.*[Rr]eviewed[[:space:]_]*commit[^0-9a-fA-F]*([0-9a-fA-F]{7,40}).*/\1/p' | head -1)"
   [ -n "$rsha" ] || continue
-  case "$head_sha" in "$rsha"*) clean_on_head=1; break;; esac
+  # Expand the (abbreviated) reviewed SHA to its full commit and require an exact
+  # match with the head — defeats a crafted short-prefix collision.
+  rfull="$(api "repos/$REPO/commits/$rsha" --jq '.sha')" || continue
+  if [ "$rfull" = "$head_sha" ]; then clean_on_head=1; break; fi
 done <<EOF
 $clean_lines
 EOF
