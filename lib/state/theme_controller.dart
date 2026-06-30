@@ -18,17 +18,12 @@ class ThemeController extends ChangeNotifier {
   Future<void> _pending = Future.value();
   Future<void> get pendingWrites => _pending;
 
-  Future<void> _track(Future<void> op) {
-    final prev = _pending;
-    _pending = Future(() async {
-      try {
-        await prev;
-      } catch (_) {}
-      try {
-        await op;
-      } catch (_) {}
-    });
-    return op;
+  /// Serialise persistence: [op] (which starts the write) is not invoked until
+  /// the previous write has completed, so rapid toggles persist in order.
+  Future<void> _track(Future<void> Function() op) {
+    final result = _pending.then((_) => op(), onError: (_) => op());
+    _pending = result.catchError((_) {});
+    return result;
   }
 
   ThemeMode get mode => _mode;
@@ -56,7 +51,7 @@ class ThemeController extends ChangeNotifier {
     if (mode == _mode) return;
     _mode = mode;
     notifyListeners();
-    await _track(_prefs.setString(_prefsKey, mode.name));
+    await _track(() => _prefs.setString(_prefsKey, mode.name));
   }
 
   /// Convenience toggle used by the toolbar icon button. Cycles

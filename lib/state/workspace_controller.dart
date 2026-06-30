@@ -25,17 +25,12 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> _pending = Future.value();
   Future<void> get pendingWrites => _pending;
 
-  Future<void> _track(Future<void> op) {
-    final prev = _pending;
-    _pending = Future(() async {
-      try {
-        await prev;
-      } catch (_) {}
-      try {
-        await op;
-      } catch (_) {}
-    });
-    return op;
+  /// Serialise persistence: [op] (which starts the write) is not invoked until
+  /// the previous write completes, so rapid toggles persist in order.
+  Future<void> _track(Future<void> Function() op) {
+    final result = _pending.then((_) => op(), onError: (_) => op());
+    _pending = result.catchError((_) {});
+    return result;
   }
 
   List<DocumentController> get documents => List.unmodifiable(_docs);
@@ -144,7 +139,7 @@ class WorkspaceController extends ChangeNotifier {
     if (value == _autoReload) return;
     _autoReload = value;
     notifyListeners();
-    await _track(_prefs.setBool(_autoReloadKey, value));
+    await _track(() => _prefs.setBool(_autoReloadKey, value));
     // Resolve any pending conflicts that no longer need the user.
     for (final d in _docs) {
       d.resolveIfSafe();

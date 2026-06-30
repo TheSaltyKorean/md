@@ -69,31 +69,16 @@ class MarkdownPdfBuilder {
 
   // --- Inline-styled <div> blocks (signature lines & labels) ------------------
 
-  static final _divRe =
-      RegExp(r'<div\b([^>]*)>([\s\S]*?)</div>', caseSensitive: false);
+  static final _divOpen = RegExp(r'<div\b([^>]*)>', caseSensitive: false);
+  static final _divTag = RegExp(r'<(/?)div\b[^>]*>', caseSensitive: false);
 
   /// If [raw] is block-level `<div>` HTML (used by legal docs for signature
   /// lines and labels), render those divs and any text between them; else null.
   /// Operating on already-parsed block text means fenced code samples (which are
   /// `pre`/`code` nodes) are never mistaken for document divs.
   pw.Widget? _divBlock(String raw) {
-    final matches = _divRe.allMatches(raw).toList();
-    if (matches.isEmpty) return null;
-    final children = <pw.Widget>[];
-    void addText(String s) {
-      final t = s.trim();
-      if (t.isEmpty) return;
-      children.add(pw.RichText(text: pw.TextSpan(children: _inline([md.Text(t)]))));
-    }
-
-    var last = 0;
-    for (final m in matches) {
-      addText(raw.substring(last, m.start));
-      final w = _htmlDiv(m.group(1) ?? '', m.group(2) ?? '');
-      if (w != null) children.add(w);
-      last = m.end;
-    }
-    addText(raw.substring(last));
+    if (!_divOpen.hasMatch(raw)) return null;
+    final children = _renderDivSequence(raw);
     if (children.isEmpty) return pw.SizedBox();
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 4),
@@ -102,11 +87,65 @@ class MarkdownPdfBuilder {
     );
   }
 
-  /// Render a block-level `<div style="…">content</div>`. An empty div with a
-  /// `border-bottom` becomes a signature/blank line (width given as a percent);
-  /// a div with text becomes a styled label. Returns null for an empty,
-  /// borderless div (purely structural).
+  /// Render text interleaved with *balanced* `<div>…</div>` blocks (so a wrapper
+  /// div containing a signature line + label is handled, not just flat divs).
+  List<pw.Widget> _renderDivSequence(String raw) {
+    final out = <pw.Widget>[];
+    void addText(String s) {
+      final t = s.trim();
+      if (t.isEmpty) return;
+      out.add(pw.RichText(text: pw.TextSpan(children: _inline([md.Text(t)]))));
+    }
+
+    var i = 0;
+    while (i < raw.length) {
+      final open = _divOpen.firstMatch(raw.substring(i));
+      if (open == null) {
+        addText(raw.substring(i));
+        break;
+      }
+      final openAbs = i + open.start;
+      addText(raw.substring(i, openAbs));
+      final closeStart = _matchDiv(raw, openAbs);
+      if (closeStart < 0) {
+        addText(raw.substring(openAbs).replaceAll(RegExp(r'</?div[^>]*>'), ''));
+        break;
+      }
+      final contentStart = openAbs + open.group(0)!.length;
+      final w =
+          _htmlDiv(open.group(1) ?? '', raw.substring(contentStart, closeStart));
+      if (w != null) out.add(w);
+      i = closeStart + '</div>'.length;
+    }
+    return out;
+  }
+
+  /// Index of the `</div>` that closes the `<div>` opening at [openAbs], or -1.
+  int _matchDiv(String s, int openAbs) {
+    var depth = 0;
+    for (final m in _divTag.allMatches(s, openAbs)) {
+      if (m.group(1) == '/') {
+        depth--;
+        if (depth == 0) return m.start;
+      } else {
+        depth++;
+      }
+    }
+    return -1;
+  }
+
+  /// Render a single `<div style="…">content</div>`. A wrapper div (whose content
+  /// holds more divs) recurses; an empty div with a *visible* `border-bottom`
+  /// becomes a signature/blank line; a div with text becomes a styled label.
+  /// Returns null for an empty, borderless/structural div.
   pw.Widget? _htmlDiv(String attrs, String content) {
+    if (_divOpen.hasMatch(content)) {
+      final inner = _renderDivSequence(content);
+      return inner.isEmpty
+          ? null
+          : pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start, children: inner);
+    }
     final style = _parseStyle(attrs);
     // Inline markup inside a label (<b>…</b>) and HTML whitespace entities are
     // common in exported legal HTML; strip tags and normalise nbsp before
@@ -116,14 +155,17 @@ class MarkdownPdfBuilder {
         .replaceAll(RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' ')
         .replaceAll(' ', ' ')
         .trim();
-    final hasBorder = style.containsKey('border-bottom');
+    final bv = style['border-bottom'];
+    // A border only counts if it has a positive width (border-bottom:0 / :none
+    // is an explicit spacer, not a line).
+    final hasVisibleBorder = bv != null && (_lengthPt(bv) ?? 0) > 0;
     final marginTop = _lengthPt(style['margin-top']) ?? 0;
 
     if (text.isEmpty) {
-      if (!hasBorder) return null;
+      if (!hasVisibleBorder) return null;
       final width = _percent(style['width']) ?? 60;
       final height = _lengthPt(style['height']) ?? 36;
-      final border = _border(style['border-bottom']!);
+      final border = _border(bv);
       final line = pw.Container(height: border.$1, color: border.$2);
       return pw.Padding(
         padding: pw.EdgeInsets.only(top: marginTop + height, bottom: 2),
