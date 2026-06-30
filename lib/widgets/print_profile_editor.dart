@@ -37,6 +37,11 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   late bool _titleInHeader;
   late double _margin;
   late bool _accentRule;
+  late bool _headingRule;
+  late bool _footerCentered;
+  late bool _coverLogo;
+  late bool _useAccent;
+  late int _accent;
 
   static const _swatches = <int>[
     0xFF0D3B66, // navy
@@ -72,6 +77,11 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     _titleInHeader = p.showTitleInHeader;
     _margin = p.marginCm;
     _accentRule = p.accentRule;
+    _headingRule = p.headingRule;
+    _footerCentered = p.footerCentered;
+    _coverLogo = p.coverLogo;
+    _useAccent = p.accentColor != null;
+    _accent = p.accentColor ?? p.primaryColor;
   }
 
   @override
@@ -111,6 +121,10 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         showTitleInHeader: _titleInHeader,
         marginCm: _margin,
         accentRule: _accentRule,
+        headingRule: _headingRule,
+        footerCentered: _footerCentered,
+        coverLogo: _coverLogo,
+        accentColor: _useAccent ? _accent : null,
       );
 
   Future<void> _pickLogo() async {
@@ -198,6 +212,42 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             title: const Text('Accent rule under header / above footer'),
             contentPadding: EdgeInsets.zero,
           ),
+          const SizedBox(height: 20),
+          _section('Branded styling'),
+          SwitchListTile(
+            value: _headingRule,
+            onChanged: (v) => setState(() => _headingRule = v),
+            title: const Text('Underline section headings'),
+            subtitle: const Text('Primary-colour rule beneath h2/h3 headings'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: _footerCentered,
+            onChanged: (v) => setState(() => _footerCentered = v),
+            title: const Text('Centred footer with page count'),
+            subtitle: const Text('“Footer — Title | Page N of M”, hairline above'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: _coverLogo,
+            onChanged: (v) => setState(() => _coverLogo = v),
+            title: const Text('Logo as cover (top of first page)'),
+            subtitle:
+                const Text('Logo once at the top; omitted from the running header'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: _useAccent,
+            onChanged: (v) => setState(() => _useAccent = v),
+            title: const Text('Separate link / accent colour'),
+            subtitle: const Text('Otherwise links use the primary colour'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          if (_useAccent) ...[
+            const SizedBox(height: 8),
+            _colorField('Link / accent colour', _accent,
+                (c) => setState(() => _accent = c)),
+          ],
           const SizedBox(height: 20),
           _section('Header & footer'),
           TextField(

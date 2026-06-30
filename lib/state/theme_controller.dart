@@ -13,6 +13,19 @@ class ThemeController extends ChangeNotifier {
   final SharedPreferences _prefs;
   ThemeMode _mode = ThemeMode.system;
 
+  /// All in-flight persistence writes (UI callbacks fire-and-forget), chained so
+  /// rapid repeated theme toggles are all drained before an immediate app close.
+  Future<void> _pending = Future.value();
+  Future<void> get pendingWrites => _pending;
+
+  /// Serialise persistence: [op] (which starts the write) is not invoked until
+  /// the previous write has completed, so rapid toggles persist in order.
+  Future<void> _track(Future<void> Function() op) {
+    final result = _pending.then((_) => op(), onError: (_) => op());
+    _pending = result.catchError((_) {});
+    return result;
+  }
+
   ThemeMode get mode => _mode;
 
   bool isDark(BuildContext context) {
@@ -38,7 +51,7 @@ class ThemeController extends ChangeNotifier {
     if (mode == _mode) return;
     _mode = mode;
     notifyListeners();
-    await _prefs.setString(_prefsKey, mode.name);
+    await _track(() => _prefs.setString(_prefsKey, mode.name));
   }
 
   /// Convenience toggle used by the toolbar icon button. Cycles

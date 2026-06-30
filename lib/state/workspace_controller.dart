@@ -20,6 +20,19 @@ class WorkspaceController extends ChangeNotifier {
   int _activeIndex = 0;
   bool _autoReload = true;
 
+  /// All in-flight persistence writes (UI callbacks don't await them), chained
+  /// so rapid repeated toggles are all drained before an immediate app close.
+  Future<void> _pending = Future.value();
+  Future<void> get pendingWrites => _pending;
+
+  /// Serialise persistence: [op] (which starts the write) is not invoked until
+  /// the previous write completes, so rapid toggles persist in order.
+  Future<void> _track(Future<void> Function() op) {
+    final result = _pending.then((_) => op(), onError: (_) => op());
+    _pending = result.catchError((_) {});
+    return result;
+  }
+
   List<DocumentController> get documents => List.unmodifiable(_docs);
   int get activeIndex => _activeIndex;
   DocumentController get active => _docs[_activeIndex];
@@ -126,10 +139,17 @@ class WorkspaceController extends ChangeNotifier {
     if (value == _autoReload) return;
     _autoReload = value;
     notifyListeners();
-    await _prefs.setBool(_autoReloadKey, value);
+    await _track(() => _prefs.setBool(_autoReloadKey, value));
     // Resolve any pending conflicts that no longer need the user.
     for (final d in _docs) {
       d.resolveIfSafe();
+    }
+  }
+
+  /// Stop all file watchers (used on app shutdown for a prompt exit).
+  void disposeWatchers() {
+    for (final d in _docs) {
+      d.stopWatching();
     }
   }
 

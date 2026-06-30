@@ -249,6 +249,9 @@ class DocumentController extends ChangeNotifier {
     _watchSub = null;
   }
 
+  /// Stop watching the file (used on app shutdown to release the watcher).
+  void stopWatching() => _stopWatching();
+
   Future<void> _onFileChanged(String path) async {
     if (path != _filePath) return;
     String disk;
