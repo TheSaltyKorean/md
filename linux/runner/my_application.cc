@@ -52,7 +52,31 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "markdown_studio");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // Portrait by default — these are documents, which read taller than wide —
+  // but never taller/wider than the monitor work area, so the bottom of the
+  // window can't start off-screen on shorter 1366x768 displays.
+  gint win_w = 900;
+  gint win_h = 1180;
+  GdkDisplay* display = gdk_display_get_default();
+  if (display != nullptr) {
+    GdkMonitor* monitor = gdk_display_get_primary_monitor(display);
+    if (monitor == nullptr) {
+      monitor = gdk_display_get_monitor(display, 0);
+    }
+    if (monitor != nullptr) {
+      GdkRectangle work_area;
+      gdk_monitor_get_workarea(monitor, &work_area);
+      // gtk_window_set_default_size sets the *client* size; the window manager
+      // / CSD header bar add decorations on top, so reserve room for them
+      // (and shadows) — otherwise the realized window can still be taller than
+      // the work area on short displays.
+      const gint kHDecor = 40;
+      const gint kVDecor = 96;
+      if (win_w > work_area.width - kHDecor) win_w = work_area.width - kHDecor;
+      if (win_h > work_area.height - kVDecor) win_h = work_area.height - kVDecor;
+    }
+  }
+  gtk_window_set_default_size(window, win_w, win_h);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

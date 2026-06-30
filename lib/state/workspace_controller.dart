@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Offset;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'document_controller.dart';
@@ -8,17 +9,27 @@ import 'document_controller.dart';
 class WorkspaceController extends ChangeNotifier {
   WorkspaceController(this._prefs) {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
+    final tx = _prefs.getDouble(_toolbarXKey);
+    final ty = _prefs.getDouble(_toolbarYKey);
+    if (tx != null && ty != null) _toolbarOffset = Offset(tx, ty);
     _docs.add(_newDoc());
     _activeIndex = 0;
   }
 
   static const _autoReloadKey = 'auto_reload';
+  static const _toolbarXKey = 'format_toolbar_x';
+  static const _toolbarYKey = 'format_toolbar_y';
 
   final SharedPreferences _prefs;
 
   final List<DocumentController> _docs = [];
   int _activeIndex = 0;
   bool _autoReload = true;
+
+  /// Persisted position of the floating format toolbar (null until first moved,
+  /// in which case it defaults to the top-left dock).
+  Offset? _toolbarOffset;
+  Offset? get toolbarOffset => _toolbarOffset;
 
   /// All in-flight persistence writes (UI callbacks don't await them), chained
   /// so rapid repeated toggles are all drained before an immediate app close.
@@ -134,6 +145,16 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   // --- Global settings --------------------------------------------------------
+
+  /// Persist the floating format toolbar's position. Fire-and-forget from the
+  /// drag handler; not notified (the toolbar tracks its own live position).
+  void setToolbarOffset(Offset offset) {
+    _toolbarOffset = offset;
+    _track(() => Future.wait([
+          _prefs.setDouble(_toolbarXKey, offset.dx),
+          _prefs.setDouble(_toolbarYKey, offset.dy),
+        ]));
+  }
 
   Future<void> setAutoReload(bool value) async {
     if (value == _autoReload) return;

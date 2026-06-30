@@ -34,9 +34,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Edit'), findsOneWidget);
-    expect(find.text('Split'), findsOneWidget);
-    expect(find.text('Preview'), findsOneWidget);
+    // The mode toggle is icon-only; each segment carries a tooltip naming it.
+    expect(find.byTooltip('Edit'), findsOneWidget);
+    expect(find.byTooltip('Split'), findsOneWidget);
+    expect(find.byTooltip('Raw'), findsOneWidget);
+    expect(find.byTooltip('Preview'), findsOneWidget);
   });
 
   test('Print profiles seed with built-ins', () async {

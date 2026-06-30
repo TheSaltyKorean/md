@@ -101,7 +101,8 @@ class DocumentController extends ChangeNotifier {
   }
 
   void _onSourceChanged() {
-    if (_mode == EditorMode.split && !_suppressDirty) _markDirty();
+    // Both source modes (split and raw) edit [sourceController] directly.
+    if (_mode.isSource && !_suppressDirty) _markDirty();
   }
 
   void _markDirty() {
