@@ -252,18 +252,6 @@ class _PrintDialogState extends State<PrintDialog> {
           icon: const Icon(Icons.close_rounded),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        actions: [
-          // Direct vector export — keeps selectable text, unlike printing to a
-          // virtual PDF printer (which rasterises the page on Windows).
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilledButton.tonalIcon(
-              icon: const Icon(Icons.picture_as_pdf_outlined),
-              label: const Text('Save as PDF'),
-              onPressed: () => _savePdf(selected),
-            ),
-          ),
-        ],
       ),
       body: Column(
         children: [
@@ -274,125 +262,137 @@ class _PrintDialogState extends State<PrintDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // A narrow profile dropdown on the left, with all the profile
-                  // actions grouped on the right. The dropdown shrinks first
-                  // (capped at 240px); the actions sit in a right-aligned
-                  // horizontal scroll view so they never overflow on very narrow
-                  // widths (they scroll instead).
+                  // Branding-profile dropdown fills the row; the action icons
+                  // are right-aligned in two groups — profile management, then a
+                  // divider, then document/output actions.
                   Row(
                     children: [
-                      Flexible(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 240),
-                          child: DropdownButtonFormField<String>(
-                            // Key by selection so the field rebuilds with a valid
-                            // value after a profile is created or deleted (avoids
-                            // a stale/duplicate-value assertion).
-                            key: ValueKey('profile-dd-$_selectedId'),
-                            initialValue: _selectedId,
-                            isExpanded: true,
-                            decoration: const InputDecoration(
-                              labelText: 'Branding profile',
-                              isDense: true,
-                            ),
-                            items: [
-                              for (final p in profiles)
-                                DropdownMenuItem(
-                                  value: p.id,
-                                  child: Text(
-                                    p.id == profilesService.defaultId
-                                        ? '${p.name}  (default)'
-                                        : p.name,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                            ],
-                            onChanged: (v) => setState(() {
-                              _selectedId = v ?? _selectedId;
-                              _previewEpoch++;
-                            }),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          // Key by selection so the field rebuilds with a valid
+                          // value after a profile is created or deleted (avoids a
+                          // stale/duplicate-value assertion).
+                          key: ValueKey('profile-dd-$_selectedId'),
+                          initialValue: _selectedId,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Branding profile',
+                            isDense: true,
                           ),
+                          items: [
+                            for (final p in profiles)
+                              DropdownMenuItem(
+                                value: p.id,
+                                child: Text(
+                                  p.id == profilesService.defaultId
+                                      ? '${p.name}  (default)'
+                                      : p.name,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                          ],
+                          onChanged: (v) => setState(() {
+                            _selectedId = v ?? _selectedId;
+                            _previewEpoch++;
+                          }),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Expanded(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          // Start scrolled to the end so the actions are
-                          // right-aligned, and scroll left to reach earlier ones
-                          // when the dialog is too narrow to show them all.
-                          reverse: true,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: 'Edit profile',
-                                icon: const Icon(Icons.edit_rounded),
-                                onPressed: () =>
-                                    _editProfile(selected, isNew: false),
-                              ),
-                              IconButton(
-                                tooltip: 'New profile',
-                                icon: const Icon(Icons.add_rounded),
-                                onPressed: () => _editProfile(
-                                  PrintProfile(
-                                      id: _newId(), name: 'New profile'),
-                                  isNew: true,
-                                ),
-                              ),
-                              IconButton(
-                                tooltip: 'Import… (.json)',
-                                icon: const Icon(Icons.upload_file_rounded),
-                                onPressed: _importProfile,
-                              ),
-                              IconButton(
-                                tooltip: 'Export… (.json)',
-                                icon: const Icon(Icons.download_rounded),
-                                onPressed: () => _exportProfile(selected),
-                              ),
-                              if (profiles.length > 1)
-                                IconButton(
-                                  tooltip: 'Delete profile',
-                                  icon: const Icon(Icons.delete_outline_rounded),
-                                  color: cs.error,
-                                  onPressed: () async {
-                                    await profilesService.delete(selected.id);
-                                    if (mounted) {
-                                      setState(() => _previewEpoch++);
-                                    }
-                                  },
-                                ),
-                            ],
-                          ),
+                      // --- Group 1: profile management ---
+                      IconButton(
+                        tooltip: 'Edit profile',
+                        icon: const Icon(Icons.edit_rounded),
+                        onPressed: () => _editProfile(selected, isNew: false),
+                      ),
+                      IconButton(
+                        tooltip: 'New profile',
+                        icon: const Icon(Icons.add_rounded),
+                        onPressed: () => _editProfile(
+                          PrintProfile(id: _newId(), name: 'New profile'),
+                          isNew: true,
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      if (_selectedId != profilesService.defaultId)
-                        ActionChip(
-                          avatar:
-                              const Icon(Icons.star_outline_rounded, size: 18),
-                          label: const Text('Set as default'),
-                          onPressed: () =>
-                              profilesService.setDefault(_selectedId),
+                      IconButton(
+                        tooltip: 'Import… (.json)',
+                        icon: const Icon(Icons.upload_file_rounded),
+                        onPressed: _importProfile,
+                      ),
+                      IconButton(
+                        tooltip: 'Export… (.json)',
+                        icon: const Icon(Icons.download_rounded),
+                        onPressed: () => _exportProfile(selected),
+                      ),
+                      if (profiles.length > 1)
+                        IconButton(
+                          tooltip: 'Delete profile',
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          color: cs.error,
+                          onPressed: () async {
+                            await profilesService.delete(selected.id);
+                            if (mounted) setState(() => _previewEpoch++);
+                          },
                         ),
-                      if (widget.docPath != null)
-                        _AssignChip(
-                          assigned:
-                              profilesService.assignedId(widget.docPath) ==
-                                  _selectedId,
-                          onToggle: (assign) =>
-                              profilesService.assignToDocument(
-                            widget.docPath!,
-                            assign ? _selectedId : null,
-                          ),
+                      // Divider between the two icon groups.
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: SizedBox(
+                          height: 24,
+                          child: VerticalDivider(
+                              width: 1, color: cs.outlineVariant),
                         ),
+                      ),
+                      // --- Group 2: document / output actions ---
+                      // Make this profile the global default.
+                      Builder(builder: (_) {
+                        final isDefault =
+                            _selectedId == profilesService.defaultId;
+                        return IconButton(
+                          tooltip: isDefault
+                              ? 'This is the default profile'
+                              : 'Set as default profile',
+                          icon: Icon(isDefault
+                              ? Icons.star_rounded
+                              : Icons.star_border_rounded),
+                          color: isDefault ? cs.primary : null,
+                          onPressed: isDefault
+                              ? null
+                              : () => profilesService.setDefault(_selectedId),
+                        );
+                      }),
+                      // Pin this profile to the current file ("use for this
+                      // document"): it is auto-selected next time you print it.
+                      Builder(builder: (_) {
+                        final hasPath = widget.docPath != null;
+                        final assigned = hasPath &&
+                            profilesService.assignedId(widget.docPath) ==
+                                _selectedId;
+                        return IconButton(
+                          tooltip: !hasPath
+                              ? 'Save the file first to always use this '
+                                  'profile for it'
+                              : (assigned
+                                  ? 'Always using this profile for this file '
+                                      '— tap to stop'
+                                  : 'Always use this profile for this file'),
+                          icon: Icon(assigned
+                              ? Icons.push_pin_rounded
+                              : Icons.push_pin_outlined),
+                          color: assigned ? cs.primary : null,
+                          onPressed: !hasPath
+                              ? null
+                              : () => profilesService.assignToDocument(
+                                    widget.docPath!,
+                                    assigned ? null : _selectedId,
+                                  ),
+                        );
+                      }),
+                      // Direct vector export — keeps selectable text, unlike
+                      // printing to a virtual PDF printer.
+                      IconButton(
+                        tooltip: 'Save as PDF (selectable text)',
+                        icon: const Icon(Icons.picture_as_pdf_outlined),
+                        onPressed: () => _savePdf(selected),
+                      ),
                     ],
                   ),
                 ],
@@ -430,8 +430,8 @@ class _PrintDialogState extends State<PrintDialog> {
                 ScaffoldMessenger.of(ctx).showSnackBar(
                   const SnackBar(
                     content: Text(
-                      'Printing failed. To make a PDF, use “Save as PDF” at the '
-                      'top — it exports directly with selectable text.',
+                      'Printing failed. To make a PDF, use the “Save as PDF” '
+                      'icon above — it exports directly with selectable text.',
                     ),
                   ),
                 );
@@ -440,28 +440,6 @@ class _PrintDialogState extends State<PrintDialog> {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _AssignChip extends StatelessWidget {
-  const _AssignChip({required this.assigned, required this.onToggle});
-
-  final bool assigned;
-  final ValueChanged<bool> onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return FilterChip(
-      avatar: Icon(
-        assigned ? Icons.link_rounded : Icons.link_off_rounded,
-        size: 18,
-      ),
-      label: const Text('Always use for this file'),
-      tooltip: 'Remember this branding profile for this file, so it is selected '
-          'automatically next time you print or export this document.',
-      selected: assigned,
-      onSelected: onToggle,
     );
   }
 }
