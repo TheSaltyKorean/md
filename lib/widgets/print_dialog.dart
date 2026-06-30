@@ -51,6 +51,8 @@ class PrintDialog extends StatefulWidget {
 
 class _PrintDialogState extends State<PrintDialog> {
   final _service = PrintService();
+  // Anchors the iPad share popover to the Share button.
+  final GlobalKey _shareButtonKey = GlobalKey();
   late String _selectedId;
   int _previewEpoch = 0;
 
@@ -187,13 +189,15 @@ class _PrintDialogState extends State<PrintDialog> {
   String? get _baseDir =>
       widget.docPath != null ? p.dirname(widget.docPath!) : null;
 
-  /// Open the OS print dialog for the rendered document. The print dialog picks
-  /// the paper format, so we (re)build at whatever format it asks for.
+  /// Open the OS print dialog for the rendered document. Start from the page
+  /// size/orientation the user is previewing (the print dialog can still change
+  /// it, in which case onLayout rebuilds at the chosen format).
   Future<void> _print(PrintProfile profile) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await Printing.layoutPdf(
         name: widget.title,
+        format: _previewFormat,
         onLayout: (format) => _service.generate(
           markdown: widget.markdown,
           profile: profile,
@@ -213,6 +217,12 @@ class _PrintDialogState extends State<PrintDialog> {
   Future<void> _share(PrintProfile profile) async {
     final messenger = ScaffoldMessenger.of(context);
     final safe = widget.title.replaceAll(RegExp(r'[^\w\-. ]'), '_');
+    // On iPad the share sheet is a popover anchored to these bounds; without
+    // them it falls back to a top-left rect. Anchor it to the Share button.
+    final box =
+        _shareButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    final bounds =
+        box != null ? box.localToGlobal(Offset.zero) & box.size : null;
     try {
       final bytes = await _service.generate(
         markdown: widget.markdown,
@@ -221,7 +231,8 @@ class _PrintDialogState extends State<PrintDialog> {
         format: _previewFormat,
         baseDir: _baseDir,
       );
-      await Printing.sharePdf(bytes: bytes, filename: '$safe.pdf');
+      await Printing.sharePdf(
+          bytes: bytes, filename: '$safe.pdf', bounds: bounds);
     } catch (e) {
       if (mounted) {
         messenger.showSnackBar(SnackBar(content: Text('Share failed: $e')));
@@ -320,6 +331,7 @@ class _PrintDialogState extends State<PrintDialog> {
         onPressed: () => _print(selected),
       ),
       IconButton(
+        key: _shareButtonKey,
         tooltip: 'Share PDF',
         icon: const Icon(Icons.ios_share_rounded),
         onPressed: () => _share(selected),
