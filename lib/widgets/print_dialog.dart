@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:printing/printing.dart';
@@ -150,28 +151,32 @@ class _PrintDialogState extends State<PrintDialog> {
     final json = const JsonEncoder.withIndent('  ').convert(profile.toJson());
     final safe = profile.name.replaceAll(RegExp(r'[^\w\-. ]'), '_');
     final bytes = Uint8List.fromList(utf8.encode(json));
-    // file_picker writes the bytes itself (desktop included for the pinned v10),
-    // so any failure — a denied or invalid destination — comes from saveFile.
-    // Wrap the whole call so those failures surface instead of being swallowed.
-    String? path;
+    final isDesktop =
+        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
     try {
-      path = await FilePicker.platform.saveFile(
+      // On desktop, saveFile only returns a chosen path (it does not reliably
+      // write the bytes — e.g. on Linux), so we write the file ourselves. On
+      // mobile/web, saveFile writes the passed bytes and File access to the
+      // returned URI may not work, so we rely on it there.
+      final path = await FilePicker.platform.saveFile(
         dialogTitle: 'Export print profile',
         fileName: '$safe.print-profile.json',
         type: FileType.custom,
         allowedExtensions: const ['json'],
-        bytes: bytes,
+        bytes: isDesktop ? null : bytes,
       );
+      if (path == null) return; // user cancelled
+      if (isDesktop) await File(path).writeAsString(json);
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-            SnackBar(content: Text('Export failed: $e')));
+        messenger.showSnackBar(SnackBar(content: Text('Export failed: $e')));
       }
       return;
     }
-    if (path == null || !mounted) return; // user cancelled
-    messenger.showSnackBar(
-        SnackBar(content: Text('Exported "${profile.name}"')));
+    if (mounted) {
+      messenger.showSnackBar(
+          SnackBar(content: Text('Exported "${profile.name}"')));
+    }
   }
 
   @override

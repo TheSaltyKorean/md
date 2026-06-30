@@ -22,9 +22,26 @@ class PrintProfileService extends ChangeNotifier {
   String _defaultId = PrintProfile.personal.id;
   Map<String, String> _docMap = {};
 
-  /// Most recent persistence write (UI callbacks don't await it).
+  /// All in-flight persistence operations (UI callbacks don't await them). Each
+  /// mutator chains onto this so several fire-and-forget changes followed by an
+  /// immediate app close can all be drained, not just the most recent one.
   Future<void> _pending = Future.value();
   Future<void> get pendingWrites => _pending;
+
+  /// Run [op] and fold it into [_pending] without dropping any prior in-flight
+  /// operation. Errors are isolated so one failure can't poison the drain.
+  Future<void> _track(Future<void> op) {
+    final prev = _pending;
+    _pending = Future(() async {
+      try {
+        await prev;
+      } catch (_) {}
+      try {
+        await op;
+      } catch (_) {}
+    });
+    return op;
+  }
 
   List<PrintProfile> get profiles => List.unmodifiable(_profiles);
   String get defaultId => _defaultId;
@@ -87,7 +104,7 @@ class PrintProfileService extends ChangeNotifier {
   // last write), so a fire-and-forget call followed by an immediate app close can
   // be drained fully — multi-write transactions like delete() persist completely.
 
-  Future<void> upsert(PrintProfile profile) => _pending = _upsert(profile);
+  Future<void> upsert(PrintProfile profile) => _track(_upsert(profile));
   Future<void> _upsert(PrintProfile profile) async {
     final idx = _profiles.indexWhere((p) => p.id == profile.id);
     if (idx >= 0) {
@@ -99,7 +116,7 @@ class PrintProfileService extends ChangeNotifier {
     await _persistProfiles();
   }
 
-  Future<void> delete(String id) => _pending = _delete(id);
+  Future<void> delete(String id) => _track(_delete(id));
   Future<void> _delete(String id) async {
     if (_profiles.length <= 1) return; // always keep at least one
     _profiles.removeWhere((p) => p.id == id);
@@ -113,7 +130,7 @@ class PrintProfileService extends ChangeNotifier {
     await _persistDocMap();
   }
 
-  Future<void> setDefault(String id) => _pending = _setDefault(id);
+  Future<void> setDefault(String id) => _track(_setDefault(id));
   Future<void> _setDefault(String id) async {
     _defaultId = id;
     notifyListeners();
@@ -122,7 +139,7 @@ class PrintProfileService extends ChangeNotifier {
 
   /// Associate a document with a profile (or clear it when [id] is null).
   Future<void> assignToDocument(String docPath, String? id) =>
-      _pending = _assignToDocument(docPath, id);
+      _track(_assignToDocument(docPath, id));
   Future<void> _assignToDocument(String docPath, String? id) async {
     if (id == null) {
       _docMap.remove(docPath);

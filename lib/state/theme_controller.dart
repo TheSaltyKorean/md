@@ -13,10 +13,23 @@ class ThemeController extends ChangeNotifier {
   final SharedPreferences _prefs;
   ThemeMode _mode = ThemeMode.system;
 
-  /// The most recent persistence write, so a caller (e.g. the close handler)
-  /// can wait for it to settle even though UI callbacks fire-and-forget.
+  /// All in-flight persistence writes (UI callbacks fire-and-forget), chained so
+  /// rapid repeated theme toggles are all drained before an immediate app close.
   Future<void> _pending = Future.value();
   Future<void> get pendingWrites => _pending;
+
+  Future<void> _track(Future<void> op) {
+    final prev = _pending;
+    _pending = Future(() async {
+      try {
+        await prev;
+      } catch (_) {}
+      try {
+        await op;
+      } catch (_) {}
+    });
+    return op;
+  }
 
   ThemeMode get mode => _mode;
 
@@ -43,7 +56,7 @@ class ThemeController extends ChangeNotifier {
     if (mode == _mode) return;
     _mode = mode;
     notifyListeners();
-    await (_pending = _prefs.setString(_prefsKey, mode.name));
+    await _track(_prefs.setString(_prefsKey, mode.name));
   }
 
   /// Convenience toggle used by the toolbar icon button. Cycles

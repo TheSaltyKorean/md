@@ -91,7 +91,9 @@ class PrintProfile {
   final bool footerCentered;
 
   /// Place the logo once at the top of the document (cover) rather than as a
-  /// running header repeated on every page.
+  /// running header repeated on every page. In this mode the running header also
+  /// omits the company name, since the cover logo already conveys the brand
+  /// (the title, classification label and accent rule are still kept).
   final bool coverLogo;
 
   /// ARGB colour for links / secondary accents. Null = use [primaryColor].
