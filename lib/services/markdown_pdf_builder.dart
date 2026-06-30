@@ -199,6 +199,8 @@ class MarkdownPdfBuilder {
             : pw.Align(
                 alignment: pw.Alignment.centerLeft,
                 child: pw.SizedBox(width: widthPt, child: line));
+      } else if (widthPct != null && widthPct <= 0) {
+        sized = pw.SizedBox(); // explicit 0% => collapsed rule
       } else {
         final pct = (widthPct ?? 60).clamp(1.0, 100.0);
         sized = pct >= 99
@@ -312,6 +314,14 @@ class MarkdownPdfBuilder {
     for (final e in decls) {
       switch (e.key) {
         case 'border-bottom':
+          // The shorthand resets all components to their initial values, then
+          // applies whatever tokens it carries (so a later shorthand that omits
+          // the width restores the medium default rather than keeping an earlier
+          // border-bottom-width).
+          width = null; // initial width = medium (resolved to 1pt below)
+          styleKw = 'none'; // initial style
+          color = null; // initial colour
+          transparent = false;
           final w = _firstBorderWidth(e.value);
           if (w != null) width = w;
           final s = RegExp(
@@ -364,7 +374,7 @@ class MarkdownPdfBuilder {
     if (h8 != null && h8.group(1) == '00') return true;
     final h4 = RegExp(r'#[0-9a-f]{3}([0-9a-f])\b').firstMatch(s); // #RGBA
     if (h4 != null && h4.group(1) == '0') return true;
-    if (RegExp(r'(rgba|hsla)\([^)]*,\s*0?\.?0+\s*\)').hasMatch(s)) return true;
+    if (RegExp(r'(rgba|hsla)\([^)]*,\s*0?\.?0+%?\s*\)').hasMatch(s)) return true;
     return false;
   }
 
