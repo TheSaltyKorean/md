@@ -152,12 +152,15 @@ class MarkdownPdfBuilder {
     // Inline markup inside a label (<b>…</b>) and HTML whitespace entities are
     // common in exported legal HTML; strip tags and normalise nbsp before
     // deciding whether the div is "empty".
-    final text = content
+    final stripped = content
         .replaceAll(RegExp(r'<[^>]*>'), '')
         .replaceAll(RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' ')
         .replaceAll(' ', ' ')
         .trim();
-    final bv = style['border-bottom'];
+    // Decode HTML entities so a label like "AT&amp;T" renders as "AT&T".
+    final text = _decodeEntities(stripped);
+    // Accept the border via the shorthand or the longhand border-bottom-*.
+    final bv = style['border-bottom'] ?? _composeLonghandBorder(style);
     final borderWidth = bv == null ? 0.0 : _borderWidthPt(bv);
     final marginTop = _lengthPt(style['margin-top']) ?? 0;
 
@@ -234,7 +237,12 @@ class MarkdownPdfBuilder {
   /// isn't read as a width), and falls back to a medium 1pt for a style/colour
   /// with no explicit width.
   double _borderWidthPt(String v) {
-    final s = v.replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ').trim();
+    // Strip colours first (hex and rgb()/rgba()/hsl()) so colour channels aren't
+    // read as the width.
+    final s = v
+        .replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ')
+        .replaceAll(RegExp(r'(rgba?|hsla?)\([^)]*\)', caseSensitive: false), ' ')
+        .trim();
     if (RegExp(r'\b(none|hidden)\b', caseSensitive: false).hasMatch(s)) return 0;
     // The first length token in the shorthand is the width (including a bare 0).
     final m = RegExp(r'(?:^|\s)(\d*\.?\d+)\s*(pt|px|em|rem)?\b').firstMatch(' $s');
@@ -258,6 +266,39 @@ class MarkdownPdfBuilder {
       return 1.0;
     }
     return 0;
+  }
+
+  /// Build a border value from the longhand `border-bottom-{width,style,color}`
+  /// properties when the shorthand isn't present. Null if none are set.
+  String? _composeLonghandBorder(Map<String, String> style) {
+    final parts = [
+      style['border-bottom-width'],
+      style['border-bottom-style'],
+      style['border-bottom-color'],
+    ].whereType<String>().toList();
+    return parts.isEmpty ? null : parts.join(' ');
+  }
+
+  /// Decode the common named + numeric HTML entities so exported-HTML labels
+  /// render their real text (e.g. "AT&amp;T" -> "AT&T").
+  String _decodeEntities(String s) {
+    if (!s.contains('&')) return s;
+    String charOf(int? code) =>
+        (code == null || code < 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
+            ? ''
+            : String.fromCharCode(code);
+    return s
+        .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'),
+            (m) => charOf(int.tryParse(m.group(1)!, radix: 16)))
+        .replaceAllMapped(
+            RegExp(r'&#(\d+);'), (m) => charOf(int.tryParse(m.group(1)!)))
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&'); // amp last so "&amp;lt;" -> "&lt;"
   }
 
   /// The bundled fonts have no distinct ballot-box glyphs, so checked (☑/☒) and
