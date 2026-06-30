@@ -28,9 +28,11 @@ head_sha="$(api "repos/$REPO/pulls/$PR" --jq '.head.sha')" || red "PR lookup fai
 head_date="$(api "repos/$REPO/commits/$head_sha" --jq '.commit.committer.date')" || red "head commit lookup failed."
 [ -n "$head_date" ] || red "could not read head commit date."
 
-# Latest "@codex review" request across all pages.
+# Latest "@codex review" request across all pages. Exclude the Codex bot itself:
+# its review comments contain "@codex review" boilerplate and must never be
+# mistaken for the human request that authorises the review.
 comments="$(api --paginate "repos/$REPO/issues/$PR/comments" \
-  --jq '.[] | select((.body|test("@codex";"i")) and (.body|test("review";"i"))) | "\(.created_at)\t\(.id)"')" \
+  --jq ".[] | select(.user.login != \"$BOT\") | select((.body|test(\"@codex\";\"i\")) and (.body|test(\"review\";\"i\"))) | \"\(.created_at)\t\(.id)\"")" \
   || red "comments lookup failed (fail-closed)."
 latest="$(printf '%s\n' "$comments" | grep -v '^$' | sort | tail -1)"
 [ -n "$latest" ] || red "no '@codex review' request comment found."
@@ -59,6 +61,37 @@ reacts="$(api --paginate "repos/$REPO/issues/comments/$req_id/reactions" \
   --jq ".[] | select(.user.login==\"$BOT\") | .content")" || red "reactions lookup failed (fail-closed)."
 thumbs="$(printf '%s\n' "$reacts" | grep -cx '+1' | tr -d ' ')"
 
+# Comment-based all-clear: Codex signals a clean review by posting a comment such
+# as "Codex Review: Didn't find any major issues" that names the reviewed commit
+# ("Reviewed commit: <sha>"). Only the Codex bot can author a comment as $BOT, so
+# this is trustworthy. To accept it we require ALL of:
+#   * the comment is NEWER than the latest request (a fresh response to it, not a
+#     stale clean comment carried over from an earlier cycle), AND
+#   * the SHA parsed from its "Reviewed commit:" line resolves (via the API) to
+#     EXACTLY the current head SHA. Codex abbreviates the SHA, so we expand it
+#     through the commits endpoint and compare the full 40-char result — a short
+#     prefix is never matched loosely, and an ambiguous abbreviation makes the
+#     API error (fail-closed) rather than match.
+# Combined with the "no findings after the request" check below, a re-requested
+# review can't go green on a stale clean comment.
+clean_lines="$(api --paginate "repos/$REPO/issues/$PR/comments" \
+  --jq ".[] | select(.user.login==\"$BOT\") | select(.body|test(\"find any major issues|no major issues\";\"i\")) | \"\(.created_at)\t\" + (.body|gsub(\"[\\n\\r]+\";\" \"))")" \
+  || red "clean-review comment lookup failed (fail-closed)."
+clean_on_head=0
+while IFS=$'\t' read -r cdate cbody; do
+  [ -n "$cdate" ] || continue
+  [[ "$cdate" > "$req_date" ]] || continue   # fresh: posted after the latest request
+  rsha="$(printf '%s' "$cbody" \
+    | sed -nE 's/.*[Rr]eviewed[[:space:]_]*commit[^0-9a-fA-F]*([0-9a-fA-F]{7,40}).*/\1/p' | head -1)"
+  [ -n "$rsha" ] || continue
+  # Expand the (abbreviated) reviewed SHA to its full commit and require an exact
+  # match with the head — defeats a crafted short-prefix collision.
+  rfull="$(api "repos/$REPO/commits/$rsha" --jq '.sha')" || continue
+  if [ "$rfull" = "$head_sha" ]; then clean_on_head=1; break; fi
+done <<EOF
+$clean_lines
+EOF
+
 latest_review_date="$(printf '%s\n' "$reviews" | grep -v '^$' | sort | tail -1 | cut -f1)"
 
 if api --paginate "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx 'codex-accepted'; then
@@ -80,7 +113,13 @@ if api --paginate "repos/$REPO/issues/$PR/labels" --jq '.[].name' | grep -qx 'co
 fi
 
 [ "${later_reviews:-0}" -eq 0 ] || red "Codex submitted a review with findings after the latest request."
-[ "${thumbs:-0}" -gt 0 ] || red "no literal Codex 👍 (+1) all-clear on the latest review request yet."
 
-echo "GREEN $head_sha: Codex all-clear (👍) on request $req_id; no later findings."
-exit 0
+if [ "${thumbs:-0}" -gt 0 ]; then
+  echo "GREEN $head_sha: Codex all-clear (👍 reaction) on request $req_id; no later findings."
+  exit 0
+fi
+if [ "${clean_on_head:-0}" -gt 0 ]; then
+  echo "GREEN $head_sha: Codex all-clear (fresh clean-review comment whose 'Reviewed commit' is the head); no later findings."
+  exit 0
+fi
+red "no Codex all-clear yet: neither a 👍 reaction nor a fresh clean-review comment whose 'Reviewed commit' matches the current head."

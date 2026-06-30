@@ -27,27 +27,35 @@ See `README.md` for full feature/build/store docs. High level:
    - Codex requires a **PR** to run (it cannot review a bare branch).
    - The loop: tag **`@codex`** in a PR comment → **poll the PR every ~5 minutes**
      → address/resolve its feedback (push fixes) → tag `@codex` again → repeat
-     **until Codex reacts 👍 (its no-suggestions signal)**.
-   - **"All-clear" means Codex literally returned 👍.** A Codex *review* (even a
-     `COMMENTED` one) with open findings is NOT an all-clear. Do not describe the
-     gate as "passed/satisfied/complete" unless `tool/codex-gate.sh <PR>` prints
+     **until Codex signals no issues** (see the all-clear definition below).
+   - **"All-clear" means Codex gave a clean review on the current head.** Codex
+     signals this in one of two ways: a literal 👍 (`+1`) reaction on the
+     `@codex review` request, **or** a clean-review *comment* (e.g. "Codex
+     Review: Didn't find any major issues") whose **"Reviewed commit:"** SHA is
+     the current head. A Codex *review* (even a `COMMENTED` one) with open
+     findings is NOT an all-clear. Do not describe the gate as
+     "passed/satisfied/complete" unless `tool/codex-gate.sh <PR>` prints
      `GREEN`. Report honestly — e.g. "merged with N accepted findings", never
      "all-clear", when findings remain.
    - **Primary enforcement (server-side):** `main` has branch protection
      requiring the **`codex-gate`** status check (`.github/workflows/codex-gate.yml`,
      which runs `tool/codex-gate.sh`) plus `analyze-test`, **enforced on admins**.
-     The merge button stays disabled until `codex-gate` is green. After Codex
-     posts its 👍, re-run the check (`gh run rerun <run-id>`) so it re-evaluates
-     and flips green; then merge. This binds *any* actor (agent or human) and is
-     the real guarantee.
+     The merge button stays disabled until `codex-gate` is green. After Codex's
+     all-clear (👍 reaction or a clean-review comment on the head), re-run the
+     check (`gh run rerun <run-id>`) so it re-evaluates and flips green; then
+     merge. This binds *any* actor (agent or human) and is the real guarantee.
    - **Defense-in-depth (local):** `.claude/settings.json` runs
      `tool/codex-gate-hook.sh`, which blocks raw `gh pr merge` / pushes to `main`
      and steers merges through **`bash tool/codex-merge.sh <PR>`**. This is a
      fast local speed bump only — a PreToolUse hook can't see subprocesses, so it
      is NOT a guarantee; the server-side check above is. Don't try to evade it.
-   - The gate's all-clear = a **literal 👍 (`+1`)** from the Codex bot on a
-     `@codex review` request that is **newer than the PR head commit**, with no
-     later findings (it paginates and ignores non-`+1` reactions).
+   - The gate's all-clear = a **`@codex review` request newer than the PR head
+     commit**, with no later findings, **and** either (a) a literal 👍 (`+1`)
+     reaction from the Codex bot on that request, or (b) a Codex-bot
+     clean-review comment ("…find any major issues…") that names the **current
+     head SHA** in its "Reviewed commit:" line. Path (b) binds to the exact head
+     SHA; only the Codex bot can author such a comment. Every `gh api` call is
+     fail-closed (any error ⇒ RED).
    - **Accepted findings:** if the user *explicitly* decides to merge with an
      open finding, that decision must be recorded on the PR, and only then may
      the **`codex-accepted`** label be added (which the gate honours). Never add
