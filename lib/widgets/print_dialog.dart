@@ -274,74 +274,99 @@ class _PrintDialogState extends State<PrintDialog> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  DropdownButtonFormField<String>(
-                    // Key by selection so the field rebuilds with a valid value
-                    // after a profile is created or deleted (avoids a
-                    // stale/duplicate-value assertion).
-                    key: ValueKey('profile-dd-$_selectedId'),
-                    initialValue: _selectedId,
-                    decoration: const InputDecoration(
-                      labelText: 'Branding profile',
-                      isDense: true,
-                    ),
-                    items: [
-                      for (final p in profiles)
-                        DropdownMenuItem(
-                          value: p.id,
-                          child: Text(
-                            p.id == profilesService.defaultId
-                                ? '${p.name}  (default)'
-                                : p.name,
+                  // A narrow profile dropdown on the left, with all the profile
+                  // actions grouped on the right. The dropdown shrinks first
+                  // (capped at 240px); the actions sit in a right-aligned
+                  // horizontal scroll view so they never overflow on very narrow
+                  // widths (they scroll instead).
+                  Row(
+                    children: [
+                      Flexible(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 240),
+                          child: DropdownButtonFormField<String>(
+                            // Key by selection so the field rebuilds with a valid
+                            // value after a profile is created or deleted (avoids
+                            // a stale/duplicate-value assertion).
+                            key: ValueKey('profile-dd-$_selectedId'),
+                            initialValue: _selectedId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Branding profile',
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final p in profiles)
+                                DropdownMenuItem(
+                                  value: p.id,
+                                  child: Text(
+                                    p.id == profilesService.defaultId
+                                        ? '${p.name}  (default)'
+                                        : p.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() {
+                              _selectedId = v ?? _selectedId;
+                              _previewEpoch++;
+                            }),
                           ),
                         ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          // Start scrolled to the end so the actions are
+                          // right-aligned, and scroll left to reach earlier ones
+                          // when the dialog is too narrow to show them all.
+                          reverse: true,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit profile',
+                                icon: const Icon(Icons.edit_rounded),
+                                onPressed: () =>
+                                    _editProfile(selected, isNew: false),
+                              ),
+                              IconButton(
+                                tooltip: 'New profile',
+                                icon: const Icon(Icons.add_rounded),
+                                onPressed: () => _editProfile(
+                                  PrintProfile(
+                                      id: _newId(), name: 'New profile'),
+                                  isNew: true,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Import… (.json)',
+                                icon: const Icon(Icons.upload_file_rounded),
+                                onPressed: _importProfile,
+                              ),
+                              IconButton(
+                                tooltip: 'Export… (.json)',
+                                icon: const Icon(Icons.download_rounded),
+                                onPressed: () => _exportProfile(selected),
+                              ),
+                              if (profiles.length > 1)
+                                IconButton(
+                                  tooltip: 'Delete profile',
+                                  icon: const Icon(Icons.delete_outline_rounded),
+                                  color: cs.error,
+                                  onPressed: () async {
+                                    await profilesService.delete(selected.id);
+                                    if (mounted) {
+                                      setState(() => _previewEpoch++);
+                                    }
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ],
-                    onChanged: (v) => setState(() {
-                      _selectedId = v ?? _selectedId;
-                      _previewEpoch++;
-                    }),
-                  ),
-                  const SizedBox(height: 4),
-                  // Action buttons on their own scrollable row so they never
-                  // overflow the dropdown on narrow (phone) widths.
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        IconButton(
-                          tooltip: 'Edit profile',
-                          icon: const Icon(Icons.edit_rounded),
-                          onPressed: () => _editProfile(selected, isNew: false),
-                        ),
-                        IconButton(
-                          tooltip: 'New profile',
-                          icon: const Icon(Icons.add_rounded),
-                          onPressed: () => _editProfile(
-                            PrintProfile(id: _newId(), name: 'New profile'),
-                            isNew: true,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Import… (.json)',
-                          icon: const Icon(Icons.upload_file_rounded),
-                          onPressed: _importProfile,
-                        ),
-                        IconButton(
-                          tooltip: 'Export… (.json)',
-                          icon: const Icon(Icons.download_rounded),
-                          onPressed: () => _exportProfile(selected),
-                        ),
-                        if (profiles.length > 1)
-                          IconButton(
-                            tooltip: 'Delete profile',
-                            icon: const Icon(Icons.delete_outline_rounded),
-                            color: cs.error,
-                            onPressed: () async {
-                              await profilesService.delete(selected.id);
-                              if (mounted) setState(() => _previewEpoch++);
-                            },
-                          ),
-                      ],
-                    ),
                   ),
                   const SizedBox(height: 4),
                   Wrap(
@@ -397,6 +422,20 @@ class _PrintDialogState extends State<PrintDialog> {
               allowSharing: true,
               pdfFileName: '${widget.title}.pdf',
               loadingWidget: const Center(child: CircularProgressIndicator()),
+              // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
+              // printers are flaky on repeat jobs (the spooler can refuse the
+              // second one until you switch printers and back). When a print
+              // fails, point the user at the reliable in-app export instead.
+              onPrintError: (ctx, error) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Printing failed. To make a PDF, use “Save as PDF” at the '
+                      'top — it exports directly with selectable text.',
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],
@@ -418,7 +457,9 @@ class _AssignChip extends StatelessWidget {
         assigned ? Icons.link_rounded : Icons.link_off_rounded,
         size: 18,
       ),
-      label: const Text('Use for this document'),
+      label: const Text('Always use for this file'),
+      tooltip: 'Remember this branding profile for this file, so it is selected '
+          'automatically next time you print or export this document.',
       selected: assigned,
       onSelected: onToggle,
     );
