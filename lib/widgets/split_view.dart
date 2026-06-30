@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../state/document_controller.dart';
 import 'preview_view.dart';
+import 'source_pane.dart';
 
 /// Raw Markdown source editor and a live rendered preview, laid out **side by
 /// side in landscape** and **stacked in portrait** (by screen orientation).
@@ -99,7 +100,7 @@ class _SplitViewState extends State<SplitView> {
     final theme = Theme.of(context);
     final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
 
-    final source = _SourcePane(
+    final source = SourcePane(
       controller: widget.controller,
       scrollController: _sourceScroll,
     );
@@ -122,39 +123,5 @@ class _SplitViewState extends State<SplitView> {
     ];
 
     return portrait ? Column(children: children) : Row(children: children);
-  }
-}
-
-class _SourcePane extends StatelessWidget {
-  const _SourcePane({required this.controller, required this.scrollController});
-
-  final DocumentController controller;
-  final ScrollController scrollController;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      color: theme.colorScheme.surfaceContainerLowest,
-      child: TextField(
-        controller: controller.sourceController,
-        scrollController: scrollController,
-        maxLines: null,
-        expands: true,
-        textAlignVertical: TextAlignVertical.top,
-        keyboardType: TextInputType.multiline,
-        style: const TextStyle(
-          fontFamily: 'monospace',
-          fontSize: 14,
-          height: 1.5,
-        ),
-        decoration: const InputDecoration(
-          filled: false,
-          border: InputBorder.none,
-          contentPadding: EdgeInsets.fromLTRB(20, 16, 20, 80),
-          hintText: '# Start writing Markdown…',
-        ),
-      ),
-    );
   }
 }

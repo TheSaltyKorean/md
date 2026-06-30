@@ -148,6 +148,13 @@ Future<void> _bringToFront() async {
       await windowManager.restore();
     }
     await windowManager.show();
+    // Windows blocks background apps from stealing focus, so a plain focus()
+    // call often just flashes the taskbar. Briefly forcing always-on-top pulls
+    // the window to the foreground; we drop it again right away so it behaves
+    // like a normal window afterwards.
+    await windowManager.setAlwaysOnTop(true);
+    await windowManager.show();
     await windowManager.focus();
+    await windowManager.setAlwaysOnTop(false);
   } catch (_) {/* best effort */}
 }

@@ -52,7 +52,8 @@ static void my_application_activate(GApplication* application) {
     gtk_window_set_title(window, "markdown_studio");
   }
 
-  gtk_window_set_default_size(window, 1280, 720);
+  // Portrait by default — these are documents, which read taller than wide.
+  gtk_window_set_default_size(window, 900, 1180);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(

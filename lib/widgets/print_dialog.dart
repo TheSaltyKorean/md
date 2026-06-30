@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
+import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 
@@ -179,6 +180,56 @@ class _PrintDialogState extends State<PrintDialog> {
     }
   }
 
+  /// Save the rendered document straight to a `.pdf` file. Unlike printing to a
+  /// virtual "PDF printer" — which on Windows rasterises each page into a bitmap
+  /// (no selectable text, large file, fuzzy) — this writes the vector PDF bytes
+  /// we generate, so headings and body text stay real, selectable text.
+  Future<void> _savePdf(PrintProfile profile) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final isDesktop =
+        !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+    final safe = widget.title.replaceAll(RegExp(r'[^\w\-. ]'), '_');
+    Uint8List bytes;
+    try {
+      bytes = await _service.generate(
+        markdown: widget.markdown,
+        profile: profile,
+        title: widget.title,
+        format: PdfPageFormat.a4,
+        baseDir: widget.docPath != null ? p.dirname(widget.docPath!) : null,
+      );
+    } catch (e) {
+      if (mounted) {
+        messenger
+            .showSnackBar(SnackBar(content: Text('Could not build PDF: $e')));
+      }
+      return;
+    }
+    try {
+      // On desktop saveFile only returns the chosen path (it doesn't reliably
+      // write the bytes), so we write them ourselves; on mobile/web we hand the
+      // bytes to saveFile.
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save as PDF',
+        fileName: '$safe.pdf',
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+        bytes: isDesktop ? null : bytes,
+      );
+      if (path == null) return; // cancelled
+      if (isDesktop) await File(path).writeAsBytes(bytes);
+    } catch (e) {
+      if (mounted) {
+        messenger.showSnackBar(SnackBar(content: Text('Save failed: $e')));
+      }
+      return;
+    }
+    if (mounted) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Saved PDF with selectable text')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final profilesService = context.watch<PrintProfileService>();
@@ -196,6 +247,18 @@ class _PrintDialogState extends State<PrintDialog> {
           icon: const Icon(Icons.close_rounded),
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          // Direct vector export — keeps selectable text, unlike printing to a
+          // virtual PDF printer (which rasterises the page on Windows).
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: FilledButton.tonalIcon(
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+              label: const Text('Save as PDF'),
+              onPressed: () => _savePdf(selected),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -236,49 +299,41 @@ class _PrintDialogState extends State<PrintDialog> {
                           }),
                         ),
                       ),
+                      // Direct action buttons (no overflow menu) so import /
+                      // export / new / delete are one tap away.
                       IconButton(
                         tooltip: 'Edit profile',
                         icon: const Icon(Icons.edit_rounded),
                         onPressed: () => _editProfile(selected, isNew: false),
                       ),
-                      // Less-common actions in an overflow menu so the row can't
-                      // overflow on narrow widths.
-                      PopupMenuButton<String>(
-                        tooltip: 'Profile actions',
-                        onSelected: (v) async {
-                          switch (v) {
-                            case 'new':
-                              await _editProfile(
-                                  PrintProfile(
-                                      id: _newId(), name: 'New profile'),
-                                  isNew: true);
-                              break;
-                            case 'import':
-                              await _importProfile();
-                              break;
-                            case 'export':
-                              await _exportProfile(selected);
-                              break;
-                            case 'delete':
-                              await profilesService.delete(selected.id);
-                              if (mounted) setState(() => _previewEpoch++);
-                              break;
-                          }
-                        },
-                        itemBuilder: (_) => [
-                          const PopupMenuItem(
-                              value: 'new', child: Text('New profile')),
-                          const PopupMenuItem(
-                              value: 'import', child: Text('Import… (.json)')),
-                          const PopupMenuItem(
-                              value: 'export', child: Text('Export… (.json)')),
-                          if (profiles.length > 1)
-                            PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete',
-                                    style: TextStyle(color: cs.error))),
-                        ],
+                      IconButton(
+                        tooltip: 'New profile',
+                        icon: const Icon(Icons.add_rounded),
+                        onPressed: () => _editProfile(
+                          PrintProfile(id: _newId(), name: 'New profile'),
+                          isNew: true,
+                        ),
                       ),
+                      IconButton(
+                        tooltip: 'Import… (.json)',
+                        icon: const Icon(Icons.upload_file_rounded),
+                        onPressed: _importProfile,
+                      ),
+                      IconButton(
+                        tooltip: 'Export… (.json)',
+                        icon: const Icon(Icons.download_rounded),
+                        onPressed: () => _exportProfile(selected),
+                      ),
+                      if (profiles.length > 1)
+                        IconButton(
+                          tooltip: 'Delete profile',
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          color: cs.error,
+                          onPressed: () async {
+                            await profilesService.delete(selected.id);
+                            if (mounted) setState(() => _previewEpoch++);
+                          },
+                        ),
                     ],
                   ),
                   const SizedBox(height: 4),

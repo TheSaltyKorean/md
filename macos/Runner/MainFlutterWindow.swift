@@ -4,9 +4,11 @@ import FlutterMacOS
 class MainFlutterWindow: NSWindow {
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
-    let windowFrame = self.frame
     self.contentViewController = flutterViewController
-    self.setFrame(windowFrame, display: true)
+    // Portrait by default — these are documents, which read taller than wide.
+    let portraitSize = NSSize(width: 900, height: 1180)
+    self.setContentSize(portraitSize)
+    self.center()
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

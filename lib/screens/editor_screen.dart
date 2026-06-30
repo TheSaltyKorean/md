@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/gestures.dart'
+    show PointerScrollEvent, PointerSignalEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:path/path.dart' as p;
@@ -20,6 +22,7 @@ import '../state/workspace_controller.dart';
 import '../widgets/format_toolbar.dart';
 import '../widgets/preview_view.dart';
 import '../widgets/print_dialog.dart';
+import '../widgets/raw_view.dart';
 import '../widgets/split_view.dart';
 import '../widgets/wysiwyg_view.dart';
 
@@ -250,26 +253,34 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
             onTabDragEnd: _onTabDragEnd,
           ),
           actions: _actions(context, ws, active, theme, isNarrow),
-          bottom: PreferredSize(
-            preferredSize: Size.fromHeight(isNarrow ? 96 : 48),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isNarrow) _ModeBar(doc: active),
-                FormatToolbar(controller: active),
-              ],
-            ),
-          ),
+          // On narrow (phone) layouts the mode selector gets its own bar; on
+          // wide layouts it lives in the actions row. The format toolbar is no
+          // longer docked here — it floats over the body (see below).
+          bottom: isNarrow
+              ? PreferredSize(
+                  preferredSize: const Size.fromHeight(48),
+                  child: _ModeBar(doc: active),
+                )
+              : null,
         ),
         body: DropTarget(
           onDragEntered: (_) => setState(() => _dragging = true),
           onDragExited: (_) => setState(() => _dragging = false),
           onDragDone: (detail) => _onFilesDropped(detail, ws),
-          child: Stack(
-            children: [
-              Positioned.fill(child: _body(active)),
-              if (_dragging) _dropHint(context),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              children: [
+                Positioned.fill(child: _body(active)),
+                // The floating, draggable format palette — hidden in Preview
+                // (nothing to edit there).
+                if (active.mode != EditorMode.preview)
+                  FloatingFormatToolbar(
+                    controller: active,
+                    area: constraints.biggest,
+                  ),
+                if (_dragging) _dropHint(context),
+              ],
+            ),
           ),
         ),
       ),
@@ -285,6 +296,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         return WysiwygView(key: key, controller: doc);
       case EditorMode.split:
         return SplitView(key: key, controller: doc);
+      case EditorMode.raw:
+        return RawSourceView(key: key, controller: doc);
       case EditorMode.preview:
         return PreviewView(key: key, markdown: doc.currentMarkdown());
     }
@@ -341,28 +354,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
 
     return [
-      // View-mode selector lives on the main menu bar (wide layouts).
+      // Compact icon-only view-mode toggle (wide layouts).
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6),
-        child: Center(
-          child: SegmentedButton<EditorMode>(
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            segments: [
-              for (final m in EditorMode.values)
-                ButtonSegment(
-                  value: m,
-                  icon: Icon(m.icon, size: 18),
-                  label: Text(m.label),
-                ),
-            ],
-            selected: {active.mode},
-            onSelectionChanged: (s) => active.setMode(s.first),
-          ),
-        ),
+        child: Center(child: _ModeToggle(doc: active)),
       ),
       IconButton(
         tooltip: 'Open',
@@ -625,6 +620,37 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
 enum _AssocChoice { associate, notNow, never }
 
+/// Compact, icon-only Edit/Split/Raw/Preview toggle. Tooltips name each mode.
+class _ModeToggle extends StatelessWidget {
+  const _ModeToggle({required this.doc});
+
+  final DocumentController doc;
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<EditorMode>(
+      showSelectedIcon: false,
+      style: const ButtonStyle(
+        visualDensity: VisualDensity.compact,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 8),
+        ),
+      ),
+      segments: [
+        for (final m in EditorMode.values)
+          ButtonSegment(
+            value: m,
+            icon: Icon(m.icon, size: 18),
+            tooltip: m.label,
+          ),
+      ],
+      selected: {doc.mode},
+      onSelectionChanged: (s) => doc.setMode(s.first),
+    );
+  }
+}
+
 /// View-mode selector shown on its own bar on narrow (phone) layouts.
 class _ModeBar extends StatelessWidget {
   const _ModeBar({required this.doc});
@@ -644,32 +670,16 @@ class _ModeBar extends StatelessWidget {
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: Center(
-          child: SegmentedButton<EditorMode>(
-            showSelectedIcon: false,
-            style: const ButtonStyle(
-              visualDensity: VisualDensity.compact,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            segments: [
-              for (final m in EditorMode.values)
-                ButtonSegment(
-                  value: m,
-                  icon: Icon(m.icon, size: 18),
-                  label: Text(m.label),
-                ),
-            ],
-            selected: {doc.mode},
-            onSelectionChanged: (s) => doc.setMode(s.first),
-          ),
-        ),
+        child: Center(child: _ModeToggle(doc: doc)),
       ),
     );
   }
 }
 
 /// Horizontal, scrollable strip of open-document tabs plus a "new tab" button.
-class _TabStrip extends StatelessWidget {
+/// The tabs scroll by mouse wheel/trackpad, and left/right chevrons appear when
+/// they overflow the available width.
+class _TabStrip extends StatefulWidget {
   const _TabStrip({
     required this.workspace,
     required this.onClose,
@@ -681,11 +691,75 @@ class _TabStrip extends StatelessWidget {
   final void Function(int index, DraggableDetails details) onTabDragEnd;
 
   @override
+  State<_TabStrip> createState() => _TabStripState();
+}
+
+class _TabStripState extends State<_TabStrip> {
+  final ScrollController _scroll = ScrollController();
+  bool _canLeft = false;
+  bool _canRight = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scroll.addListener(_updateArrows);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
+  }
+
+  @override
+  void didUpdateWidget(covariant _TabStrip oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Tabs may have been opened/closed — recompute overflow after layout.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
+  }
+
+  @override
+  void dispose() {
+    _scroll.removeListener(_updateArrows);
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  void _updateArrows() {
+    if (!mounted || !_scroll.hasClients) return;
+    final pos = _scroll.position;
+    final canLeft = pos.pixels > 0.5;
+    final canRight = pos.pixels < pos.maxScrollExtent - 0.5;
+    if (canLeft != _canLeft || canRight != _canRight) {
+      setState(() {
+        _canLeft = canLeft;
+        _canRight = canRight;
+      });
+    }
+  }
+
+  void _nudge(double delta) {
+    if (!_scroll.hasClients) return;
+    final target =
+        (_scroll.offset + delta).clamp(0.0, _scroll.position.maxScrollExtent);
+    _scroll.animateTo(target,
+        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+  }
+
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_scroll.hasClients) return;
+    // Translate vertical wheel into horizontal scroll (a horizontal ListView
+    // otherwise ignores the wheel on desktop).
+    final primary = event.scrollDelta.dy != 0
+        ? event.scrollDelta.dy
+        : event.scrollDelta.dx;
+    final target =
+        (_scroll.offset + primary).clamp(0.0, _scroll.position.maxScrollExtent);
+    _scroll.jumpTo(target);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final workspace = widget.workspace;
     final docs = workspace.documents;
     return Container(
-      height: 44,
+      height: 36,
       decoration: BoxDecoration(
         color: cs.surfaceContainerLow,
         border: Border(bottom: BorderSide(color: cs.outlineVariant)),
@@ -696,16 +770,29 @@ class _TabStrip extends StatelessWidget {
           // its right and scroll when they overflow.
           IconButton(
             tooltip: 'New tab',
+            iconSize: 18,
+            visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.add_rounded),
             onPressed: workspace.newDocument,
           ),
+          if (_canLeft)
+            IconButton(
+              tooltip: 'Scroll left',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_left_rounded),
+              onPressed: () => _nudge(-180),
+            ),
           Expanded(
-            child: ListView.builder(
-              scrollDirection: Axis.horizontal,
-              // One extra slot for an end drop target so a tab can be dropped
-              // after the last one.
-              itemCount: docs.length + 1,
-              itemBuilder: (context, i) {
+            child: Listener(
+              onPointerSignal: _onPointerSignal,
+              child: ListView.builder(
+                controller: _scroll,
+                scrollDirection: Axis.horizontal,
+                // One extra slot for an end drop target so a tab can be dropped
+                // after the last one.
+                itemCount: docs.length + 1,
+                itemBuilder: (context, i) {
                 if (i == docs.length) {
                   return DragTarget<int>(
                     onWillAcceptWithDetails: (d) => true,
@@ -731,7 +818,7 @@ class _TabStrip extends StatelessWidget {
                   doc: docs[i],
                   selected: i == workspace.activeIndex,
                   onTap: () => workspace.select(i),
-                  onClose: () => onClose(i),
+                  onClose: () => widget.onClose(i),
                 );
                 return DragTarget<int>(
                   onWillAcceptWithDetails: (d) => d.data != i,
@@ -762,15 +849,25 @@ class _TabStrip extends StatelessWidget {
                           ),
                         ),
                         childWhenDragging: Opacity(opacity: 0.3, child: tab),
-                        onDragEnd: (details) => onTabDragEnd(i, details),
+                        onDragEnd: (details) =>
+                            widget.onTabDragEnd(i, details),
                         child: tab,
                       ),
                     );
                   },
                 );
-              },
+                },
+              ),
             ),
           ),
+          if (_canRight)
+            IconButton(
+              tooltip: 'Scroll right',
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_right_rounded),
+              onPressed: () => _nudge(180),
+            ),
         ],
       ),
     );
@@ -803,8 +900,8 @@ class _Tab extends StatelessWidget {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 220),
-          padding: const EdgeInsets.only(left: 14, right: 6),
+          constraints: const BoxConstraints(maxWidth: 200),
+          padding: const EdgeInsets.only(left: 12, right: 4),
           decoration: BoxDecoration(
             color: selected ? cs.surface : Colors.transparent,
             border: Border(
@@ -819,14 +916,15 @@ class _Tab extends StatelessWidget {
             children: [
               if (doc.isDirty)
                 Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Icon(Icons.circle, size: 8, color: cs.primary),
+                  padding: const EdgeInsets.only(right: 5),
+                  child: Icon(Icons.circle, size: 7, color: cs.primary),
                 ),
               Flexible(
                 child: Text(
                   doc.title,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
+                    fontSize: 13,
                     fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
                     color: selected ? cs.onSurface : cs.onSurfaceVariant,
                   ),
@@ -834,8 +932,11 @@ class _Tab extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Close',
-                iconSize: 16,
+                iconSize: 14,
                 visualDensity: VisualDensity.compact,
+                constraints:
+                    const BoxConstraints(minWidth: 28, minHeight: 28),
+                padding: EdgeInsets.zero,
                 icon: const Icon(Icons.close_rounded),
                 onPressed: onClose,
               ),
