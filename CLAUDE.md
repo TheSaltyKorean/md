@@ -21,47 +21,44 @@ See `README.md` for full feature/build/store docs. High level:
 
 ## Standing rules (from the user — always follow)
 
-1. **Codex review loop before every merge — enforced by a hook.** A PR must pass
-   a Codex review loop *before* it is merged. Never merge until Codex has given a
-   literal all-clear.
-   - Codex requires a **PR** to run (it cannot review a bare branch).
-   - The loop: tag **`@codex`** in a PR comment → **poll the PR every ~5 minutes**
-     → address/resolve its feedback (push fixes) → tag `@codex` again → repeat
-     **until Codex signals no issues** (see the all-clear definition below).
+1. **Codex review loop before every merge — mandatory, never skip.** A PR must
+   pass a Codex review loop *before* it is merged. Never merge until Codex has
+   given a literal all-clear (or the user has explicitly accepted open findings —
+   see below). This is now enforced by **discipline, not machinery**: the
+   `codex-gate` CI check and the local PreToolUse hook have been removed at the
+   user's request. The rule still stands — do not treat the absence of a gate as
+   permission to skip the loop.
+   - Codex requires a **PR** to run (it cannot review a bare branch). So: branch,
+     commit, open a PR.
+   - **The loop:** tag **`@codex review`** in a PR comment → **poll the PR every
+     ~5 minutes** → address/resolve its feedback (push fixes) → tag
+     `@codex review` again on the new head → repeat **until Codex signals no
+     issues** (see the all-clear definition below).
    - **"All-clear" means Codex gave a clean review on the current head.** Codex
      signals this in one of two ways: a literal 👍 (`+1`) reaction on the
      `@codex review` request, **or** a clean-review *comment* (e.g. "Codex
      Review: Didn't find any major issues") whose **"Reviewed commit:"** SHA is
      the current head. A Codex *review* (even a `COMMENTED` one) with open
-     findings is NOT an all-clear. Do not describe the gate as
-     "passed/satisfied/complete" unless `tool/codex-gate.sh <PR>` prints
-     `GREEN`. Report honestly — e.g. "merged with N accepted findings", never
-     "all-clear", when findings remain.
-   - **Primary enforcement (server-side):** `main` has branch protection
-     requiring the **`codex-gate`** status check (`.github/workflows/codex-gate.yml`,
-     which runs `tool/codex-gate.sh`) plus `analyze-test`, **enforced on admins**.
-     The merge button stays disabled until `codex-gate` is green. After Codex's
-     all-clear (👍 reaction or a clean-review comment on the head), re-run the
-     check (`gh run rerun <run-id>`) so it re-evaluates and flips green; then
-     merge. This binds *any* actor (agent or human) and is the real guarantee.
-   - **Defense-in-depth (local):** `.claude/settings.json` runs
-     `tool/codex-gate-hook.sh`, which blocks raw `gh pr merge` / pushes to `main`
-     and steers merges through **`bash tool/codex-merge.sh <PR>`**. This is a
-     fast local speed bump only — a PreToolUse hook can't see subprocesses, so it
-     is NOT a guarantee; the server-side check above is. Don't try to evade it.
-   - The gate's all-clear = a **`@codex review` request newer than the PR head
-     commit**, with no later findings, **and** either (a) a literal 👍 (`+1`)
-     reaction from the Codex bot on that request, or (b) a Codex-bot
-     clean-review comment ("…find any major issues…") that names the **current
-     head SHA** in its "Reviewed commit:" line. Path (b) binds to the exact head
-     SHA; only the Codex bot can author such a comment. Every `gh api` call is
-     fail-closed (any error ⇒ RED).
+     findings is NOT an all-clear. `tool/codex-gate.sh <PR>` is kept as a
+     **convenience checker** — it prints `GREEN` only on a genuine all-clear
+     bound to the head; use it to confirm before merging. Report honestly — e.g.
+     "merged with N accepted findings", never "all-clear", when findings remain.
+   - The all-clear = a **`@codex review` request newer than the PR head commit**,
+     with no later findings, **and** either (a) a literal 👍 (`+1`) reaction from
+     the Codex bot on that request, or (b) a Codex-bot clean-review comment
+     ("…find any major issues…") that names the **current head SHA** in its
+     "Reviewed commit:" line. Path (b) binds to the exact head SHA; only the
+     Codex bot can author such a comment.
+   - **Merging:** once all-clear, merge with `gh pr merge <PR> --merge` (or
+     `bash tool/codex-merge.sh <PR>`, which re-checks the all-clear first).
+     Branch protection still requires the **`Analyze & test`** check and a PR
+     (no direct pushes to `main`), so let CI pass before merging.
    - **Accepted findings:** if the user *explicitly* decides to merge with an
-     open finding, that decision must be recorded on the PR, and only then may
-     the **`codex-accepted`** label be added (which the gate honours). Never add
-     that label without explicit user approval, and never re-review only part of
-     a change — re-run Codex on the **final** head before merge so nothing slips
-     through unreviewed (this exact gap shipped a P1 once; don't repeat it).
+     open finding, record that decision on the PR, then merge — and say so
+     honestly ("merged with N accepted findings"). Never accept findings without
+     explicit user approval, and never re-review only part of a change — re-run
+     Codex on the **final** head before merge so nothing slips through
+     unreviewed (this exact gap shipped a P1 once; don't repeat it).
 2. **Tooling lives under `C:\git`, not the `C:\` root.** e.g. the Flutter SDK is
    at `C:\git\flutter-sdk` (not `C:\flutter-sdk`). Keep build tooling out of the
    drive root.
