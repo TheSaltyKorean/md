@@ -228,25 +228,31 @@ class MarkdownPdfBuilder {
     return m == null ? null : double.tryParse(m.group(1)!);
   }
 
-  /// Width (in pt) of a `border-bottom` shorthand. Returns 0 for `none` / `0`.
-  /// Strips the colour first (so "solid #111344" doesn't read the hex as a
-  /// width) and falls back to a medium 1pt when only a style/colour is given.
+  /// Width (in pt) of a `border-bottom` shorthand, or 0 when the border is
+  /// disabled. Handles `none`/`hidden`, an explicit zero width even alongside a
+  /// style keyword (e.g. `0 solid #000`), strips the colour first (so the hex
+  /// isn't read as a width), and falls back to a medium 1pt for a style/colour
+  /// with no explicit width.
   double _borderWidthPt(String v) {
-    final s = v.replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ');
-    if (RegExp(r'\bnone\b', caseSensitive: false).hasMatch(s)) return 0;
-    final m = RegExp(r'(\d*\.?\d+)\s*(pt|px)\b').firstMatch(s);
+    final s = v.replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ').trim();
+    if (RegExp(r'\b(none|hidden)\b', caseSensitive: false).hasMatch(s)) return 0;
+    // The first length token in the shorthand is the width (including a bare 0).
+    final m = RegExp(r'(?:^|\s)(\d*\.?\d+)\s*(pt|px|em|rem)?\b').firstMatch(' $s');
     if (m != null) {
       final n = double.tryParse(m.group(1)!) ?? 0;
-      return m.group(2) == 'px' ? n * 0.75 : n;
+      switch (m.group(2)) {
+        case 'px':
+          return n * 0.75;
+        case 'em':
+        case 'rem':
+          return n * 12;
+        default:
+          return n; // pt or unitless
+      }
     }
-    // A bare zero ("border-bottom: 0") is borderless; a style/colour keyword
-    // without an explicit width draws a medium (~1pt) rule.
-    if (RegExp(r'\b0(\.0+)?\b').hasMatch(s) &&
-        !RegExp(r'(solid|dashed|dotted|double)', caseSensitive: false)
-            .hasMatch(s)) {
-      return 0;
-    }
-    if (RegExp(r'(solid|dashed|dotted|double)', caseSensitive: false)
+    // A style/colour keyword without an explicit width draws a medium (~1pt) rule.
+    if (RegExp(r'\b(solid|dashed|dotted|double|groove|ridge|inset|outset)\b',
+                caseSensitive: false)
             .hasMatch(v) ||
         RegExp(r'#[0-9a-fA-F]{3,8}').hasMatch(v)) {
       return 1.0;
