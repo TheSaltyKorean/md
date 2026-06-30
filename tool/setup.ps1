@@ -14,7 +14,7 @@ flutter --version
 # lib/ or pubspec.yaml. Change --org to your reverse-domain identifier; it
 # becomes the base of your app/bundle ID for the stores.
 Write-Host "==> Generating native platform projects..." -ForegroundColor Cyan
-flutter create --org com.skmeridian --project-name markdown_studio `
+flutter create --org com.markdownstudio --project-name markdown_studio `
   --platforms=android,ios,linux,windows .
 
 Write-Host "==> Fetching packages..." -ForegroundColor Cyan

@@ -104,7 +104,7 @@ flutter doctor
 ### 2. Native platform projects
 
 The `android/`, `ios/`, `linux/`, `windows/`, and `macos/` folders are **already
-included** in this repo (org `com.skmeridian`). Just fetch packages:
+included** in this repo (org `com.markdownstudio`). Just fetch packages:
 
 ```bash
 flutter pub get
@@ -114,7 +114,7 @@ If you ever need to regenerate them or add a platform, use the helper scripts
 (`./tool/setup.sh` or `pwsh ./tool/setup.ps1`), or run directly:
 
 ```bash
-flutter create --org com.skmeridian --project-name markdown_studio \
+flutter create --org com.markdownstudio --project-name markdown_studio \
   --platforms=android,ios,linux,windows,macos .
 ```
 

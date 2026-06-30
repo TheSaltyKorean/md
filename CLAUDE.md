@@ -94,7 +94,7 @@ and the fix is only in v11. **Tracked in issue #2.**
 - SDK location: `C:\git\flutter-sdk`. Run via FVM, or put that `bin/` on `PATH`.
 - `intl` is overridden to `0.20.2` in `pubspec.yaml` to reconcile AppFlowy
   (`intl ^0.19`) with `flutter_localizations` (`intl 0.20.2`).
-- App / bundle id org: **`com.skmeridian`** (→ `com.skmeridian.markdown_studio`).
+- App / bundle id org: **`com.markdownstudio`** (→ `com.markdownstudio.markdown_studio`).
 
 ## Standard commands
 
@@ -108,7 +108,7 @@ fvm flutter run -d windows     # or linux / macos / a device
 Generate native platform folders (not committed by default — see README):
 
 ```bash
-fvm flutter create --org com.skmeridian --project-name markdown_studio \
+fvm flutter create --org com.markdownstudio --project-name markdown_studio \
   --platforms=android,ios,linux,windows,macos .
 ```
 

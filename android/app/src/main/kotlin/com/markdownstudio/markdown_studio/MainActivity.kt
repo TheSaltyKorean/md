@@ -1,4 +1,4 @@
-package com.skmeridian.markdown_studio
+package com.markdownstudio.markdown_studio
 
 import android.content.Intent
 import android.net.Uri
