@@ -378,9 +378,11 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     // Also drop a paragraph after the table and land the caret there, so the
     // user can keep typing — AppFlowy clears the selection to afterSelection
     // when applying a transaction, so leaving it unset strands the cursor.
+    // Same-path inserts keep their queued order, so insert the table first and
+    // the trailing paragraph second (paragraph ends up at insertedPath.next).
     final transaction = es.transaction
-      ..insertNode(insertedPath, paragraphNode())
       ..insertNode(insertedPath, table)
+      ..insertNode(insertedPath, paragraphNode())
       ..afterSelection = Selection.collapsed(Position(path: insertedPath.next));
     es.apply(transaction);
   }
