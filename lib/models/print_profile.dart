@@ -200,8 +200,9 @@ class PrintProfile {
         confidentialLabel: json['confidentialLabel'] as String?,
         // Clamp to the editor's slider range so an imported value stays
         // representable/adjustable in the profile editor.
-        marginCm:
-            ((json['marginCm'] as num?)?.toDouble() ?? 2.0).clamp(1.0, 3.5),
+        marginCm: ((json['marginCm'] as num?)?.toDouble() ?? 2.0)
+            .clamp(1.0, 3.5)
+            .toDouble(),
         accentRule: json['accentRule'] as bool? ?? true,
         headingRule: json['headingRule'] as bool? ?? false,
         footerCentered: json['footerCentered'] as bool? ?? false,

@@ -232,6 +232,7 @@ class PrintService {
         bits.add(profile.footerText!);
       }
       if (title.isNotEmpty) bits.add(title);
+      if (profile.showDate) bits.add(_today());
       var line = bits.join('  —  ');
       if (profile.showPageNumbers) {
         line = line.isEmpty

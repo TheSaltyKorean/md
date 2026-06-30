@@ -106,7 +106,7 @@ class MarkdownPdfBuilder {
       }
       final openAbs = i + open.start;
       addText(raw.substring(i, openAbs));
-      final closeStart = _matchDiv(raw, openAbs);
+      final (closeStart, closeEnd) = _matchDiv(raw, openAbs);
       if (closeStart < 0) {
         addText(raw.substring(openAbs).replaceAll(RegExp(r'</?div[^>]*>'), ''));
         break;
@@ -115,23 +115,25 @@ class MarkdownPdfBuilder {
       final w =
           _htmlDiv(open.group(1) ?? '', raw.substring(contentStart, closeStart));
       if (w != null) out.add(w);
-      i = closeStart + '</div>'.length;
+      i = closeEnd;
     }
     return out;
   }
 
-  /// Index of the `</div>` that closes the `<div>` opening at [openAbs], or -1.
-  int _matchDiv(String s, int openAbs) {
+  /// (start, end) of the `</div>` that closes the `<div>` opening at [openAbs],
+  /// or (-1, -1). The end is the real tag end so a spaced `</div >` advances
+  /// correctly.
+  (int, int) _matchDiv(String s, int openAbs) {
     var depth = 0;
     for (final m in _divTag.allMatches(s, openAbs)) {
       if (m.group(1) == '/') {
         depth--;
-        if (depth == 0) return m.start;
+        if (depth == 0) return (m.start, m.end);
       } else {
         depth++;
       }
     }
-    return -1;
+    return (-1, -1);
   }
 
   /// Render a single `<div style="…">content</div>`. A wrapper div (whose content
@@ -156,25 +158,29 @@ class MarkdownPdfBuilder {
         .replaceAll(' ', ' ')
         .trim();
     final bv = style['border-bottom'];
-    // A border only counts if it has a positive width (border-bottom:0 / :none
-    // is an explicit spacer, not a line).
-    final hasVisibleBorder = bv != null && (_lengthPt(bv) ?? 0) > 0;
+    final borderWidth = bv == null ? 0.0 : _borderWidthPt(bv);
     final marginTop = _lengthPt(style['margin-top']) ?? 0;
 
     if (text.isEmpty) {
-      if (!hasVisibleBorder) return null;
-      final width = _percent(style['width']) ?? 60;
+      // A border only counts if it has a positive width (border-bottom:0 / :none
+      // is an explicit spacer, not a line).
+      if (borderWidth <= 0) return null;
+      final width = (_percent(style['width']) ?? 60).clamp(1.0, 100.0);
       final height = _lengthPt(style['height']) ?? 36;
-      final border = _border(bv);
-      final line = pw.Container(height: border.$1, color: border.$2);
+      final color = _cssColor(RegExp(r'#[0-9a-fA-F]{3,8}').firstMatch(bv!)?.group(0)) ?? _text;
+      final line = pw.Container(
+          height: borderWidth < 0.4 ? 0.4 : borderWidth, color: color);
       return pw.Padding(
         padding: pw.EdgeInsets.only(top: marginTop + height, bottom: 2),
-        child: width >= 100
+        // Use a Row of weighted flexes for partial widths; full width avoids a
+        // zero-flex spacer (which the layout engine rejects).
+        child: width >= 99
             ? line
             : pw.Row(children: [
                 pw.Expanded(flex: width.round(), child: line),
                 pw.Expanded(
-                    flex: (100 - width).round(), child: pw.SizedBox()),
+                    flex: (100 - width).round().clamp(1, 100),
+                    child: pw.SizedBox()),
               ]),
       );
     }
@@ -222,11 +228,30 @@ class MarkdownPdfBuilder {
     return m == null ? null : double.tryParse(m.group(1)!);
   }
 
-  /// Parse "1.5pt solid #111344" → (thickness, colour).
-  (double, PdfColor) _border(String v) {
-    final t = _lengthPt(v) ?? 1.0;
-    final c = _cssColor(RegExp(r'#[0-9a-fA-F]{3,6}').firstMatch(v)?.group(0));
-    return (t < 0.4 ? 0.4 : t, c ?? _text);
+  /// Width (in pt) of a `border-bottom` shorthand. Returns 0 for `none` / `0`.
+  /// Strips the colour first (so "solid #111344" doesn't read the hex as a
+  /// width) and falls back to a medium 1pt when only a style/colour is given.
+  double _borderWidthPt(String v) {
+    final s = v.replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ');
+    if (RegExp(r'\bnone\b', caseSensitive: false).hasMatch(s)) return 0;
+    final m = RegExp(r'(\d*\.?\d+)\s*(pt|px)\b').firstMatch(s);
+    if (m != null) {
+      final n = double.tryParse(m.group(1)!) ?? 0;
+      return m.group(2) == 'px' ? n * 0.75 : n;
+    }
+    // A bare zero ("border-bottom: 0") is borderless; a style/colour keyword
+    // without an explicit width draws a medium (~1pt) rule.
+    if (RegExp(r'\b0(\.0+)?\b').hasMatch(s) &&
+        !RegExp(r'(solid|dashed|dotted|double)', caseSensitive: false)
+            .hasMatch(s)) {
+      return 0;
+    }
+    if (RegExp(r'(solid|dashed|dotted|double)', caseSensitive: false)
+            .hasMatch(v) ||
+        RegExp(r'#[0-9a-fA-F]{3,8}').hasMatch(v)) {
+      return 1.0;
+    }
+    return 0;
   }
 
   /// The bundled fonts have no distinct ballot-box glyphs, so checked (☑/☒) and
