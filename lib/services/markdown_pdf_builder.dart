@@ -153,50 +153,58 @@ class MarkdownPdfBuilder {
     // common in exported legal HTML; strip tags and normalise nbsp before
     // deciding whether the div is "empty".
     final stripped = content
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]*>'), '')
         .replaceAll(RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' ')
         .replaceAll(' ', ' ')
         .trim();
     // Decode HTML entities so a label like "AT&amp;T" renders as "AT&T".
     final text = _decodeEntities(stripped);
-    // Accept the border via the shorthand or the longhand border-bottom-*.
-    final bv = style['border-bottom'] ?? _composeLonghandBorder(style);
-    final borderWidth = bv == null ? 0.0 : _borderWidthPt(bv);
-    final marginTop = _lengthPt(style['margin-top']) ?? 0;
+    // Resolve the effective bottom border (shorthand merged with longhand
+    // overrides; null when invisible). Margins honour the shorthand + bottom.
+    final border = _resolveBorder(style);
+    final gapTop = _marginPt(style, 'top');
+    final gapBottom = _marginPt(style, 'bottom');
 
     if (text.isEmpty) {
-      // A border only counts if it has a positive width (border-bottom:0 / :none
-      // is an explicit spacer, not a line). When the border is invisible but the
-      // div still reserves vertical space, render a spacer so signature gaps
-      // aren't collapsed.
-      if (borderWidth <= 0) {
-        final gap = (_lengthPt(style['height']) ?? 0) + marginTop;
+      // Invisible border (none/hidden/0-width/transparent): if the div still
+      // reserves space, render a spacer so signature gaps aren't collapsed.
+      if (border == null) {
+        final gap = (_lengthPt(style['height']) ?? 0) + gapTop + gapBottom;
         return gap > 0 ? pw.SizedBox(height: gap) : null;
       }
-      final width = (_percent(style['width']) ?? 60).clamp(1.0, 100.0);
+      final thickness = border.$1 < 0.4 ? 0.4 : border.$1;
       final height = _lengthPt(style['height']) ?? 36;
-      final color = _cssColor(bv!) ?? _text;
-      final line = pw.Container(
-          height: borderWidth < 0.4 ? 0.4 : borderWidth, color: color);
-      return pw.Padding(
-        padding: pw.EdgeInsets.only(top: marginTop + height, bottom: 2),
-        // Use a Row of weighted flexes for partial widths; full width avoids a
-        // zero-flex spacer (which the layout engine rejects).
-        child: width >= 99
+      final line = pw.Container(height: thickness, color: border.$2);
+      // Width may be a percentage (weighted flex) or a fixed length.
+      final widthPt = _lengthPt(style['width']);
+      final widthPct = _percent(style['width']);
+      final pw.Widget sized;
+      if (widthPt != null && widthPt > 0) {
+        sized = pw.Align(
+            alignment: pw.Alignment.centerLeft,
+            child: pw.SizedBox(width: widthPt, child: line));
+      } else {
+        final pct = (widthPct ?? 60).clamp(1.0, 100.0);
+        sized = pct >= 99
             ? line
             : pw.Row(children: [
-                pw.Expanded(flex: width.round(), child: line),
+                pw.Expanded(flex: pct.round(), child: line),
                 pw.Expanded(
-                    flex: (100 - width).round().clamp(1, 100),
+                    flex: (100 - pct).round().clamp(1, 100),
                     child: pw.SizedBox()),
-              ]),
+              ]);
+      }
+      return pw.Padding(
+        padding: pw.EdgeInsets.only(top: gapTop + height, bottom: gapBottom + 2),
+        child: sized,
       );
     }
 
     final size = _lengthPt(style['font-size']) ?? 10;
     final color = _cssColor(style['color']) ?? _text;
     return pw.Padding(
-      padding: pw.EdgeInsets.only(top: marginTop, bottom: 4),
+      padding: pw.EdgeInsets.only(top: gapTop, bottom: gapBottom + 4),
       child: pw.Text(text,
           style: pw.TextStyle(fontSize: size, color: color, font: fonts.base)),
     );
@@ -220,14 +228,38 @@ class MarkdownPdfBuilder {
     return out;
   }
 
-  /// Parse a CSS length like "52pt" / "12px" into points (px ≈ 0.75pt).
+  /// Parse a CSS absolute length into points. Supports pt/px/in/cm/mm/pc/q and
+  /// em/rem (~12pt). Returns null for unknown or relative units (e.g. %, vh) so
+  /// callers don't mistake them for points.
   double? _lengthPt(String? v) {
     if (v == null) return null;
-    final m = RegExp(r'([\d.]+)\s*(pt|px)?').firstMatch(v);
+    final m = RegExp(r'(-?[\d.]+)\s*([a-z%]*)', caseSensitive: false)
+        .firstMatch(v.trim());
     if (m == null) return null;
     final n = double.tryParse(m.group(1)!);
     if (n == null) return null;
-    return m.group(2) == 'px' ? n * 0.75 : n;
+    switch (m.group(2)!.toLowerCase()) {
+      case '':
+      case 'pt':
+        return n;
+      case 'px':
+        return n * 0.75;
+      case 'in':
+        return n * 72;
+      case 'cm':
+        return n * 28.3465;
+      case 'mm':
+        return n * 2.83465;
+      case 'pc':
+        return n * 12;
+      case 'q':
+        return n * 0.708661;
+      case 'em':
+      case 'rem':
+        return n * 12;
+      default:
+        return null; // %, vh, vw, etc. — not an absolute length
+    }
   }
 
   double? _percent(String? v) {
@@ -236,53 +268,99 @@ class MarkdownPdfBuilder {
     return m == null ? null : double.tryParse(m.group(1)!);
   }
 
-  /// Width (in pt) of a `border-bottom` shorthand, or 0 when the border is
-  /// disabled. Handles `none`/`hidden`, an explicit zero width even alongside a
-  /// style keyword (e.g. `0 solid #000`), strips the colour first (so the hex
-  /// isn't read as a width), and falls back to a medium 1pt for a style/colour
-  /// with no explicit width.
-  double _borderWidthPt(String v) {
-    // Strip colours first (hex and rgb()/rgba()/hsl()) so colour channels aren't
-    // read as the width.
-    final s = v
-        .replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ')
-        .replaceAll(RegExp(r'(rgba?|hsla?)\([^)]*\)', caseSensitive: false), ' ')
-        .trim();
-    if (RegExp(r'\b(none|hidden)\b', caseSensitive: false).hasMatch(s)) return 0;
-    // The first length token in the shorthand is the width (including a bare 0).
-    final m = RegExp(r'(?:^|\s)(\d*\.?\d+)\s*(pt|px|em|rem)?\b').firstMatch(' $s');
-    if (m != null) {
-      final n = double.tryParse(m.group(1)!) ?? 0;
-      switch (m.group(2)) {
-        case 'px':
-          return n * 0.75;
-        case 'em':
-        case 'rem':
-          return n * 12;
-        default:
-          return n; // pt or unitless
-      }
+  static const _borderStyles = {
+    'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset'
+  };
+
+  /// The effective bottom border as (widthPt, colour), or null when invisible.
+  /// Merges the `border-bottom` shorthand with longhand `border-bottom-*`
+  /// overrides (later declaration wins) and follows CSS visibility rules: a
+  /// border needs a drawable *style* keyword (a width or colour alone leaves the
+  /// style at `none`), a positive width, and a non-transparent colour.
+  (double, PdfColor)? _resolveBorder(Map<String, String> style) {
+    double? width;
+    String? styleKw;
+    PdfColor? color;
+    var transparent = false;
+
+    void apply(String? v) {
+      if (v == null) return;
+      final w = _firstBorderWidth(v);
+      if (w != null) width = w;
+      final s = RegExp(r'\b(none|hidden|solid|dashed|dotted|double|groove|ridge|inset|outset)\b',
+              caseSensitive: false)
+          .firstMatch(v);
+      if (s != null) styleKw = s.group(0)!.toLowerCase();
+      final c = _cssColor(v);
+      if (c != null) color = c;
+      if (_isTransparent(v)) transparent = true;
     }
-    // A visible *style* keyword without an explicit width draws a medium (~1pt)
-    // rule. A colour alone is NOT enough — CSS leaves border-style at `none`, so
-    // a colour-only border stays invisible.
-    if (RegExp(r'\b(solid|dashed|dotted|double|groove|ridge|inset|outset)\b',
-            caseSensitive: false)
-        .hasMatch(v)) {
-      return 1.0;
+
+    apply(style['border-bottom']);
+    // Longhand overrides win over the shorthand.
+    if (style.containsKey('border-bottom-width')) {
+      width = _lengthPt(style['border-bottom-width']);
     }
-    return 0;
+    if (style.containsKey('border-bottom-style')) {
+      styleKw = style['border-bottom-style']!.trim().toLowerCase();
+    }
+    if (style.containsKey('border-bottom-color')) {
+      final v = style['border-bottom-color']!;
+      color = _cssColor(v);
+      transparent = _isTransparent(v);
+    }
+
+    if (styleKw == null || !_borderStyles.contains(styleKw)) return null;
+    final w = width ?? 1.0; // drawable style, no explicit width => medium
+    if (w <= 0 || transparent) return null;
+    return (w, color ?? _text);
   }
 
-  /// Build a border value from the longhand `border-bottom-{width,style,color}`
-  /// properties when the shorthand isn't present. Null if none are set.
-  String? _composeLonghandBorder(Map<String, String> style) {
-    final parts = [
-      style['border-bottom-width'],
-      style['border-bottom-style'],
-      style['border-bottom-color'],
-    ].whereType<String>().toList();
-    return parts.isEmpty ? null : parts.join(' ');
+  /// The first length token in a border shorthand (the width), or null.
+  double? _firstBorderWidth(String v) {
+    final s = v
+        .replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ')
+        .replaceAll(RegExp(r'(rgba?|hsla?)\([^)]*\)', caseSensitive: false), ' ');
+    for (final tok in s.split(RegExp(r'\s+'))) {
+      if (RegExp(r'^-?[\d.]').hasMatch(tok)) {
+        final l = _lengthPt(tok);
+        if (l != null) return l;
+      }
+    }
+    return null;
+  }
+
+  /// Whether a CSS colour value is fully transparent.
+  bool _isTransparent(String v) {
+    final s = v.toLowerCase();
+    if (RegExp(r'\btransparent\b').hasMatch(s)) return true;
+    final h = RegExp(r'#[0-9a-f]{6}([0-9a-f]{2})\b').firstMatch(s);
+    if (h != null && h.group(1) == '00') return true;
+    if (RegExp(r'(rgba|hsla)\([^)]*,\s*0?\.?0+\s*\)').hasMatch(s)) return true;
+    return false;
+  }
+
+  /// Top/bottom margin in pt from the longhand or the `margin` shorthand.
+  double _marginPt(Map<String, String> style, String side) {
+    final lh = _lengthPt(style['margin-$side']);
+    if (lh != null) return lh;
+    final sh = style['margin'];
+    if (sh == null) return 0;
+    final p = sh
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((t) => _lengthPt(t) ?? 0)
+        .toList();
+    if (p.isEmpty) return 0;
+    // 1: all; 2: v/h; 3: t/h/b; 4: t/r/b/l.
+    if (side == 'top') return p[0];
+    switch (p.length) {
+      case 1:
+      case 2:
+        return p[0];
+      default:
+        return p.length >= 3 ? p[2] : p[0];
+    }
   }
 
   /// Decode the common named + numeric HTML entities so exported-HTML labels
