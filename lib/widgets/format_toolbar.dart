@@ -309,7 +309,15 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     if (url == null || url.isEmpty || !mounted) return;
 
     if (source) {
-      _wrapSource('[', ']($url)');
+      final c = controller.sourceController;
+      final sel = c.value.selection;
+      // With no text selected, wrapping would yield `[](url)` — an empty,
+      // invisible link. Insert the URL itself as the visible label instead.
+      if (!sel.isValid || sel.isCollapsed) {
+        _wrapSource('[$url](', '$url)');
+      } else {
+        _wrapSource('[', ']($url)');
+      }
       return;
     }
     final sel = es.selection ?? selection!;
@@ -367,7 +375,13 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
       ['', ''],
       ['', ''],
     ]).node;
-    final transaction = es.transaction..insertNode(insertedPath, table);
+    // Also drop a paragraph after the table and land the caret there, so the
+    // user can keep typing — AppFlowy clears the selection to afterSelection
+    // when applying a transaction, so leaving it unset strands the cursor.
+    final transaction = es.transaction
+      ..insertNode(insertedPath, paragraphNode())
+      ..insertNode(insertedPath, table)
+      ..afterSelection = Selection.collapsed(Position(path: insertedPath.next));
     es.apply(transaction);
   }
 
@@ -420,10 +434,10 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
               Tooltip(
                 message: e.key,
                 child: InkWell(
-                  onTap: () => Navigator.pop(
-                    ctx,
-                    '0x${e.value.toRadixString(16).toUpperCase().padLeft(8, '0')}',
-                  ),
+                  // AppFlowy stores colours as `rgba(r, g, b, a)` strings and
+                  // parses them with tryFromRgbaString — a 0xAARRGGBB value
+                  // wouldn't render. Color.toRgbaString() emits the right form.
+                  onTap: () => Navigator.pop(ctx, Color(e.value).toRgbaString()),
                   child: Container(
                     width: 32,
                     height: 32,

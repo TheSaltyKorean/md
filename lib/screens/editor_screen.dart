@@ -758,6 +758,9 @@ class _TabStripState extends State<_TabStrip> {
     final cs = Theme.of(context).colorScheme;
     final workspace = widget.workspace;
     final docs = workspace.documents;
+    // Recompute overflow after every layout so the chevrons appear/disappear on
+    // a pure window-width change, not only on tab add/remove or scroll.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
     return Container(
       height: 36,
       decoration: BoxDecoration(
