@@ -166,11 +166,16 @@ class MarkdownPdfBuilder {
 
     if (text.isEmpty) {
       // A border only counts if it has a positive width (border-bottom:0 / :none
-      // is an explicit spacer, not a line).
-      if (borderWidth <= 0) return null;
+      // is an explicit spacer, not a line). When the border is invisible but the
+      // div still reserves vertical space, render a spacer so signature gaps
+      // aren't collapsed.
+      if (borderWidth <= 0) {
+        final gap = (_lengthPt(style['height']) ?? 0) + marginTop;
+        return gap > 0 ? pw.SizedBox(height: gap) : null;
+      }
       final width = (_percent(style['width']) ?? 60).clamp(1.0, 100.0);
       final height = _lengthPt(style['height']) ?? 36;
-      final color = _cssColor(RegExp(r'#[0-9a-fA-F]{3,8}').firstMatch(bv!)?.group(0)) ?? _text;
+      final color = _cssColor(bv!) ?? _text;
       final line = pw.Container(
           height: borderWidth < 0.4 ? 0.4 : borderWidth, color: color);
       return pw.Padding(
@@ -258,11 +263,12 @@ class MarkdownPdfBuilder {
           return n; // pt or unitless
       }
     }
-    // A style/colour keyword without an explicit width draws a medium (~1pt) rule.
+    // A visible *style* keyword without an explicit width draws a medium (~1pt)
+    // rule. A colour alone is NOT enough — CSS leaves border-style at `none`, so
+    // a colour-only border stays invisible.
     if (RegExp(r'\b(solid|dashed|dotted|double|groove|ridge|inset|outset)\b',
-                caseSensitive: false)
-            .hasMatch(v) ||
-        RegExp(r'#[0-9a-fA-F]{3,8}').hasMatch(v)) {
+            caseSensitive: false)
+        .hasMatch(v)) {
       return 1.0;
     }
     return 0;
@@ -312,17 +318,70 @@ class MarkdownPdfBuilder {
         .replaceAll('☐', '[  ]');
   }
 
+  static const _namedColors = <String, int>{
+    'black': 0x000000, 'white': 0xFFFFFF, 'red': 0xFF0000, 'green': 0x008000,
+    'blue': 0x0000FF, 'navy': 0x000080, 'gray': 0x808080, 'grey': 0x808080,
+    'silver': 0xC0C0C0, 'maroon': 0x800000, 'olive': 0x808000,
+    'lime': 0x00FF00, 'teal': 0x008080, 'aqua': 0x00FFFF, 'cyan': 0x00FFFF,
+    'purple': 0x800080, 'fuchsia': 0xFF00FF, 'magenta': 0xFF00FF,
+    'yellow': 0xFFFF00, 'orange': 0xFFA500, 'darkgray': 0xA9A9A9,
+    'darkgrey': 0xA9A9A9, 'lightgray': 0xD3D3D3, 'lightgrey': 0xD3D3D3,
+    'dimgray': 0x696969, 'dimgrey': 0x696969,
+  };
+
+  /// Parse a CSS colour (hex 3/6/8-digit, rgb()/rgba(), hsl()/hsla(), or a
+  /// common named colour) found anywhere in [v]. Alpha is ignored (opaque).
   PdfColor? _cssColor(String? v) {
     if (v == null) return null;
-    // Six-digit alternative first: otherwise "#111344" matches the 3-digit
-    // branch and captures only "111" (→ #111111).
-    final m = RegExp(r'#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b').firstMatch(v.trim());
-    if (m == null) return null;
-    var hex = m.group(1)!;
-    if (hex.length == 3) {
-      hex = hex.split('').map((c) => '$c$c').join();
+    final s = v.trim().toLowerCase();
+    PdfColor rgb(int r, int g, int b) => PdfColor.fromInt(
+        0xFF000000 | (r.clamp(0, 255) << 16) | (g.clamp(0, 255) << 8) | b.clamp(0, 255));
+
+    // #RRGGBB(AA) / #RGB — 6/8 before 3 so "#111344" isn't read as "#111".
+    final hex =
+        RegExp(r'#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3})\b').firstMatch(s);
+    if (hex != null) {
+      var h = hex.group(1)!;
+      if (h.length == 3) h = h.split('').map((c) => '$c$c').join();
+      if (h.length == 8) h = h.substring(0, 6); // drop alpha
+      final n = int.parse(h, radix: 16);
+      return PdfColor.fromInt(0xFF000000 | n);
     }
-    return PdfColor.fromInt(0xFF000000 | int.parse(hex, radix: 16));
+    final m = RegExp(r'rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)')
+        .firstMatch(s);
+    if (m != null) {
+      int ch(String x) => (double.tryParse(x) ?? 0).round();
+      return rgb(ch(m.group(1)!), ch(m.group(2)!), ch(m.group(3)!));
+    }
+    final hsl =
+        RegExp(r'hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%')
+            .firstMatch(s);
+    if (hsl != null) {
+      return _hslToColor(double.tryParse(hsl.group(1)!) ?? 0,
+          (double.tryParse(hsl.group(2)!) ?? 0) / 100,
+          (double.tryParse(hsl.group(3)!) ?? 0) / 100);
+    }
+    for (final entry in _namedColors.entries) {
+      if (RegExp('\\b${entry.key}\\b').hasMatch(s)) {
+        return PdfColor.fromInt(0xFF000000 | entry.value);
+      }
+    }
+    return null;
+  }
+
+  // CSS Color 4 reference HSL→RGB.
+  PdfColor _hslToColor(double hDeg, double s, double l) {
+    final h = (hDeg % 360) / 30; // hue in 0..12 units
+    final a = s * (l < 0.5 ? l : 1 - l);
+    double comp(double n) {
+      final k = (n + h) % 12;
+      final m = [k - 3.0, 9 - k, 1.0].reduce((x, y) => x < y ? x : y);
+      return l - a * (m.clamp(-1.0, 1.0));
+    }
+
+    int c(double x) => (x * 255).round().clamp(0, 255);
+    return PdfColor.fromInt(
+        0xFF000000 | (c(comp(0)) << 16) | (c(comp(8)) << 8) | c(comp(4)));
   }
 
   // --- Block-level rendering --------------------------------------------------
