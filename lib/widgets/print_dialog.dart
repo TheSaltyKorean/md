@@ -275,80 +275,97 @@ class _PrintDialogState extends State<PrintDialog> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // A narrow profile dropdown on the left, with all the profile
-                  // actions grouped on the right. The dropdown is in an Expanded
-                  // (capped width) so the fixed icons always fit — no overflow
-                  // on narrow widths.
+                  // actions grouped on the right. The dropdown shrinks first
+                  // (capped at 240px); the actions sit in a right-aligned
+                  // horizontal scroll view so they never overflow on very narrow
+                  // widths (they scroll instead).
                   Row(
                     children: [
-                      Expanded(
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 240),
-                            child: DropdownButtonFormField<String>(
-                              // Key by selection so the field rebuilds with a
-                              // valid value after a profile is created or deleted
-                              // (avoids a stale/duplicate-value assertion).
-                              key: ValueKey('profile-dd-$_selectedId'),
-                              initialValue: _selectedId,
-                              isExpanded: true,
-                              decoration: const InputDecoration(
-                                labelText: 'Branding profile',
-                                isDense: true,
-                              ),
-                              items: [
-                                for (final p in profiles)
-                                  DropdownMenuItem(
-                                    value: p.id,
-                                    child: Text(
-                                      p.id == profilesService.defaultId
-                                          ? '${p.name}  (default)'
-                                          : p.name,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                              ],
-                              onChanged: (v) => setState(() {
-                                _selectedId = v ?? _selectedId;
-                                _previewEpoch++;
-                              }),
+                      Flexible(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 240),
+                          child: DropdownButtonFormField<String>(
+                            // Key by selection so the field rebuilds with a valid
+                            // value after a profile is created or deleted (avoids
+                            // a stale/duplicate-value assertion).
+                            key: ValueKey('profile-dd-$_selectedId'),
+                            initialValue: _selectedId,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Branding profile',
+                              isDense: true,
                             ),
+                            items: [
+                              for (final p in profiles)
+                                DropdownMenuItem(
+                                  value: p.id,
+                                  child: Text(
+                                    p.id == profilesService.defaultId
+                                        ? '${p.name}  (default)'
+                                        : p.name,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (v) => setState(() {
+                              _selectedId = v ?? _selectedId;
+                              _previewEpoch++;
+                            }),
                           ),
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Edit profile',
-                        icon: const Icon(Icons.edit_rounded),
-                        onPressed: () => _editProfile(selected, isNew: false),
-                      ),
-                      IconButton(
-                        tooltip: 'New profile',
-                        icon: const Icon(Icons.add_rounded),
-                        onPressed: () => _editProfile(
-                          PrintProfile(id: _newId(), name: 'New profile'),
-                          isNew: true,
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          // Start scrolled to the end so the actions are
+                          // right-aligned, and scroll left to reach earlier ones
+                          // when the dialog is too narrow to show them all.
+                          reverse: true,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'Edit profile',
+                                icon: const Icon(Icons.edit_rounded),
+                                onPressed: () =>
+                                    _editProfile(selected, isNew: false),
+                              ),
+                              IconButton(
+                                tooltip: 'New profile',
+                                icon: const Icon(Icons.add_rounded),
+                                onPressed: () => _editProfile(
+                                  PrintProfile(
+                                      id: _newId(), name: 'New profile'),
+                                  isNew: true,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Import… (.json)',
+                                icon: const Icon(Icons.upload_file_rounded),
+                                onPressed: _importProfile,
+                              ),
+                              IconButton(
+                                tooltip: 'Export… (.json)',
+                                icon: const Icon(Icons.download_rounded),
+                                onPressed: () => _exportProfile(selected),
+                              ),
+                              if (profiles.length > 1)
+                                IconButton(
+                                  tooltip: 'Delete profile',
+                                  icon: const Icon(Icons.delete_outline_rounded),
+                                  color: cs.error,
+                                  onPressed: () async {
+                                    await profilesService.delete(selected.id);
+                                    if (mounted) {
+                                      setState(() => _previewEpoch++);
+                                    }
+                                  },
+                                ),
+                            ],
+                          ),
                         ),
                       ),
-                      IconButton(
-                        tooltip: 'Import… (.json)',
-                        icon: const Icon(Icons.upload_file_rounded),
-                        onPressed: _importProfile,
-                      ),
-                      IconButton(
-                        tooltip: 'Export… (.json)',
-                        icon: const Icon(Icons.download_rounded),
-                        onPressed: () => _exportProfile(selected),
-                      ),
-                      if (profiles.length > 1)
-                        IconButton(
-                          tooltip: 'Delete profile',
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          color: cs.error,
-                          onPressed: () async {
-                            await profilesService.delete(selected.id);
-                            if (mounted) setState(() => _previewEpoch++);
-                          },
-                        ),
                     ],
                   ),
                   const SizedBox(height: 4),
