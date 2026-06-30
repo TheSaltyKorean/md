@@ -66,8 +66,14 @@ static void my_application_activate(GApplication* application) {
     if (monitor != nullptr) {
       GdkRectangle work_area;
       gdk_monitor_get_workarea(monitor, &work_area);
-      if (win_w > work_area.width - 20) win_w = work_area.width - 20;
-      if (win_h > work_area.height - 20) win_h = work_area.height - 20;
+      // gtk_window_set_default_size sets the *client* size; the window manager
+      // / CSD header bar add decorations on top, so reserve room for them
+      // (and shadows) — otherwise the realized window can still be taller than
+      // the work area on short displays.
+      const gint kHDecor = 40;
+      const gint kVDecor = 96;
+      if (win_w > work_area.width - kHDecor) win_w = work_area.width - kHDecor;
+      if (win_h > work_area.height - kVDecor) win_h = work_area.height - kVDecor;
     }
   }
   gtk_window_set_default_size(window, win_w, win_h);

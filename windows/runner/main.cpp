@@ -34,12 +34,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   int origin_y = 10;
   RECT work_area;
   if (::SystemParametersInfo(SPI_GETWORKAREA, 0, &work_area, 0)) {
-    const int work_w = work_area.right - work_area.left;
-    const int work_h = work_area.bottom - work_area.top;
+    // Win32Window::Create treats the Point/Size as *logical* units and scales
+    // them by dpi/96 before CreateWindow. SPI_GETWORKAREA reports *physical*
+    // pixels, so convert the work area to logical units before clamping —
+    // otherwise on >100% display scaling the clamped value is scaled again and
+    // the window still opens taller than the monitor.
+    double scale = ::GetDpiForSystem() / 96.0;
+    if (scale <= 0) scale = 1.0;
+    const int work_w = static_cast<int>((work_area.right - work_area.left) / scale);
+    const int work_h = static_cast<int>((work_area.bottom - work_area.top) / scale);
     if (desired_w > work_w - 20) desired_w = work_w - 20;
     if (desired_h > work_h - 20) desired_h = work_h - 20;
-    origin_x = work_area.left + 10;
-    origin_y = work_area.top + 10;
+    origin_x = static_cast<int>(work_area.left / scale) + 10;
+    origin_y = static_cast<int>(work_area.top / scale) + 10;
   }
   Win32Window::Point origin(origin_x, origin_y);
   Win32Window::Size size(desired_w, desired_h);
