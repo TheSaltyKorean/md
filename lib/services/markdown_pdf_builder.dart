@@ -380,6 +380,18 @@ class MarkdownPdfBuilder {
     return (w, color ?? currentColor ?? _text);
   }
 
+  /// Whether the bottom-border declarations carry an explicit colour (so a
+  /// span's `currentColor` is not used to colour the rule).
+  bool _borderHasColor(List<MapEntry<String, String>> decls) {
+    for (final e in decls) {
+      if ((e.key == 'border-bottom' || e.key == 'border-bottom-color') &&
+          _cssColor(e.value) != null) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// The first length token in a border shorthand (the width), or null.
   double? _firstBorderWidth(String v) {
     final s = v
@@ -822,15 +834,16 @@ class MarkdownPdfBuilder {
             pw.Padding(
               padding:
                   const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              // Route cell text through the span renderer so inline `<span>`
-              // fill-in lines / labels render instead of leaking their markup.
+              // Walk the cell's inline children so `<span>` fill-in lines and
+              // labels render, while inline code (which may mention a span tag)
+              // is still rendered literally by the `code` case in _inline.
               child: pw.RichText(
                 text: pw.TextSpan(
-                  children: _renderTextWithSpans(
-                    cell.textContent,
-                    bold: isHead,
-                    color: isHead ? PdfColors.white : _text,
-                    size: 10.5,
+                  children: _inline(
+                    cell.children,
+                    boldDefault: isHead,
+                    color: isHead ? PdfColors.white : null,
+                    sizeOverride: 10.5,
                   ),
                 ),
               ),
@@ -1187,10 +1200,11 @@ class MarkdownPdfBuilder {
     double? size,
   }) {
     final style = _parseStyle(attrs);
+    final decls = _styleDecls(attrs);
     // The span's own colour is `currentColor` for a border with no explicit
     // colour, and the text colour for a label.
     final spanColor = _cssColor(style['color']) ?? color;
-    final border = _resolveBorder(_styleDecls(attrs), currentColor: spanColor);
+    final border = _resolveBorder(decls, currentColor: spanColor);
     final inner = _decodeEntities(innerRaw
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
         .replaceAll(RegExp(r'<[^>]*>'), '')
@@ -1198,6 +1212,11 @@ class MarkdownPdfBuilder {
     final hasText = inner.trim().isNotEmpty;
 
     if (border != null && !hasText) {
+      // A colourless border uses currentColor; if that colour is transparent
+      // (e.g. `color: transparent`) the blank is intentionally invisible.
+      if (_isTransparent(style['color'] ?? '') && !_borderHasColor(decls)) {
+        return const pw.TextSpan(text: '');
+      }
       // CSS width is subject to the min-width floor, so honour the larger of the
       // two positive values. Only a *missing* width falls back to the default;
       // an explicit zero (length or percentage) collapses the blank.
@@ -1236,9 +1255,12 @@ class MarkdownPdfBuilder {
     final isBold = bold || fw == 'bold' || (int.tryParse(fw) ?? 0) >= 600;
     final isItalic =
         italic || (style['font-style'] ?? '').toLowerCase() == 'italic';
-    // A borderless span with no text is structural (e.g. an anchor/bookmark) —
-    // contribute nothing rather than a stray space.
-    if (!hasText) return const pw.TextSpan(text: '');
+    if (!hasText) {
+      // A truly empty structural span (anchor/bookmark) contributes nothing; a
+      // whitespace-only span is a separator and must keep a space so adjacent
+      // words don't merge.
+      return pw.TextSpan(text: inner.isEmpty ? '' : ' ');
+    }
 
     final deco = (style['text-decoration'] ?? '').toLowerCase();
     return pw.TextSpan(

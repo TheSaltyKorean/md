@@ -243,6 +243,16 @@ void main() {
     final zeroPct = builder.renderInlineText(
         '<span style="width:0%; border-bottom:1px solid;"> </span>');
     expect(zeroPct.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // A whitespace-only styled span is a separator — keep the space.
+    final sep = builder
+        .renderInlineText('First<span style="color:#555;">&nbsp;</span>Last');
+    expect(literal(sep), 'First Last');
+
+    // A colourless border with a transparent currentColor stays invisible.
+    final invisible = builder.renderInlineText(
+        '<span style="color:transparent; border-bottom:1px solid;"> </span>');
+    expect(invisible.any((s) => s is pw.WidgetSpan), isFalse);
   });
 
   test('Table cells render inline <span> instead of leaking the markup',
@@ -254,7 +264,9 @@ void main() {
       '| Field | Value |\n'
       '|---|---|\n'
       '| Signed | <span style="min-width:150px; border-bottom:1px solid #555;"> '
-      '</span> |\n',
+      '</span> |\n'
+      // A cell with inline code that mentions a span tag must keep it literal.
+      '| Code | `<span>x</span>` |\n',
     );
     expect(widgets, isNotEmpty);
     // Lays out end-to-end (the cell's WidgetSpan blank would otherwise throw).
