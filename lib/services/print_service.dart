@@ -210,7 +210,10 @@ class PrintService {
             padding: const pw.EdgeInsets.only(top: 4),
             child: pw.Text(
               headerTitle,
-              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+              // Legal mode keeps the header title monochrome (body colour).
+              style: pw.TextStyle(
+                  fontSize: 9,
+                  color: profile.legalMode ? primary : PdfColors.grey600),
             ),
           ),
         if (profile.accentRule)
@@ -298,7 +301,11 @@ class PrintService {
             ),
             pw.Text(
               right.join('   '),
-              style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+              // Legal mode prints date/page numbers in the body colour too;
+              // otherwise they stay subtle grey.
+              style: pw.TextStyle(
+                  fontSize: 8,
+                  color: profile.legalMode ? primary : PdfColors.grey600),
             ),
           ],
         ),
