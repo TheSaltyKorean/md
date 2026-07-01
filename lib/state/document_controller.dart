@@ -67,6 +67,11 @@ class DocumentController extends ChangeNotifier {
   StreamSubscription<dynamic>? _txnSub;
   bool _suppressDirty = false;
 
+  /// Last known source text, so [_onSourceChanged] can tell a real text edit
+  /// from a selection/caret-only notification (moving the caret — or find &
+  /// replace revealing a match by selecting it — must not mark the doc dirty).
+  String _lastSourceText = '';
+
   /// Whether the user has actually edited in the WYSIWYG editor since entering
   /// it. AppFlowy's Markdown serialisation is lossy (it drops blank lines and
   /// normalises bullets/emphasis/ordered markers), so we only push the block
@@ -113,8 +118,15 @@ class DocumentController extends ChangeNotifier {
   }
 
   void _onSourceChanged() {
+    // The controller also notifies on selection/caret changes; only a genuine
+    // text change should dirty the document. Track the last text on every
+    // notification (including programmatic, suppressed sets) so the baseline
+    // stays correct.
+    final text = sourceController.text;
+    final textChanged = text != _lastSourceText;
+    _lastSourceText = text;
     // Both source modes (split and raw) edit [sourceController] directly.
-    if (_mode.isSource && !_suppressDirty) _markDirty();
+    if (_mode.isSource && !_suppressDirty && textChanged) _markDirty();
   }
 
   void _markDirty() {

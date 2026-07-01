@@ -235,6 +235,16 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final theme = context.watch<ThemeController>();
     final active = ws.active;
 
+    // Find is a source-mode feature and only mounts inside a source view. If the
+    // active view is no longer a source mode (switched to Edit/Preview, or moved
+    // to a tab that is), close find so no invisible state lingers and the format
+    // toolbar returns.
+    if (_find.visible && !active.mode.isSource) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !ws.active.mode.isSource) _find.hide();
+      });
+    }
+
     // Keep the banner listener attached to whichever document is active.
     if (!identical(active, _bannerDoc)) {
       _bannerDoc?.removeListener(_onActiveDocChanged);
@@ -312,9 +322,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                   children: [
                     Positioned.fill(child: _body(active)),
                     // The floating, draggable format palette — hidden in Preview
-                    // (nothing to edit there) and while find is open so it can't
-                    // cover the find card on narrow windows.
-                    if (active.mode != EditorMode.preview && !_find.visible)
+                    // (nothing to edit there) and, in a source mode, while find
+                    // is open so it can't cover the find card on narrow windows.
+                    if (active.mode != EditorMode.preview &&
+                        !(_find.visible && active.mode.isSource))
                       FloatingFormatToolbar(
                         controller: active,
                         area: constraints.biggest,
