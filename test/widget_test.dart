@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:flutter/widgets.dart' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
+import 'package:markdown_studio/models/editor_mode.dart';
 import 'package:markdown_studio/models/print_profile.dart';
 import 'package:markdown_studio/services/file_association_service.dart';
 import 'package:markdown_studio/services/markdown_pdf_builder.dart';
 import 'package:markdown_studio/services/print_profile_service.dart';
+import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -155,6 +157,21 @@ void main() {
     doc.addPage(pw.MultiPage(build: (_) => widgets));
     final bytes = await doc.save();
     expect(bytes, isNotEmpty);
+  });
+
+  test('Visiting Edit mode without editing preserves the exact source', () {
+    // Regression: AppFlowy's Markdown round-trip drops blank lines and rewrites
+    // markers, so a no-op Edit → back visit used to reformat untouched text.
+    final doc = DocumentController(isAutoReloadEnabled: () => false);
+    addTearDown(doc.dispose);
+    const source =
+        '# Title\n\n* one\n* two\n\nSome __bold__ and *italic* text.\n';
+    doc.loadMarkdown(source);
+
+    doc.setMode(EditorMode.wysiwyg); // enter the block editor…
+    doc.setMode(EditorMode.preview); // …and leave without editing
+
+    expect(doc.currentMarkdown(), source);
   });
 
   test('Workspace starts with one tab and manages tabs', () async {
