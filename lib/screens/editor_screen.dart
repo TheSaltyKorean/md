@@ -6,7 +6,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart'
     show PointerScrollEvent, PointerSignalEvent;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:flutter/services.dart'
+    show LogicalKeyboardKey, SystemNavigator;
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -19,6 +20,7 @@ import '../services/single_instance_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
 import '../state/workspace_controller.dart';
+import '../widgets/find_controller.dart';
 import '../widgets/format_toolbar.dart';
 import '../widgets/preview_view.dart';
 import '../widgets/print_dialog.dart';
@@ -44,6 +46,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   bool _conflictShown = false;
   bool _dragging = false;
 
+  /// Shared find & replace state; the bar itself lives inside the mounted source
+  /// view (see [_body]).
+  final FindController _find = FindController();
+
   bool get _isDesktop =>
       !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
@@ -63,7 +69,15 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   void dispose() {
     if (_isDesktop) windowManager.removeListener(this);
     _bannerDoc?.removeListener(_onActiveDocChanged);
+    _find.dispose();
     super.dispose();
+  }
+
+  /// Open find (and optionally replace). Find operates on the raw Markdown
+  /// source, so switch a non-source view (Edit/Preview) to Raw first.
+  void _openFind(DocumentController doc, {bool replace = false}) {
+    if (!doc.mode.isSource) doc.setMode(EditorMode.raw);
+    replace ? _find.openReplace() : _find.openFind();
   }
 
   @override
@@ -263,23 +277,39 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 )
               : null,
         ),
-        body: DropTarget(
-          onDragEntered: (_) => setState(() => _dragging = true),
-          onDragExited: (_) => setState(() => _dragging = false),
-          onDragDone: (detail) => _onFilesDropped(detail, ws),
-          child: LayoutBuilder(
-            builder: (context, constraints) => Stack(
-              children: [
-                Positioned.fill(child: _body(active)),
-                // The floating, draggable format palette — hidden in Preview
-                // (nothing to edit there).
-                if (active.mode != EditorMode.preview)
-                  FloatingFormatToolbar(
-                    controller: active,
-                    area: constraints.biggest,
-                  ),
-                if (_dragging) _dropHint(context),
-              ],
+        body: CallbackShortcuts(
+          bindings: {
+            // Ctrl+F / Cmd+F — find; Ctrl+H / Cmd+H — replace; Esc closes.
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                () => _openFind(active),
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                () => _openFind(active),
+            const SingleActivator(LogicalKeyboardKey.keyH, control: true):
+                () => _openFind(active, replace: true),
+            const SingleActivator(LogicalKeyboardKey.keyH, meta: true):
+                () => _openFind(active, replace: true),
+            const SingleActivator(LogicalKeyboardKey.escape): () {
+              if (_find.visible) _find.hide();
+            },
+          },
+          child: DropTarget(
+            onDragEntered: (_) => setState(() => _dragging = true),
+            onDragExited: (_) => setState(() => _dragging = false),
+            onDragDone: (detail) => _onFilesDropped(detail, ws),
+            child: LayoutBuilder(
+              builder: (context, constraints) => Stack(
+                children: [
+                  Positioned.fill(child: _body(active)),
+                  // The floating, draggable format palette — hidden in Preview
+                  // (nothing to edit there).
+                  if (active.mode != EditorMode.preview)
+                    FloatingFormatToolbar(
+                      controller: active,
+                      area: constraints.biggest,
+                    ),
+                  if (_dragging) _dropHint(context),
+                ],
+              ),
             ),
           ),
         ),
@@ -295,9 +325,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       case EditorMode.wysiwyg:
         return WysiwygView(key: key, controller: doc);
       case EditorMode.split:
-        return SplitView(key: key, controller: doc);
+        return SplitView(key: key, controller: doc, find: _find);
       case EditorMode.raw:
-        return RawSourceView(key: key, controller: doc);
+        return RawSourceView(key: key, controller: doc, find: _find);
       case EditorMode.preview:
         return PreviewView(key: key, markdown: doc.currentMarkdown());
     }
@@ -344,6 +374,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           itemBuilder: (_) => const [
             PopupMenuItem(value: 'open', child: Text('Open…')),
             PopupMenuItem(value: 'new', child: Text('New tab')),
+            PopupMenuItem(value: 'find', child: Text('Find / Replace')),
             PopupMenuItem(value: 'save', child: Text('Save')),
             PopupMenuItem(value: 'saveAs', child: Text('Save As…')),
             PopupMenuItem(value: 'print', child: Text('Print / Export PDF')),
@@ -363,6 +394,11 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         tooltip: 'Open',
         icon: const Icon(Icons.folder_open_outlined),
         onPressed: () => _open(context, ws),
+      ),
+      IconButton(
+        tooltip: 'Find / Replace (Ctrl+F)',
+        icon: const Icon(Icons.search_rounded),
+        onPressed: () => _openFind(active),
       ),
       IconButton(
         tooltip: 'Save',
@@ -595,6 +631,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         break;
       case 'new':
         ws.newDocument();
+        break;
+      case 'find':
+        _openFind(active);
         break;
       case 'save':
         _save(context, active);

@@ -12,6 +12,10 @@ codebase, and is structured for submission to all the major app stores.
   - **Split** — raw Markdown source with a **live rendered preview**
     (side-by-side on wide screens, stacked on mobile).
   - **Preview** — read-only rendered view.
+- **Find & replace** in the Markdown source (Split/Raw modes) — **Ctrl/Cmd+F**
+  to find, **Ctrl/Cmd+H** to replace, with match count, next/previous, match
+  highlighting, and case / whole-word / regex options. Opening it from Edit or
+  Preview switches to Raw first. **Esc** closes it.
 - **Material Design 3** with **light, dark, and system** themes (persisted).
 - **Multi-document tabs** — open many `.md` files at once; opening into a clean
   Untitled tab reuses it. Close tabs (with an unsaved-changes guard).

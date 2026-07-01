@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../state/document_controller.dart';
+import 'find_controller.dart';
+import 'find_replace_bar.dart';
 import 'preview_view.dart';
 import 'source_pane.dart';
 
@@ -11,9 +13,10 @@ import 'source_pane.dart';
 ///  * scrolling either pane proportionally scrolls the other;
 ///  * moving the caret in the source scrolls the preview to the matching line.
 class SplitView extends StatefulWidget {
-  const SplitView({super.key, required this.controller});
+  const SplitView({super.key, required this.controller, required this.find});
 
   final DocumentController controller;
+  final FindController find;
 
   @override
   State<SplitView> createState() => _SplitViewState();
@@ -35,6 +38,20 @@ class _SplitViewState extends State<SplitView> {
     _sourceScroll.addListener(_onSourceScroll);
     _previewScroll.addListener(_onPreviewScroll);
     _text.addListener(_onTextChanged);
+    widget.find.addListener(_onFindChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant SplitView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.find, widget.find)) {
+      old.find.removeListener(_onFindChanged);
+      widget.find.addListener(_onFindChanged);
+    }
+  }
+
+  void _onFindChanged() {
+    if (mounted) setState(() {}); // show/hide the find bar overlay
   }
 
   @override
@@ -42,6 +59,7 @@ class _SplitViewState extends State<SplitView> {
     _sourceScroll.removeListener(_onSourceScroll);
     _previewScroll.removeListener(_onPreviewScroll);
     _text.removeListener(_onTextChanged);
+    widget.find.removeListener(_onFindChanged);
     _sourceScroll.dispose();
     _previewScroll.dispose();
     super.dispose();
@@ -100,9 +118,23 @@ class _SplitViewState extends State<SplitView> {
     final theme = Theme.of(context);
     final portrait = MediaQuery.orientationOf(context) == Orientation.portrait;
 
-    final source = SourcePane(
-      controller: widget.controller,
-      scrollController: _sourceScroll,
+    final source = Stack(
+      children: [
+        Positioned.fill(
+          child: SourcePane(
+            controller: widget.controller,
+            scrollController: _sourceScroll,
+          ),
+        ),
+        if (widget.find.visible)
+          Positioned.fill(
+            child: FindReplaceBar(
+              find: widget.find,
+              target: widget.controller.sourceController,
+              scroll: _sourceScroll,
+            ),
+          ),
+      ],
     );
     final preview = Container(
       color: theme.colorScheme.surface,
