@@ -1050,8 +1050,10 @@ class MarkdownPdfBuilder {
     PdfColor? color,
     double? size,
   }) {
+    // Decode HTML entities in prose/span-adjacent text (but never in code, where
+    // `&amp;` is literal), matching the entity handling in _spanFragment.
     pw.InlineSpan run(String s) => pw.TextSpan(
-          text: _symbols(s),
+          text: _symbols(code ? s : _decodeEntities(s)),
           style: _textStyle(
             bold: bold,
             italic: italic,
@@ -1078,7 +1080,10 @@ class MarkdownPdfBuilder {
         break;
       }
       final open = openIt.current;
-      if (open.start > i) out.add(run(text.substring(i, open.start)));
+      if (open.start > i) {
+        // Strip any stray closing tag that precedes the next opener.
+        out.add(run(_stripSpanTags(text.substring(i, open.start))));
+      }
       final matched = _matchSpan(text, open.start);
       if (matched == null) {
         // Unbalanced open: strip stray span tags from the remainder.
@@ -1167,13 +1172,15 @@ class MarkdownPdfBuilder {
 
     if (border != null && !hasText) {
       // CSS width is subject to the min-width floor, so honour the larger of the
-      // two when both are given.
-      final candidates = [_lengthPt(style['width']), _lengthPt(style['min-width'])]
-          .whereType<double>();
-      final resolved = candidates.isEmpty
-          ? 0.0
+      // two when both are given. Only a *missing* width falls back to the
+      // default; an explicit width/min-width of 0 collapses the blank.
+      final candidates =
+          [_lengthPt(style['width']), _lengthPt(style['min-width'])]
+              .whereType<double>();
+      final width = candidates.isEmpty
+          ? 108.0
           : candidates.reduce((a, b) => a > b ? a : b);
-      final width = resolved <= 0 ? 108.0 : resolved;
+      if (width <= 0) return const pw.TextSpan(text: '');
       final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
       final lineSize = size ?? 11.0;
       // A zero-baseline WidgetSpan sits on the text baseline, so the container's
@@ -1195,9 +1202,13 @@ class MarkdownPdfBuilder {
     final isBold = bold || fw == 'bold' || (int.tryParse(fw) ?? 0) >= 600;
     final isItalic =
         italic || (style['font-style'] ?? '').toLowerCase() == 'italic';
+    // A borderless span with no text is structural (e.g. an anchor/bookmark) —
+    // contribute nothing rather than a stray space.
+    if (!hasText) return const pw.TextSpan(text: '');
+
     final deco = (style['text-decoration'] ?? '').toLowerCase();
     return pw.TextSpan(
-      text: _symbols(hasText ? inner : ' '),
+      text: _symbols(inner),
       style: _textStyle(
         bold: isBold,
         italic: isItalic,

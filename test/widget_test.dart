@@ -207,6 +207,29 @@ void main() {
         'border-bottom:1px solid;"> </span></span>');
     expect(wrappedBlank.any((s) => s is pw.WidgetSpan), isTrue);
     expect(literal(wrappedBlank).contains('span'), isFalse);
+
+    // A stray closing tag before a later span must not leak.
+    final stray = builder.renderInlineText(
+        '</span> <span style="min-width:150px; border-bottom:1px solid;"> '
+        '</span>');
+    expect(literal(stray).contains('span'), isFalse);
+    expect(stray.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // HTML entities in span-adjacent text are decoded (not shown literally).
+    final ent = builder.renderInlineText(
+        'AT&amp;T <span style="color:#333;">x</span>');
+    expect(literal(ent), contains('AT&T'));
+    expect(literal(ent).contains('&amp;'), isFalse);
+
+    // An explicit zero-width blank collapses (no visible rule).
+    final zero = builder
+        .renderInlineText('<span style="width:0; border-bottom:1px solid;"> '
+            '</span>');
+    expect(zero.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // A borderless empty span contributes nothing (no stray space).
+    final empty = builder.renderInlineText('X<span id="bookmark"></span>Y');
+    expect(literal(empty), 'XY');
   });
 
   test('PDF builder renders a double-spaced, justified, indented body',
