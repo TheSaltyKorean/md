@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
-import 'package:flutter/widgets.dart' show Size;
+import 'package:flutter/widgets.dart' show Size, TextSelection;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -196,6 +196,25 @@ void main() {
     // Leaving Edit must not round-trip the freshly-loaded, untouched buffer.
     doc.setMode(EditorMode.preview);
     expect(doc.currentMarkdown(), reloaded);
+  });
+
+  test('Selection-only changes in the source do not mark the doc dirty', () {
+    // Find & replace reveals a match by selecting it; navigating matches must
+    // not create unsaved-changes state on a clean document.
+    final doc = DocumentController(isAutoReloadEnabled: () => false);
+    addTearDown(doc.dispose);
+    doc.loadMarkdown('hello world hello');
+    doc.setMode(EditorMode.raw);
+    expect(doc.isDirty, isFalse);
+
+    // Move/select the caret only — no text change.
+    doc.sourceController.selection =
+        const TextSelection(baseOffset: 0, extentOffset: 5);
+    expect(doc.isDirty, isFalse);
+
+    // A genuine text edit still marks it dirty.
+    doc.sourceController.text = 'hello world goodbye';
+    expect(doc.isDirty, isTrue);
   });
 
   test('Workspace starts with one tab and manages tabs', () async {

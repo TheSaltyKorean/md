@@ -6,7 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart'
     show PointerScrollEvent, PointerSignalEvent;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemNavigator;
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -19,6 +19,7 @@ import '../services/single_instance_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
 import '../state/workspace_controller.dart';
+import '../widgets/find_controller.dart';
 import '../widgets/format_toolbar.dart';
 import '../widgets/preview_view.dart';
 import '../widgets/print_dialog.dart';
@@ -44,6 +45,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   bool _conflictShown = false;
   bool _dragging = false;
 
+  /// Shared find & replace state; the bar itself lives inside the mounted source
+  /// view (see [_body]).
+  final FindController _find = FindController();
+
   bool get _isDesktop =>
       !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
@@ -57,13 +62,28 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
+    // Rebuild when find opens/closes so the floating toolbar can yield to it.
+    _find.addListener(_onFindChanged);
+  }
+
+  void _onFindChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     if (_isDesktop) windowManager.removeListener(this);
     _bannerDoc?.removeListener(_onActiveDocChanged);
+    _find.removeListener(_onFindChanged);
+    _find.dispose();
     super.dispose();
+  }
+
+  /// Open find (and optionally replace). Find operates on the raw Markdown
+  /// source, so switch a non-source view (Edit/Preview) to Raw first.
+  void _openFind(DocumentController doc, {bool replace = false}) {
+    if (!doc.mode.isSource) doc.setMode(EditorMode.raw);
+    replace ? _find.openReplace() : _find.openFind();
   }
 
   @override
@@ -214,6 +234,16 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final theme = context.watch<ThemeController>();
     final active = ws.active;
 
+    // Find is a source-mode feature and only mounts inside a source view. If the
+    // active view is no longer a source mode (switched to Edit/Preview, or moved
+    // to a tab that is), close find so no invisible state lingers and the format
+    // toolbar returns.
+    if (_find.visible && !active.mode.isSource) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !ws.active.mode.isSource) _find.hide();
+      });
+    }
+
     // Keep the banner listener attached to whichever document is active.
     if (!identical(active, _bannerDoc)) {
       _bannerDoc?.removeListener(_onActiveDocChanged);
@@ -243,43 +273,67 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         // re-trigger this guard. Exit the app explicitly instead.
         if (ok) await SystemNavigator.pop();
       },
-      child: Scaffold(
-        appBar: AppBar(
-          titleSpacing: 0,
-          // The open-document tabs sit where the filename would be.
-          title: _TabStrip(
-            workspace: ws,
-            onClose: _closeTab,
-            onTabDragEnd: _onTabDragEnd,
-          ),
-          actions: _actions(context, ws, active, theme, isNarrow),
-          // On narrow (phone) layouts the mode selector gets its own bar; on
-          // wide layouts it lives in the actions row. The format toolbar is no
-          // longer docked here — it floats over the body (see below).
-          bottom: isNarrow
-              ? PreferredSize(
-                  preferredSize: const Size.fromHeight(48),
-                  child: _ModeBar(doc: active),
-                )
-              : null,
-        ),
-        body: DropTarget(
-          onDragEntered: (_) => setState(() => _dragging = true),
-          onDragExited: (_) => setState(() => _dragging = false),
-          onDragDone: (detail) => _onFilesDropped(detail, ws),
-          child: LayoutBuilder(
-            builder: (context, constraints) => Stack(
-              children: [
-                Positioned.fill(child: _body(active)),
-                // The floating, draggable format palette — hidden in Preview
-                // (nothing to edit there).
-                if (active.mode != EditorMode.preview)
-                  FloatingFormatToolbar(
-                    controller: active,
-                    area: constraints.biggest,
-                  ),
-                if (_dragging) _dropHint(context),
-              ],
+      // Find shortcuts wrap the whole Scaffold (not just the body) so Ctrl/Cmd+F,
+      // Ctrl/Cmd+H and Esc fire regardless of which chrome control (app bar,
+      // mode toggle, …) currently holds focus. Autofocus so they also work from
+      // the initial Preview, which requests no focus of its own.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+              _openFind(active),
+          const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
+              _openFind(active),
+          const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
+              _openFind(active, replace: true),
+          const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () =>
+              _openFind(active, replace: true),
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            if (_find.visible) _find.hide();
+          },
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            appBar: AppBar(
+              titleSpacing: 0,
+              // The open-document tabs sit where the filename would be.
+              title: _TabStrip(
+                workspace: ws,
+                onClose: _closeTab,
+                onTabDragEnd: _onTabDragEnd,
+              ),
+              actions: _actions(context, ws, active, theme, isNarrow),
+              // On narrow (phone) layouts the mode selector gets its own bar; on
+              // wide layouts it lives in the actions row. The format toolbar is no
+              // longer docked here — it floats over the body (see below).
+              bottom: isNarrow
+                  ? PreferredSize(
+                      preferredSize: const Size.fromHeight(48),
+                      child: _ModeBar(doc: active),
+                    )
+                  : null,
+            ),
+            body: DropTarget(
+              onDragEntered: (_) => setState(() => _dragging = true),
+              onDragExited: (_) => setState(() => _dragging = false),
+              onDragDone: (detail) => _onFilesDropped(detail, ws),
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    Positioned.fill(child: _body(active)),
+                    // The floating, draggable format palette — hidden in Preview
+                    // (nothing to edit there) and, in a source mode, while find is
+                    // open so it can't cover the find card on narrow windows.
+                    if (active.mode != EditorMode.preview &&
+                        !(_find.visible && active.mode.isSource))
+                      FloatingFormatToolbar(
+                        controller: active,
+                        area: constraints.biggest,
+                      ),
+                    if (_dragging) _dropHint(context),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -295,9 +349,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       case EditorMode.wysiwyg:
         return WysiwygView(key: key, controller: doc);
       case EditorMode.split:
-        return SplitView(key: key, controller: doc);
+        return SplitView(key: key, controller: doc, find: _find);
       case EditorMode.raw:
-        return RawSourceView(key: key, controller: doc);
+        return RawSourceView(key: key, controller: doc, find: _find);
       case EditorMode.preview:
         return PreviewView(key: key, markdown: doc.currentMarkdown());
     }
@@ -344,6 +398,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           itemBuilder: (_) => const [
             PopupMenuItem(value: 'open', child: Text('Open…')),
             PopupMenuItem(value: 'new', child: Text('New tab')),
+            PopupMenuItem(value: 'find', child: Text('Find / Replace')),
             PopupMenuItem(value: 'save', child: Text('Save')),
             PopupMenuItem(value: 'saveAs', child: Text('Save As…')),
             PopupMenuItem(value: 'print', child: Text('Print / Export PDF')),
@@ -363,6 +418,11 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         tooltip: 'Open',
         icon: const Icon(Icons.folder_open_outlined),
         onPressed: () => _open(context, ws),
+      ),
+      IconButton(
+        tooltip: 'Find / Replace (Ctrl+F)',
+        icon: const Icon(Icons.search_rounded),
+        onPressed: () => _openFind(active),
       ),
       IconButton(
         tooltip: 'Save',
@@ -596,6 +656,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       case 'new':
         ws.newDocument();
         break;
+      case 'find':
+        _openFind(active);
+        break;
       case 'save':
         _save(context, active);
         break;
@@ -745,9 +808,8 @@ class _TabStripState extends State<_TabStrip> {
     if (event is! PointerScrollEvent || !_scroll.hasClients) return;
     // Translate vertical wheel into horizontal scroll (a horizontal ListView
     // otherwise ignores the wheel on desktop).
-    final primary = event.scrollDelta.dy != 0
-        ? event.scrollDelta.dy
-        : event.scrollDelta.dx;
+    final primary =
+        event.scrollDelta.dy != 0 ? event.scrollDelta.dy : event.scrollDelta.dx;
     final target =
         (_scroll.offset + primary).clamp(0.0, _scroll.position.maxScrollExtent);
     _scroll.jumpTo(target);
@@ -796,69 +858,69 @@ class _TabStripState extends State<_TabStrip> {
                 // after the last one.
                 itemCount: docs.length + 1,
                 itemBuilder: (context, i) {
-                if (i == docs.length) {
-                  return DragTarget<int>(
-                    onWillAcceptWithDetails: (d) => true,
-                    onAcceptWithDetails: (d) =>
-                        workspace.reorder(d.data, docs.length),
-                    builder: (context, candidate, rejected) => Container(
-                      width: 64,
-                      alignment: Alignment.centerLeft,
-                      decoration: BoxDecoration(
-                        border: Border(
-                          left: BorderSide(
-                            color: candidate.isNotEmpty
-                                ? cs.primary
-                                : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }
-                final tab = _Tab(
-                  doc: docs[i],
-                  selected: i == workspace.activeIndex,
-                  onTap: () => workspace.select(i),
-                  onClose: () => widget.onClose(i),
-                );
-                return DragTarget<int>(
-                  onWillAcceptWithDetails: (d) => d.data != i,
-                  onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
-                  builder: (context, candidate, rejected) {
-                    return Container(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          left: BorderSide(
-                            color: candidate.isNotEmpty
-                                ? cs.primary
-                                : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                      child: Draggable<int>(
-                        data: i,
-                        feedback: Material(
-                          color: Colors.transparent,
-                          elevation: 6,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 220),
-                            child: Container(
-                              color: cs.surfaceContainerHigh,
-                              child: tab,
+                  if (i == docs.length) {
+                    return DragTarget<int>(
+                      onWillAcceptWithDetails: (d) => true,
+                      onAcceptWithDetails: (d) =>
+                          workspace.reorder(d.data, docs.length),
+                      builder: (context, candidate, rejected) => Container(
+                        width: 64,
+                        alignment: Alignment.centerLeft,
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: candidate.isNotEmpty
+                                  ? cs.primary
+                                  : Colors.transparent,
+                              width: 2,
                             ),
                           ),
                         ),
-                        childWhenDragging: Opacity(opacity: 0.3, child: tab),
-                        onDragEnd: (details) =>
-                            widget.onTabDragEnd(i, details),
-                        child: tab,
                       ),
                     );
-                  },
-                );
+                  }
+                  final tab = _Tab(
+                    doc: docs[i],
+                    selected: i == workspace.activeIndex,
+                    onTap: () => workspace.select(i),
+                    onClose: () => widget.onClose(i),
+                  );
+                  return DragTarget<int>(
+                    onWillAcceptWithDetails: (d) => d.data != i,
+                    onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
+                    builder: (context, candidate, rejected) {
+                      return Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: candidate.isNotEmpty
+                                  ? cs.primary
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Draggable<int>(
+                          data: i,
+                          feedback: Material(
+                            color: Colors.transparent,
+                            elevation: 6,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 220),
+                              child: Container(
+                                color: cs.surfaceContainerHigh,
+                                child: tab,
+                              ),
+                            ),
+                          ),
+                          childWhenDragging: Opacity(opacity: 0.3, child: tab),
+                          onDragEnd: (details) =>
+                              widget.onTabDragEnd(i, details),
+                          child: tab,
+                        ),
+                      );
+                    },
+                  );
                 },
               ),
             ),
@@ -937,8 +999,7 @@ class _Tab extends StatelessWidget {
                 tooltip: 'Close',
                 iconSize: 14,
                 visualDensity: VisualDensity.compact,
-                constraints:
-                    const BoxConstraints(minWidth: 28, minHeight: 28),
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                 padding: EdgeInsets.zero,
                 icon: const Icon(Icons.close_rounded),
                 onPressed: onClose,
