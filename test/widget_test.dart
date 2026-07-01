@@ -230,6 +230,37 @@ void main() {
     // A borderless empty span contributes nothing (no stray space).
     final empty = builder.renderInlineText('X<span id="bookmark"></span>Y');
     expect(literal(empty), 'XY');
+
+    // The bordered (blank) span is the *outer* one; its whitespace is wrapped in
+    // a nested span. The fill-in line must still be drawn.
+    final outerBlank = builder.renderInlineText(
+        '<span style="min-width:150px; border-bottom:1px solid;">'
+        '<span>&nbsp;</span></span>');
+    expect(outerBlank.any((s) => s is pw.WidgetSpan), isTrue);
+    expect(literal(outerBlank).contains('span'), isFalse);
+
+    // A zero-percent width collapses like an absolute zero.
+    final zeroPct = builder.renderInlineText(
+        '<span style="width:0%; border-bottom:1px solid;"> </span>');
+    expect(zeroPct.any((s) => s is pw.WidgetSpan), isFalse);
+  });
+
+  test('Table cells render inline <span> instead of leaking the markup',
+      () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    // A form-row table with a fill-in blank in a cell.
+    final widgets = builder.build(
+      '| Field | Value |\n'
+      '|---|---|\n'
+      '| Signed | <span style="min-width:150px; border-bottom:1px solid #555;"> '
+      '</span> |\n',
+    );
+    expect(widgets, isNotEmpty);
+    // Lays out end-to-end (the cell's WidgetSpan blank would otherwise throw).
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(build: (_) => widgets));
+    expect(await doc.save(), isNotEmpty);
   });
 
   test('PDF builder renders a double-spaced, justified, indented body',

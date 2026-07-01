@@ -810,14 +810,6 @@ class MarkdownPdfBuilder {
 
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
-    final headerStyle = pw.TextStyle(
-      font: fonts.bold,
-      fontSize: 10.5,
-      color: PdfColors.white,
-    );
-    final cellStyle =
-        pw.TextStyle(font: fonts.base, fontSize: 10.5, color: _text);
-
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
       final isHead = section.tag == 'thead';
@@ -830,8 +822,18 @@ class MarkdownPdfBuilder {
             pw.Padding(
               padding:
                   const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: pw.Text(cell.textContent,
-                  style: isHead ? headerStyle : cellStyle),
+              // Route cell text through the span renderer so inline `<span>`
+              // fill-in lines / labels render instead of leaking their markup.
+              child: pw.RichText(
+                text: pw.TextSpan(
+                  children: _renderTextWithSpans(
+                    cell.textContent,
+                    bold: isHead,
+                    color: isHead ? PdfColors.white : _text,
+                    size: 10.5,
+                  ),
+                ),
+              ),
             ),
           );
         }
@@ -1093,7 +1095,18 @@ class MarkdownPdfBuilder {
       final (contentStart, closeStart, closeEnd) = matched;
       final attrs = open.group(1) ?? '';
       final content = text.substring(contentStart, closeStart);
-      if (_spanOpen.hasMatch(content)) {
+      if (_spanIsBlank(attrs, content)) {
+        // The outer span itself is the fill-in line (even if its whitespace is
+        // wrapped in a nested span) — draw it rather than recursing into the
+        // empty child.
+        out.add(_spanFragment(attrs, content,
+            bold: bold,
+            italic: italic,
+            underline: underline,
+            strike: strike,
+            color: color,
+            size: size));
+      } else if (_spanOpen.hasMatch(content)) {
         // Nested span(s): recurse so an inner blank/label still renders instead
         // of being flattened to text, inheriting the outer span's styling.
         final os = _parseStyle(attrs);
@@ -1145,6 +1158,20 @@ class MarkdownPdfBuilder {
     return null;
   }
 
+  /// A span's raw content with all tags and entities removed and trimmed — used
+  /// to decide whether a bordered span is an empty fill-in blank.
+  String _effectiveText(String raw) => _decodeEntities(raw
+          .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll(RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' '))
+      .trim();
+
+  /// Whether a span is a fill-in blank: a visible bottom border and no real text
+  /// (its whitespace may itself be wrapped in nested spans).
+  bool _spanIsBlank(String attrs, String content) =>
+      _resolveBorder(_styleDecls(attrs)) != null &&
+      _effectiveText(content).isEmpty;
+
   /// Render one `<span style="…">…</span>`: a visible bottom border with no real
   /// text becomes a baseline rule of the requested width (a signature/date
   /// blank); anything else becomes a styled text run (colour/weight/size),
@@ -1172,15 +1199,22 @@ class MarkdownPdfBuilder {
 
     if (border != null && !hasText) {
       // CSS width is subject to the min-width floor, so honour the larger of the
-      // two when both are given. Only a *missing* width falls back to the
-      // default; an explicit width/min-width of 0 collapses the blank.
-      final candidates =
+      // two positive values. Only a *missing* width falls back to the default;
+      // an explicit zero (length or percentage) collapses the blank.
+      final lengths =
           [_lengthPt(style['width']), _lengthPt(style['min-width'])]
               .whereType<double>();
-      final width = candidates.isEmpty
-          ? 108.0
-          : candidates.reduce((a, b) => a > b ? a : b);
-      if (width <= 0) return const pw.TextSpan(text: '');
+      final positive = lengths.where((v) => v > 0);
+      final double width;
+      if (positive.isNotEmpty) {
+        width = positive.reduce((a, b) => a > b ? a : b);
+      } else {
+        final explicitZero = lengths.any((v) => v <= 0) ||
+            _percent(style['width']) == 0 ||
+            _percent(style['min-width']) == 0;
+        if (explicitZero) return const pw.TextSpan(text: '');
+        width = 108.0; // missing (or an unresolved non-zero %) → default
+      }
       final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
       final lineSize = size ?? 11.0;
       // A zero-baseline WidgetSpan sits on the text baseline, so the container's
