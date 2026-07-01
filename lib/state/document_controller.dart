@@ -67,6 +67,13 @@ class DocumentController extends ChangeNotifier {
   StreamSubscription<dynamic>? _txnSub;
   bool _suppressDirty = false;
 
+  /// Whether the user has actually edited in the WYSIWYG editor since entering
+  /// it. AppFlowy's Markdown serialisation is lossy (it drops blank lines and
+  /// normalises bullets/emphasis/ordered markers), so we only push the block
+  /// model back to [sourceController] when this is true — a no-op visit to Edit
+  /// mode must never rewrite the user's Markdown.
+  bool _wysiwygEdited = false;
+
   // --- External-change handling ----------------------------------------------
   String? _lastSyncedContent;
   StreamSubscription<WatchEvent>? _watchSub;
@@ -96,7 +103,12 @@ class DocumentController extends ChangeNotifier {
     editorState = state;
     _editorEpoch++;
     _txnSub = editorState.transactionStream.listen((_) {
-      if (!_suppressDirty) _markDirty();
+      // Transactions only originate from the block editor, so a non-suppressed
+      // one means the user genuinely edited in WYSIWYG.
+      if (!_suppressDirty) {
+        _wysiwygEdited = true;
+        _markDirty();
+      }
     });
   }
 
@@ -125,6 +137,10 @@ class DocumentController extends ChangeNotifier {
     bool markDirty = false,
   }) {
     _suppressDirty = true;
+    // A fresh buffer replaces both representations, so nothing has been edited
+    // in WYSIWYG yet — otherwise a reload (conflict "Reload", auto-reload) while
+    // in Edit mode would treat untouched content as edited and round-trip it.
+    _wysiwygEdited = false;
     sourceController.text = content;
     _setEditorState(EditorState(document: markdownToDocument(content)));
     _filePath = path;
@@ -175,10 +191,14 @@ class DocumentController extends ChangeNotifier {
     final leavingWysiwyg = _mode == EditorMode.wysiwyg;
     final enteringWysiwyg = next == EditorMode.wysiwyg;
 
-    if (leavingWysiwyg) {
+    // Only re-serialise the block model into the Markdown source when the user
+    // actually edited in WYSIWYG; otherwise a round-trip through AppFlowy would
+    // silently reformat untouched source (lost blank lines, changed markers).
+    if (leavingWysiwyg && _wysiwygEdited) {
       sourceController.text = documentToMarkdown(editorState.document);
     }
     if (enteringWysiwyg) {
+      _wysiwygEdited = false;
       _setEditorState(
         EditorState(document: markdownToDocument(sourceController.text)),
       );
@@ -190,7 +210,10 @@ class DocumentController extends ChangeNotifier {
   }
 
   String currentMarkdown() {
-    if (_mode == EditorMode.wysiwyg) {
+    // While in WYSIWYG, only trust the (lossy) block-model serialisation once the
+    // user has edited there; before any edit the untouched source is canonical,
+    // so a Save/Print from a freshly-opened Edit view keeps the original text.
+    if (_mode == EditorMode.wysiwyg && _wysiwygEdited) {
       return documentToMarkdown(editorState.document);
     }
     return sourceController.text;
