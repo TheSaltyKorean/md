@@ -63,12 +63,19 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
+    // Rebuild when find opens/closes so the floating toolbar can yield to it.
+    _find.addListener(_onFindChanged);
+  }
+
+  void _onFindChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     if (_isDesktop) windowManager.removeListener(this);
     _bannerDoc?.removeListener(_onActiveDocChanged);
+    _find.removeListener(_onFindChanged);
     _find.dispose();
     super.dispose();
   }
@@ -292,23 +299,29 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               if (_find.visible) _find.hide();
             },
           },
-          child: DropTarget(
-            onDragEntered: (_) => setState(() => _dragging = true),
-            onDragExited: (_) => setState(() => _dragging = false),
-            onDragDone: (detail) => _onFilesDropped(detail, ws),
-            child: LayoutBuilder(
-              builder: (context, constraints) => Stack(
-                children: [
-                  Positioned.fill(child: _body(active)),
-                  // The floating, draggable format palette — hidden in Preview
-                  // (nothing to edit there).
-                  if (active.mode != EditorMode.preview)
-                    FloatingFormatToolbar(
-                      controller: active,
-                      area: constraints.biggest,
-                    ),
-                  if (_dragging) _dropHint(context),
-                ],
+          // Autofocus so the shortcuts fire even when the app opens in Preview
+          // (which requests no focus of its own).
+          child: Focus(
+            autofocus: true,
+            child: DropTarget(
+              onDragEntered: (_) => setState(() => _dragging = true),
+              onDragExited: (_) => setState(() => _dragging = false),
+              onDragDone: (detail) => _onFilesDropped(detail, ws),
+              child: LayoutBuilder(
+                builder: (context, constraints) => Stack(
+                  children: [
+                    Positioned.fill(child: _body(active)),
+                    // The floating, draggable format palette — hidden in Preview
+                    // (nothing to edit there) and while find is open so it can't
+                    // cover the find card on narrow windows.
+                    if (active.mode != EditorMode.preview && !_find.visible)
+                      FloatingFormatToolbar(
+                        controller: active,
+                        area: constraints.biggest,
+                      ),
+                    if (_dragging) _dropHint(context),
+                  ],
+                ),
               ),
             ),
           ),

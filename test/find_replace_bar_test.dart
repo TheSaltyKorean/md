@@ -49,6 +49,39 @@ void main() {
     expect(target.text, 'X bar X baz X');
   });
 
+  testWidgets('the in-bar chevron toggles the replace row', (tester) async {
+    final target = TextEditingController(text: 'abc');
+    final scroll = ScrollController();
+    final fc = FindController()..openFind(); // find only, no replace row
+    addTearDown(() {
+      target.dispose();
+      scroll.dispose();
+      fc.dispose();
+    });
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: FindReplaceBar(find: fc, target: target, scroll: scroll),
+            ),
+          ],
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    // Only the find field is present initially.
+    expect(find.byType(TextField), findsOneWidget);
+
+    // The chevron reveals the replace row (reachable without Ctrl+H / desktop).
+    await tester.tap(find.byTooltip('Toggle replace (Ctrl+H)'));
+    await tester.pump();
+    expect(fc.replaceVisible, isTrue);
+    expect(find.byType(TextField), findsNWidgets(2));
+  });
+
   testWidgets('reports no results and an invalid regex', (tester) async {
     final target = TextEditingController(text: 'hello world');
     final scroll = ScrollController();

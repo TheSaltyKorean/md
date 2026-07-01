@@ -29,6 +29,14 @@ class FindController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Toggle the replace row from inside the bar (also ensures it's open), so
+  /// touch users who opened plain find can still reach the replace field.
+  void toggleReplace() {
+    _visible = true;
+    _replaceVisible = !_replaceVisible;
+    notifyListeners();
+  }
+
   void hide() {
     if (!_visible) return;
     _visible = false;

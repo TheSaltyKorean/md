@@ -26,35 +26,65 @@ class RawSourceView extends StatefulWidget {
 
 class _RawSourceViewState extends State<RawSourceView> {
   final ScrollController _scroll = ScrollController();
+  final FocusNode _editorFocus = FocusNode(debugLabel: 'raw source');
+  bool _wasFindVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _wasFindVisible = widget.find.visible;
+    widget.find.addListener(_onFindChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant RawSourceView old) {
+    super.didUpdateWidget(old);
+    if (!identical(old.find, widget.find)) {
+      old.find.removeListener(_onFindChanged);
+      widget.find.addListener(_onFindChanged);
+      _wasFindVisible = widget.find.visible;
+    }
+  }
+
+  void _onFindChanged() {
+    // When the find bar closes, return focus to the editor so typing continues.
+    if (_wasFindVisible && !widget.find.visible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _editorFocus.requestFocus();
+      });
+    }
+    _wasFindVisible = widget.find.visible;
+    if (mounted) setState(() {});
+  }
 
   @override
   void dispose() {
+    widget.find.removeListener(_onFindChanged);
     _scroll.dispose();
+    _editorFocus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ListenableBuilder(
-      listenable: widget.find,
-      builder: (context, _) => Stack(
-        children: [
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: SourcePane(
+            controller: widget.controller,
+            scrollController: _scroll,
+            focusNode: _editorFocus,
+          ),
+        ),
+        if (widget.find.visible)
           Positioned.fill(
-            child: SourcePane(
-              controller: widget.controller,
-              scrollController: _scroll,
+            child: FindReplaceBar(
+              find: widget.find,
+              target: widget.controller.sourceController,
+              scroll: _scroll,
             ),
           ),
-          if (widget.find.visible)
-            Positioned.fill(
-              child: FindReplaceBar(
-                find: widget.find,
-                target: widget.controller.sourceController,
-                scroll: _scroll,
-              ),
-            ),
-        ],
-      ),
+      ],
     );
   }
 }

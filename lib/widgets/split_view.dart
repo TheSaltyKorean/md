@@ -25,10 +25,12 @@ class SplitView extends StatefulWidget {
 class _SplitViewState extends State<SplitView> {
   final ScrollController _sourceScroll = ScrollController();
   final ScrollController _previewScroll = ScrollController();
+  final FocusNode _sourceFocus = FocusNode(debugLabel: 'split source');
 
   /// Guards against scroll-sync feedback loops.
   bool _syncing = false;
   int _lastCursorLine = -1;
+  bool _wasFindVisible = false;
 
   TextEditingController get _text => widget.controller.sourceController;
 
@@ -38,6 +40,7 @@ class _SplitViewState extends State<SplitView> {
     _sourceScroll.addListener(_onSourceScroll);
     _previewScroll.addListener(_onPreviewScroll);
     _text.addListener(_onTextChanged);
+    _wasFindVisible = widget.find.visible;
     widget.find.addListener(_onFindChanged);
   }
 
@@ -47,10 +50,18 @@ class _SplitViewState extends State<SplitView> {
     if (!identical(old.find, widget.find)) {
       old.find.removeListener(_onFindChanged);
       widget.find.addListener(_onFindChanged);
+      _wasFindVisible = widget.find.visible;
     }
   }
 
   void _onFindChanged() {
+    // When the find bar closes, return focus to the source so typing continues.
+    if (_wasFindVisible && !widget.find.visible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _sourceFocus.requestFocus();
+      });
+    }
+    _wasFindVisible = widget.find.visible;
     if (mounted) setState(() {}); // show/hide the find bar overlay
   }
 
@@ -62,6 +73,7 @@ class _SplitViewState extends State<SplitView> {
     widget.find.removeListener(_onFindChanged);
     _sourceScroll.dispose();
     _previewScroll.dispose();
+    _sourceFocus.dispose();
     super.dispose();
   }
 
@@ -124,6 +136,7 @@ class _SplitViewState extends State<SplitView> {
           child: SourcePane(
             controller: widget.controller,
             scrollController: _sourceScroll,
+            focusNode: _sourceFocus,
           ),
         ),
         if (widget.find.visible)

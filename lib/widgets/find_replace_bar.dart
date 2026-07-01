@@ -92,6 +92,8 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
   void _onFindChanged() {
     // The bar is (re)opened — pull focus back to the query field and reselect.
     if (widget.find.visible) _focusQuery();
+    // Reflect replace-row toggles even when no parent rebuilds us.
+    if (mounted) setState(() {});
   }
 
   void _focusQuery() {
@@ -358,6 +360,13 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
         : '${_current + 1} of ${_matches.length}';
     return Row(
       children: [
+        _iconBtn(
+          widget.find.replaceVisible
+              ? Icons.expand_more_rounded
+              : Icons.chevron_right_rounded,
+          'Toggle replace (Ctrl+H)',
+          widget.find.toggleReplace,
+        ),
         Expanded(
           child: Focus(
             onKeyEvent: _onQueryKey,
