@@ -42,6 +42,11 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   late bool _coverLogo;
   late bool _useAccent;
   late int _accent;
+  late bool _legalMode;
+  late bool _justifyBody;
+  late bool _centerHeadings;
+  late double _lineSpacing;
+  late double _firstLineIndent;
 
   static const _swatches = <int>[
     0xFF0D3B66, // navy
@@ -82,6 +87,11 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     _coverLogo = p.coverLogo;
     _useAccent = p.accentColor != null;
     _accent = p.accentColor ?? p.primaryColor;
+    _legalMode = p.legalMode;
+    _justifyBody = p.justifyBody;
+    _centerHeadings = p.centerHeadings;
+    _lineSpacing = p.lineSpacingMultiple.clamp(1.0, 2.0);
+    _firstLineIndent = p.firstLineIndentIn.clamp(0.0, 1.0);
   }
 
   @override
@@ -125,6 +135,11 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         footerCentered: _footerCentered,
         coverLogo: _coverLogo,
         accentColor: _useAccent ? _accent : null,
+        legalMode: _legalMode,
+        justifyBody: _justifyBody,
+        centerHeadings: _centerHeadings,
+        lineSpacingMultiple: _lineSpacing,
+        firstLineIndentIn: _firstLineIndent,
       );
 
   Future<void> _pickLogo() async {
@@ -300,6 +315,69 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
               labelText: 'Diagonal watermark text (optional)',
               hintText: 'e.g. CONFIDENTIAL',
             ),
+          ),
+          const SizedBox(height: 20),
+          _section('Legal / manuscript'),
+          SwitchListTile(
+            value: _legalMode,
+            onChanged: (v) => setState(() => _legalMode = v),
+            title: const Text('Legal (monochrome) mode'),
+            subtitle: const Text(
+                'Headings, bold and links print in the body colour — no branding'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: _justifyBody,
+            onChanged: (v) => setState(() => _justifyBody = v),
+            title: const Text('Justify body paragraphs'),
+            subtitle: const Text('Flush left and right instead of ragged-right'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          SwitchListTile(
+            value: _centerHeadings,
+            onChanged: (v) => setState(() => _centerHeadings = v),
+            title: const Text('Centre headings'),
+            subtitle: const Text('For pleading captions / titles'),
+            contentPadding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('Line spacing'),
+              Expanded(
+                child: Slider(
+                  value: _lineSpacing,
+                  min: 1.0,
+                  max: 2.0,
+                  divisions: 4,
+                  label: '${_lineSpacing.toStringAsFixed(2)}×',
+                  onChanged: (v) => setState(() => _lineSpacing = v),
+                ),
+              ),
+              Text(_lineSpacing <= 1.01
+                  ? 'Single'
+                  : (_lineSpacing >= 1.99
+                      ? 'Double'
+                      : '${_lineSpacing.toStringAsFixed(2)}×')),
+            ],
+          ),
+          Row(
+            children: [
+              const Text('First-line indent'),
+              Expanded(
+                child: Slider(
+                  value: _firstLineIndent,
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 4,
+                  label: '${_firstLineIndent.toStringAsFixed(2)}"',
+                  onChanged: (v) => setState(() => _firstLineIndent = v),
+                ),
+              ),
+              Text(_firstLineIndent <= 0.001
+                  ? 'None'
+                  : '${_firstLineIndent.toStringAsFixed(2)}"'),
+            ],
           ),
           const SizedBox(height: 20),
           _section('Layout'),

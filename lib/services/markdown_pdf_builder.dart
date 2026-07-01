@@ -55,6 +55,28 @@ class MarkdownPdfBuilder {
   PdfColor get _accent =>
       PdfColor.fromInt(profile.accentColor ?? profile.primaryColor);
 
+  /// Colour for headings. In [PrintProfile.legalMode] headings drop the brand
+  /// colour and print in the body text colour (monochrome court output).
+  PdfColor get _headingColor => profile.legalMode ? _text : _primary;
+
+  /// First-line paragraph indent in PDF points (0 when disabled). The `pdf`
+  /// package has no native first-line indent, so we emulate it by prepending a
+  /// fixed-width [pw.WidgetSpan] spacer to the paragraph's first line — it wraps
+  /// and justifies like any other span (see [_bodyRich]).
+  double get _firstLineIndentPt =>
+      profile.firstLineIndentIn <= 0 ? 0 : profile.firstLineIndentIn * 72.0;
+
+  /// Extra inter-line leading (pt) for a run at [size], derived from the
+  /// profile's line-spacing multiple. 1.0 keeps the historical 2.5pt base
+  /// leading; larger multiples add `size × (multiple − 1)` on top (so 2.0 ≈
+  /// double spacing). Never negative.
+  double _leadingFor(double size) {
+    const base = 2.5;
+    final extra = size * (profile.lineSpacingMultiple - 1.0);
+    final v = base + extra;
+    return v < 0 ? 0 : v;
+  }
+
   List<pw.Widget> build(String markdown) {
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
@@ -557,30 +579,39 @@ class MarkdownPdfBuilder {
   }
 
   pw.Widget _heading(md.Element el, double size, {double spacingTop = 10}) {
+    final center = profile.centerHeadings;
     final text = pw.RichText(
+      textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
       text: pw.TextSpan(
         children: _inline(el.children,
-            color: _primary, sizeOverride: size, boldDefault: true),
+            color: _headingColor, sizeOverride: size, boldDefault: true),
       ),
     );
+    // A RichText shrink-wraps to its text, so centring only bites when the
+    // heading is stretched to the full content width first.
+    final headingWidget =
+        center ? pw.SizedBox(width: double.infinity, child: text) : text;
     // Brand look: a primary-colour underline rule beneath section headings
     // (h2/h3), but not the document title (h1) or minor sub-headings.
     if (profile.headingRule && size >= 15 && size <= 19) {
       return pw.Padding(
         padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
         child: pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          crossAxisAlignment: center
+              ? pw.CrossAxisAlignment.center
+              : pw.CrossAxisAlignment.start,
           children: [
             pw.Padding(
-                padding: const pw.EdgeInsets.only(bottom: 2.5), child: text),
-            pw.Container(height: 1, color: _primary),
+                padding: const pw.EdgeInsets.only(bottom: 2.5),
+                child: headingWidget),
+            pw.Container(height: 1, color: _headingColor),
           ],
         ),
       );
     }
     return pw.Padding(
       padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
-      child: text,
+      child: headingWidget,
     );
   }
 
@@ -591,16 +622,18 @@ class MarkdownPdfBuilder {
     if (!hasImage) {
       return pw.Padding(
         padding: const pw.EdgeInsets.only(bottom: 8),
-        child: pw.RichText(text: pw.TextSpan(children: _inline(children))),
+        child: _bodyRich(children, indentFirstLine: true),
       );
     }
 
     final widgets = <pw.Widget>[];
     final run = <md.Node>[];
+    // Only the paragraph's first text run carries the first-line indent.
+    var indentNext = true;
     void flushRun() {
       if (run.isEmpty) return;
-      widgets
-          .add(pw.RichText(text: pw.TextSpan(children: _inline(List.of(run)))));
+      widgets.add(_bodyRich(List.of(run), indentFirstLine: indentNext));
+      indentNext = false;
       run.clear();
     }
 
@@ -608,6 +641,7 @@ class MarkdownPdfBuilder {
       if (n is md.Element && n.tag == 'img') {
         flushRun();
         widgets.add(_image(n));
+        indentNext = false; // an image breaks the flow; no indent after it
       } else {
         run.add(n);
       }
@@ -621,6 +655,28 @@ class MarkdownPdfBuilder {
         children: widgets,
       ),
     );
+  }
+
+  /// A body-text paragraph, honouring [PrintProfile.justifyBody] and the
+  /// first-line indent. Justification only fills to the longest natural line
+  /// unless the paragraph is stretched to the full content width, so a justified
+  /// paragraph is wrapped in a full-width box.
+  pw.Widget _bodyRich(List<md.Node> nodes, {bool indentFirstLine = false}) {
+    final spans = <pw.InlineSpan>[];
+    if (indentFirstLine && _firstLineIndentPt > 0) {
+      // A zero-height spacer on the first line; it advances the pen like a word,
+      // so wrapping and justification stay correct.
+      spans.add(pw.WidgetSpan(child: pw.SizedBox(width: _firstLineIndentPt)));
+    }
+    spans.addAll(_inline(nodes));
+    final rich = pw.RichText(
+      textAlign:
+          profile.justifyBody ? pw.TextAlign.justify : pw.TextAlign.left,
+      text: pw.TextSpan(children: spans),
+    );
+    return profile.justifyBody
+        ? pw.SizedBox(width: double.infinity, child: rich)
+        : rich;
   }
 
   pw.Widget _blockquote(md.Element el) {
@@ -856,8 +912,12 @@ class MarkdownPdfBuilder {
                 code: code,
                 strike: strike,
                 underline: underline,
-                // Brand look: bold emphasis takes the primary colour.
-                color: color ?? (profile.headingRule ? _primary : null),
+                // Brand look: bold emphasis takes the primary colour — but not
+                // in legal mode, which stays monochrome.
+                color: color ??
+                    (profile.headingRule && !profile.legalMode
+                        ? _primary
+                        : null),
                 sizeOverride: sizeOverride,
                 boldDefault: boldDefault));
             break;
@@ -914,10 +974,12 @@ class MarkdownPdfBuilder {
                 style: _textStyle(
                   bold: bold || boldDefault,
                   italic: italic,
-                  color: _accent,
+                  // Legal mode prints links in the body colour (monochrome).
+                  color: profile.legalMode ? _text : _accent,
                   size: sizeOverride,
-                  // Brand links are coloured but not underlined.
-                  underline: !profile.headingRule,
+                  // Brand links are coloured but not underlined; legal/plain
+                  // links keep the underline.
+                  underline: profile.legalMode || !profile.headingRule,
                 ),
               ),
             );
@@ -972,7 +1034,7 @@ class MarkdownPdfBuilder {
       font: font,
       fontSize: size ?? 11,
       color: color ?? _text,
-      lineSpacing: 2.5,
+      lineSpacing: _leadingFor(size ?? 11),
       decoration:
           decorations.isEmpty ? null : pw.TextDecoration.combine(decorations),
     );

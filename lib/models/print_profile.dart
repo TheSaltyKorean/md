@@ -33,6 +33,11 @@ class PrintProfile {
     this.footerCentered = false,
     this.coverLogo = false,
     this.accentColor,
+    this.legalMode = false,
+    this.justifyBody = false,
+    this.lineSpacingMultiple = 1.0,
+    this.firstLineIndentIn = 0.0,
+    this.centerHeadings = false,
   });
 
   /// Stable identifier (also used as the per-document association key).
@@ -99,6 +104,24 @@ class PrintProfile {
   /// ARGB colour for links / secondary accents. Null = use [primaryColor].
   final int? accentColor;
 
+  /// Render the document in a monochrome "legal" style: headings, bold emphasis
+  /// and links take the body text colour instead of the brand/accent colour, so
+  /// the output prints cleanly in black and white as court filings expect.
+  final bool legalMode;
+
+  /// Justify body paragraphs (flush left *and* right) instead of ragged-right.
+  final bool justifyBody;
+
+  /// Line-height multiple for body text. 1.0 = single spacing (the default look),
+  /// 2.0 = double spacing (a common court-filing requirement).
+  final double lineSpacingMultiple;
+
+  /// First-line indent for body paragraphs, in inches (e.g. 0.5"). 0 = none.
+  final double firstLineIndentIn;
+
+  /// Centre headings horizontally (used for pleading captions / titles).
+  final bool centerHeadings;
+
   PrintProfile copyWith({
     String? id,
     String? name,
@@ -121,6 +144,11 @@ class PrintProfile {
     bool? footerCentered,
     bool? coverLogo,
     Object? accentColor = _sentinel,
+    bool? legalMode,
+    bool? justifyBody,
+    double? lineSpacingMultiple,
+    double? firstLineIndentIn,
+    bool? centerHeadings,
   }) {
     return PrintProfile(
       id: id ?? this.id,
@@ -152,6 +180,11 @@ class PrintProfile {
       coverLogo: coverLogo ?? this.coverLogo,
       accentColor:
           accentColor == _sentinel ? this.accentColor : accentColor as int?,
+      legalMode: legalMode ?? this.legalMode,
+      justifyBody: justifyBody ?? this.justifyBody,
+      lineSpacingMultiple: lineSpacingMultiple ?? this.lineSpacingMultiple,
+      firstLineIndentIn: firstLineIndentIn ?? this.firstLineIndentIn,
+      centerHeadings: centerHeadings ?? this.centerHeadings,
     );
   }
 
@@ -177,6 +210,11 @@ class PrintProfile {
         'footerCentered': footerCentered,
         'coverLogo': coverLogo,
         'accentColor': accentColor,
+        'legalMode': legalMode,
+        'justifyBody': justifyBody,
+        'lineSpacingMultiple': lineSpacingMultiple,
+        'firstLineIndentIn': firstLineIndentIn,
+        'centerHeadings': centerHeadings,
       };
 
   factory PrintProfile.fromJson(Map<String, dynamic> json) => PrintProfile(
@@ -208,6 +246,19 @@ class PrintProfile {
         footerCentered: json['footerCentered'] as bool? ?? false,
         coverLogo: json['coverLogo'] as bool? ?? false,
         accentColor: (json['accentColor'] as num?)?.toInt(),
+        legalMode: json['legalMode'] as bool? ?? false,
+        justifyBody: json['justifyBody'] as bool? ?? false,
+        // Clamp to the editor's slider ranges so imported values stay
+        // representable/adjustable in the profile editor.
+        lineSpacingMultiple:
+            ((json['lineSpacingMultiple'] as num?)?.toDouble() ?? 1.0)
+                .clamp(1.0, 2.0)
+                .toDouble(),
+        firstLineIndentIn:
+            ((json['firstLineIndentIn'] as num?)?.toDouble() ?? 0.0)
+                .clamp(0.0, 1.0)
+                .toDouble(),
+        centerHeadings: json['centerHeadings'] as bool? ?? false,
       );
 
   static String encodeList(List<PrintProfile> profiles) =>
@@ -252,5 +303,26 @@ class PrintProfile {
     accentRule: true,
   );
 
-  static List<PrintProfile> get seeds => const [personal, work];
+  /// Court-filing profile: monochrome serif, 1-inch margins, double-spaced and
+  /// justified body with a 0.5" first-line indent and centred captions —
+  /// the conventions most courts require for pleadings.
+  static const PrintProfile courtFiling = PrintProfile(
+    id: 'court-filing',
+    name: 'Court Filing',
+    fontFamily: 'Noto Serif',
+    primaryColor: 0xFF000000,
+    textColor: 0xFF000000,
+    showPageNumbers: true,
+    showDate: false,
+    showTitleInHeader: false,
+    accentRule: false,
+    marginCm: 2.54, // 1 inch
+    legalMode: true,
+    justifyBody: true,
+    lineSpacingMultiple: 2.0,
+    firstLineIndentIn: 0.5,
+    centerHeadings: true,
+  );
+
+  static List<PrintProfile> get seeds => const [personal, work, courtFiling];
 }
