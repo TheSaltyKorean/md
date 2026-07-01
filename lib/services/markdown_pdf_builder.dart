@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:markdown/markdown.dart' as md;
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
@@ -898,20 +899,16 @@ class MarkdownPdfBuilder {
 
     for (final n in nodes) {
       if (n is md.Text) {
-        spans.add(
-          pw.TextSpan(
-            text: _symbols(n.text),
-            style: _textStyle(
-              bold: bold || boldDefault,
-              italic: italic,
-              code: code,
-              strike: strike,
-              underline: underline,
-              color: color,
-              size: sizeOverride,
-            ),
-          ),
-        );
+        spans.addAll(_renderTextWithSpans(
+          n.text,
+          bold: bold || boldDefault,
+          italic: italic,
+          code: code,
+          strike: strike,
+          underline: underline,
+          color: color,
+          size: sizeOverride,
+        ));
       } else if (n is md.Element) {
         switch (n.tag) {
           case 'strong':
@@ -1010,6 +1007,113 @@ class MarkdownPdfBuilder {
       }
     }
     return spans;
+  }
+
+  static final _spanTag =
+      RegExp(r'<span\b([^>]*)>([\s\S]*?)</span>', caseSensitive: false);
+
+  /// Test hook for the inline-`<span>` rendering (blank lines / styled labels).
+  @visibleForTesting
+  List<pw.InlineSpan> renderInlineText(String text) =>
+      _renderTextWithSpans(text);
+
+  /// Split raw inline text into styled runs, rendering inline `<span>` HTML that
+  /// package:markdown otherwise leaves as literal text. Legal/manuscript docs
+  /// use spans for fill-in "blank" lines (a span with a visible bottom border)
+  /// and small styled labels. Text without a span returns as a single run, and
+  /// inline code is never touched.
+  List<pw.InlineSpan> _renderTextWithSpans(
+    String text, {
+    bool bold = false,
+    bool italic = false,
+    bool code = false,
+    bool strike = false,
+    bool underline = false,
+    PdfColor? color,
+    double? size,
+  }) {
+    pw.InlineSpan run(String s) => pw.TextSpan(
+          text: _symbols(s),
+          style: _textStyle(
+            bold: bold,
+            italic: italic,
+            code: code,
+            strike: strike,
+            underline: underline,
+            color: color,
+            size: size,
+          ),
+        );
+    if (code || !text.contains('<span') || !_spanTag.hasMatch(text)) {
+      return [run(text)];
+    }
+    final out = <pw.InlineSpan>[];
+    var last = 0;
+    for (final m in _spanTag.allMatches(text)) {
+      if (m.start > last) out.add(run(text.substring(last, m.start)));
+      out.add(_spanFragment(m.group(1) ?? '', m.group(2) ?? '',
+          bold: bold, italic: italic, color: color, size: size));
+      last = m.end;
+    }
+    if (last < text.length) out.add(run(text.substring(last)));
+    return out;
+  }
+
+  /// Render one `<span style="…">…</span>`: a visible bottom border with no real
+  /// text becomes a baseline rule of the requested width (a signature/date
+  /// blank); anything else becomes a styled text run (colour/weight/size).
+  pw.InlineSpan _spanFragment(
+    String attrs,
+    String innerRaw, {
+    bool bold = false,
+    bool italic = false,
+    PdfColor? color,
+    double? size,
+  }) {
+    final decls = _styleDecls(attrs);
+    final style = _parseStyle(attrs);
+    final border = _resolveBorder(decls);
+    final inner = _decodeEntities(innerRaw
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll(RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' '));
+    final hasText = inner.trim().isNotEmpty;
+
+    if (border != null && !hasText) {
+      final w = _lengthPt(style['min-width']) ?? _lengthPt(style['width']);
+      final width = (w == null || w <= 0) ? 108.0 : w;
+      final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
+      final lineSize = size ?? 11.0;
+      // A zero-baseline WidgetSpan sits on the text baseline, so the container's
+      // bottom border renders as an underline blank at the baseline.
+      return pw.WidgetSpan(
+        child: pw.Container(
+          width: width,
+          height: lineSize,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 2),
+          decoration: pw.BoxDecoration(
+            border: pw.Border(
+                bottom: pw.BorderSide(color: border.$2, width: thickness)),
+          ),
+        ),
+      );
+    }
+
+    final fw = (style['font-weight'] ?? '').toLowerCase();
+    final isBold = bold || fw == 'bold' || (int.tryParse(fw) ?? 0) >= 600;
+    final isItalic =
+        italic || (style['font-style'] ?? '').toLowerCase() == 'italic';
+    final deco = (style['text-decoration'] ?? '').toLowerCase();
+    return pw.TextSpan(
+      text: _symbols(hasText ? inner : ' '),
+      style: _textStyle(
+        bold: isBold,
+        italic: isItalic,
+        underline: deco.contains('underline'),
+        color: _cssColor(style['color']) ?? color,
+        size: _lengthPt(style['font-size']) ?? size,
+      ),
+    );
   }
 
   pw.TextStyle _textStyle({

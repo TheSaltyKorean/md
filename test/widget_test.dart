@@ -137,6 +137,49 @@ void main() {
     expect(clamped.firstLineIndentIn, 0.0);
   });
 
+  test('Inline <span> fill-in lines and labels never leak as literal HTML', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+
+    String literal(List<pw.InlineSpan> spans) {
+      final sb = StringBuffer();
+      void walk(pw.InlineSpan s) {
+        if (s is pw.TextSpan) {
+          if (s.text != null) sb.write(s.text);
+          for (final c in s.children ?? const <pw.InlineSpan>[]) {
+            walk(c);
+          }
+        }
+      }
+
+      for (final s in spans) {
+        walk(s);
+      }
+      return sb.toString();
+    }
+
+    // A signature/date blank: a span with a bottom border and only whitespace.
+    final blank = builder.renderInlineText(
+      'Name: <span style="display:inline-block; min-width:150px; '
+      'border-bottom:1px solid #555;"> </span> Date',
+    );
+    final blankText = literal(blank);
+    expect(blankText.contains('<span'), isFalse);
+    expect(blankText.contains('min-width'), isFalse);
+    expect(blankText.contains('Name:'), isTrue);
+    expect(blankText.contains('Date'), isTrue);
+    // The blank line itself is drawn as a widget, not text.
+    expect(blank.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A styled label span keeps its text but drops the markup.
+    final label = builder.renderInlineText(
+        'A <span style="color:#c00; font-weight:bold;">label</span> here.');
+    final labelText = literal(label);
+    expect(labelText.contains('<span'), isFalse);
+    expect(labelText.contains('label'), isTrue);
+    expect(label.every((s) => s is! pw.WidgetSpan), isTrue);
+  });
+
   test('PDF builder renders a double-spaced, justified, indented body',
       () async {
     // Exercises the justify + first-line-indent WidgetSpan + centred-heading
@@ -150,7 +193,9 @@ void main() {
       'This is a body paragraph long enough to wrap onto several lines so '
       'that justification, double spacing and the first-line indent all take '
       'effect during layout. It keeps going to force at least one wrap.\n\n'
-      'A second paragraph with **bold** text and a [link](https://example.com).',
+      'A second paragraph with **bold** text and a [link](https://example.com).\n\n'
+      'Signed: <span style="min-width:180px; border-bottom:1px solid #555;"> '
+      '</span>',
     );
     expect(widgets, isNotEmpty);
 
