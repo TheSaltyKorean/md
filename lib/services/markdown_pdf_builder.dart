@@ -1012,8 +1012,6 @@ class MarkdownPdfBuilder {
     return spans;
   }
 
-  static final _spanTag =
-      RegExp(r'<span\b([^>]*)>([\s\S]*?)</span>', caseSensitive: false);
   static final _spanOpen = RegExp(r'<span\b([^>]*)>', caseSensitive: false);
   static final _spanAnyTag = RegExp(r'<(/?)span\b[^>]*>', caseSensitive: false);
 
@@ -1034,6 +1032,14 @@ class MarkdownPdfBuilder {
   /// and small styled labels. Text without a span returns as a single run, and
   /// inline code is never touched. Spans are matched with a balanced scan so a
   /// nested `<span>` doesn't leak its outer `</span>`.
+  ///
+  /// Known limitation (accepted): when a span wraps Markdown inline syntax, e.g.
+  /// `<span style="color:red">**bold**</span>`, the Markdown parser splits the
+  /// span's open/close tags into separate sibling nodes from the parsed
+  /// `strong`/`a`/… element, so each text node is handled in isolation here. The
+  /// tags are stripped (no leak) and the emphasis still renders, but the span's
+  /// own colour/weight is not applied to that inner element — the same behaviour
+  /// as the existing inline `<u>` handling.
   List<pw.InlineSpan> _renderTextWithSpans(
     String text, {
     bool bold = false,
@@ -1056,42 +1062,66 @@ class MarkdownPdfBuilder {
             size: size,
           ),
         );
-    // Case-insensitive: HTML tag names are case-insensitive, and _spanTag is too.
-    if (code || !_spanTag.hasMatch(text)) return [run(text)];
+    // Enter the parser for *any* span tag (open or close). Gating on a complete
+    // pair would let a single unclosed/stray tag fall through and leak; the loop
+    // strips those instead. HTML tag names are case-insensitive (as is the regex).
+    if (code || !_spanAnyTag.hasMatch(text)) return [run(text)];
 
     final out = <pw.InlineSpan>[];
     var i = 0;
     while (i < text.length) {
       final openIt = _spanOpen.allMatches(text, i).iterator;
       if (!openIt.moveNext()) {
-        out.add(run(text.substring(i)));
+        // No further opening tag — emit the remainder, stripping any stray
+        // closing tags so nothing leaks.
+        out.add(run(_stripSpanTags(text.substring(i))));
         break;
       }
       final open = openIt.current;
       if (open.start > i) out.add(run(text.substring(i, open.start)));
       final matched = _matchSpan(text, open.start);
       if (matched == null) {
-        // Unbalanced: strip stray span tags from the remainder so nothing leaks.
-        out.add(run(text
-            .substring(open.start)
-            .replaceAll(RegExp(r'</?span[^>]*>', caseSensitive: false), '')));
+        // Unbalanced open: strip stray span tags from the remainder.
+        out.add(run(_stripSpanTags(text.substring(open.start))));
         break;
       }
       final (contentStart, closeStart, closeEnd) = matched;
-      out.add(_spanFragment(
-        open.group(1) ?? '',
-        text.substring(contentStart, closeStart),
-        bold: bold,
-        italic: italic,
-        underline: underline,
-        strike: strike,
-        color: color,
-        size: size,
-      ));
+      final attrs = open.group(1) ?? '';
+      final content = text.substring(contentStart, closeStart);
+      if (_spanOpen.hasMatch(content)) {
+        // Nested span(s): recurse so an inner blank/label still renders instead
+        // of being flattened to text, inheriting the outer span's styling.
+        final os = _parseStyle(attrs);
+        final ofw = (os['font-weight'] ?? '').toLowerCase();
+        final odeco = (os['text-decoration'] ?? '').toLowerCase();
+        out.addAll(_renderTextWithSpans(
+          content,
+          bold: bold || ofw == 'bold' || (int.tryParse(ofw) ?? 0) >= 600,
+          italic: italic || (os['font-style'] ?? '').toLowerCase() == 'italic',
+          underline: underline || odeco.contains('underline'),
+          strike: strike || odeco.contains('line-through'),
+          color: _cssColor(os['color']) ?? color,
+          size: _lengthPt(os['font-size']) ?? size,
+        ));
+      } else {
+        out.add(_spanFragment(
+          attrs,
+          content,
+          bold: bold,
+          italic: italic,
+          underline: underline,
+          strike: strike,
+          color: color,
+          size: size,
+        ));
+      }
       i = closeEnd;
     }
     return out;
   }
+
+  static final _spanStrip = RegExp(r'</?span[^>]*>', caseSensitive: false);
+  String _stripSpanTags(String s) => s.replaceAll(_spanStrip, '');
 
   /// (contentStart, closeStart, closeEnd) of the `</span>` balancing the `<span>`
   /// opening at [openAbs], accounting for nested spans; null if unbalanced.

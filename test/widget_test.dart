@@ -192,6 +192,21 @@ void main() {
     expect(nestedText.contains('span'), isFalse);
     expect(nestedText.contains('<'), isFalse);
     expect(nestedText, contains('q'));
+
+    // A single unclosed span (truncated export) must not leak either.
+    final unclosed =
+        builder.renderInlineText('Name: <span style="min-width:150px">');
+    final unclosedText = literal(unclosed);
+    expect(unclosedText.contains('span'), isFalse);
+    expect(unclosedText.contains('min-width'), isFalse);
+    expect(unclosedText, contains('Name:'));
+
+    // A blank wrapped in an outer styling span still renders as a blank line.
+    final wrappedBlank = builder.renderInlineText(
+        '<span style="color:#555;"><span style="min-width:150px; '
+        'border-bottom:1px solid;"> </span></span>');
+    expect(wrappedBlank.any((s) => s is pw.WidgetSpan), isTrue);
+    expect(literal(wrappedBlank).contains('span'), isFalse);
   });
 
   test('PDF builder renders a double-spaced, justified, indented body',
