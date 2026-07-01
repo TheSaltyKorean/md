@@ -148,7 +148,10 @@ class PrintService {
     pw.MemoryImage? logo, {
     bool hideCompany = false,
   }) {
-    final primary = PdfColor.fromInt(profile.primaryColor);
+    // Legal mode prints monochrome: the header chrome (company name, badge fill,
+    // accent rule) uses the body text colour instead of the brand colour.
+    final primary = PdfColor.fromInt(
+        profile.legalMode ? profile.textColor : profile.primaryColor);
 
     final brandRow = <pw.Widget>[];
     if (logo != null) {
@@ -207,7 +210,10 @@ class PrintService {
             padding: const pw.EdgeInsets.only(top: 4),
             child: pw.Text(
               headerTitle,
-              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey600),
+              // Legal mode keeps the header title monochrome (body colour).
+              style: pw.TextStyle(
+                  fontSize: 9,
+                  color: profile.legalMode ? primary : PdfColors.grey600),
             ),
           ),
         if (profile.accentRule)
@@ -222,7 +228,9 @@ class PrintService {
   }
 
   pw.Widget _footer(pw.Context context, PrintProfile profile, String title) {
-    final primary = PdfColor.fromInt(profile.primaryColor);
+    // Monochrome footer text in legal mode (see _header).
+    final primary = PdfColor.fromInt(
+        profile.legalMode ? profile.textColor : profile.primaryColor);
 
     // Brand footer: a single centred grey line with a hairline rule above,
     // e.g. "Company — <Title> | Page N of M".
@@ -249,8 +257,13 @@ class PrintService {
         alignment: pw.Alignment.center,
         child: pw.Text(
           line,
-          style: const pw.TextStyle(
-              fontSize: 7.5, color: PdfColor.fromInt(0xFF8A8DA0)),
+          // Legal mode prints the footer in the body colour; otherwise the
+          // centred footer keeps its subtle grey.
+          style: pw.TextStyle(
+              fontSize: 7.5,
+              color: profile.legalMode
+                  ? primary
+                  : const PdfColor.fromInt(0xFF8A8DA0)),
         ),
       );
     }
@@ -288,7 +301,11 @@ class PrintService {
             ),
             pw.Text(
               right.join('   '),
-              style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+              // Legal mode prints date/page numbers in the body colour too;
+              // otherwise they stay subtle grey.
+              style: pw.TextStyle(
+                  fontSize: 8,
+                  color: profile.legalMode ? primary : PdfColors.grey600),
             ),
           ],
         ),

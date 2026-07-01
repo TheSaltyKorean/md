@@ -16,6 +16,16 @@ class PrintProfileService extends ChangeNotifier {
   static const _defaultKey = 'default_print_profile';
   static const _docMapKey = 'doc_print_profile_map';
 
+  /// Ids of built-in seeds already introduced to this install, so newly-shipped
+  /// seeds (e.g. "Court Filing") are merged into an existing user's saved list
+  /// exactly once — without resurrecting a seed they deliberately deleted.
+  static const _seededIdsKey = 'seeded_profile_ids';
+
+  /// Seeds that shipped before the merge-on-load scheme existed. Used only the
+  /// first time it runs (when [_seededIdsKey] is absent) so pre-existing users
+  /// receive genuinely new seeds only, not ones they had removed.
+  static const _priorSeedIds = <String>{'personal', 'work'};
+
   final SharedPreferences _prefs;
 
   List<PrintProfile> _profiles = [];
@@ -74,6 +84,8 @@ class PrintProfileService extends ChangeNotifier {
     }
     if (_profiles.isEmpty) _profiles = List.of(PrintProfile.seeds);
 
+    _mergeNewSeeds();
+
     _defaultId = _prefs.getString(_defaultKey) ?? _profiles.first.id;
     if (!_profiles.any((p) => p.id == _defaultId)) {
       _defaultId = _profiles.first.id;
@@ -87,6 +99,40 @@ class PrintProfileService extends ChangeNotifier {
       } catch (_) {
         _docMap = {};
       }
+    }
+  }
+
+  /// Add any built-in seed the user hasn't seen yet (by id), then remember the
+  /// full set of introduced seed ids. Runs once per newly-shipped seed; a seed
+  /// the user explicitly deleted is recorded as introduced and stays gone.
+  void _mergeNewSeeds() {
+    final raw = _prefs.getString(_seededIdsKey);
+    Set<String> introduced;
+    if (raw == null || raw.isEmpty) {
+      introduced = {..._priorSeedIds};
+    } else {
+      try {
+        introduced = (jsonDecode(raw) as List).map((e) => e.toString()).toSet();
+      } catch (_) {
+        introduced = {..._priorSeedIds};
+      }
+    }
+
+    final existingIds = _profiles.map((p) => p.id).toSet();
+    var addedProfile = false;
+    for (final seed in PrintProfile.seeds) {
+      if (!introduced.contains(seed.id) && !existingIds.contains(seed.id)) {
+        _profiles.add(seed);
+        addedProfile = true;
+      }
+    }
+
+    final allSeedIds = PrintProfile.seeds.map((p) => p.id).toSet();
+    final introducedChanged = !allSeedIds.every(introduced.contains);
+    if (addedProfile) _track(_persistProfiles);
+    if (raw == null || raw.isEmpty || introducedChanged) {
+      _track(() => _prefs.setString(
+          _seededIdsKey, jsonEncode({...introduced, ...allSeedIds}.toList())));
     }
   }
 

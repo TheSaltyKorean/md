@@ -1,12 +1,26 @@
+import 'dart:convert';
+
 import 'package:flutter/widgets.dart' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
+import 'package:markdown_studio/models/print_profile.dart';
 import 'package:markdown_studio/services/file_association_service.dart';
+import 'package:markdown_studio/services/markdown_pdf_builder.dart';
 import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// Standard built-in PDF fonts, so PDF-render tests never touch the network.
+PdfFontSet _standardFonts() => PdfFontSet(
+      base: pw.Font.helvetica(),
+      bold: pw.Font.helveticaBold(),
+      italic: pw.Font.helveticaOblique(),
+      boldItalic: pw.Font.helveticaBoldOblique(),
+      mono: pw.Font.courier(),
+    );
 
 void main() {
   testWidgets('App boots and shows the mode selector', (tester) async {
@@ -49,6 +63,98 @@ void main() {
     expect(service.profiles.length, greaterThanOrEqualTo(2));
     expect(service.profiles.any((p) => p.name == 'Work'), isTrue);
     expect(service.profiles.any((p) => p.name == 'Personal'), isTrue);
+  });
+
+  test('New built-in seeds merge into a pre-existing saved profile list',
+      () async {
+    // A pre-existing install whose saved profiles predate Court Filing, with no
+    // seeded-ids marker yet.
+    final saved = PrintProfile.encodeList(
+        const [PrintProfile.personal, PrintProfile.work]);
+    SharedPreferences.setMockInitialValues({'print_profiles': saved});
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    expect(service.profiles.any((p) => p.id == 'court-filing'), isTrue);
+    expect(service.profiles.any((p) => p.id == 'work'), isTrue);
+  });
+
+  test('A deliberately-deleted built-in seed is not resurrected on reload',
+      () async {
+    final saved = PrintProfile.encodeList(const [PrintProfile.personal]);
+    SharedPreferences.setMockInitialValues({
+      'print_profiles': saved,
+      // Marker records personal+work as already introduced (work was deleted).
+      'seeded_profile_ids': jsonEncode(['personal', 'work']),
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    expect(service.profiles.any((p) => p.id == 'work'), isFalse);
+    // A genuinely new seed still arrives.
+    expect(service.profiles.any((p) => p.id == 'court-filing'), isTrue);
+  });
+
+  test('Court Filing seed carries the legal formatting defaults', () {
+    final court =
+        PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    expect(court.legalMode, isTrue);
+    expect(court.justifyBody, isTrue);
+    expect(court.centerHeadings, isTrue);
+    expect(court.lineSpacingMultiple, 2.0);
+    expect(court.firstLineIndentIn, 0.5);
+  });
+
+  test('New legal fields survive a JSON round-trip (and clamp on import)', () {
+    const p = PrintProfile(
+      id: 'x',
+      name: 'X',
+      legalMode: true,
+      justifyBody: true,
+      centerHeadings: true,
+      lineSpacingMultiple: 1.5,
+      firstLineIndentIn: 0.5,
+    );
+    final back = PrintProfile.fromJson(
+        jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.legalMode, isTrue);
+    expect(back.justifyBody, isTrue);
+    expect(back.centerHeadings, isTrue);
+    expect(back.lineSpacingMultiple, 1.5);
+    expect(back.firstLineIndentIn, 0.5);
+
+    // Out-of-range imports clamp into the editor's slider ranges.
+    final clamped = PrintProfile.fromJson({
+      'id': 'y',
+      'name': 'Y',
+      'lineSpacingMultiple': 9.0,
+      'firstLineIndentIn': -3.0,
+    });
+    expect(clamped.lineSpacingMultiple, 2.0);
+    expect(clamped.firstLineIndentIn, 0.0);
+  });
+
+  test('PDF builder renders a double-spaced, justified, indented body',
+      () async {
+    // Exercises the justify + first-line-indent WidgetSpan + centred-heading
+    // paths; a layout crash in any of them would fail here.
+    final court =
+        PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder =
+        MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final widgets = builder.build(
+      '# In re: Example Matter\n\n'
+      'This is a body paragraph long enough to wrap onto several lines so '
+      'that justification, double spacing and the first-line indent all take '
+      'effect during layout. It keeps going to force at least one wrap.\n\n'
+      'A second paragraph with **bold** text and a [link](https://example.com).',
+    );
+    expect(widgets, isNotEmpty);
+
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(build: (_) => widgets));
+    final bytes = await doc.save();
+    expect(bytes, isNotEmpty);
   });
 
   test('Workspace starts with one tab and manages tabs', () async {
