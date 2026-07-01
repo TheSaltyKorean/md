@@ -834,19 +834,21 @@ class MarkdownPdfBuilder {
             pw.Padding(
               padding:
                   const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              // Walk the cell's inline children so `<span>` fill-in lines and
-              // labels render, while inline code (which may mention a span tag)
-              // is still rendered literally by the `code` case in _inline.
-              child: pw.RichText(
-                text: pw.TextSpan(
-                  children: _inline(
-                    cell.children,
-                    boldDefault: isHead,
-                    color: isHead ? PdfColors.white : null,
-                    sizeOverride: 10.5,
-                  ),
-                ),
-              ),
+              // Header cells stay flat white (links/code must not adopt their
+              // own colour on the coloured header fill). Body cells walk their
+              // inline children so `<span>` fill-in lines / labels render, with
+              // inline code kept literal by the `code` case in _inline.
+              child: isHead
+                  ? pw.Text(cell.textContent,
+                      style: pw.TextStyle(
+                          font: fonts.bold,
+                          fontSize: 10.5,
+                          color: PdfColors.white))
+                  : pw.RichText(
+                      text: pw.TextSpan(
+                        children: _inline(cell.children, sizeOverride: 10.5),
+                      ),
+                    ),
             ),
           );
         }
@@ -1064,6 +1066,7 @@ class MarkdownPdfBuilder {
     bool underline = false,
     PdfColor? color,
     double? size,
+    bool transparentColor = false,
   }) {
     // Decode HTML entities in prose/span-adjacent text (but never in code, where
     // `&amp;` is literal), matching the entity handling in _spanFragment.
@@ -1118,21 +1121,27 @@ class MarkdownPdfBuilder {
             underline: underline,
             strike: strike,
             color: color,
-            size: size));
+            size: size,
+            transparentColor: transparentColor));
       } else if (_spanOpen.hasMatch(content)) {
         // Nested span(s): recurse so an inner blank/label still renders instead
-        // of being flattened to text, inheriting the outer span's styling.
+        // of being flattened to text, inheriting the outer span's styling
+        // (including a transparent currentColor, so an inner colourless border
+        // stays invisible).
         final os = _parseStyle(attrs);
         final ofw = (os['font-weight'] ?? '').toLowerCase();
         final odeco = (os['text-decoration'] ?? '').toLowerCase();
+        final oColor = os['color'];
         out.addAll(_renderTextWithSpans(
           content,
           bold: bold || ofw == 'bold' || (int.tryParse(ofw) ?? 0) >= 600,
           italic: italic || (os['font-style'] ?? '').toLowerCase() == 'italic',
           underline: underline || odeco.contains('underline'),
           strike: strike || odeco.contains('line-through'),
-          color: _cssColor(os['color']) ?? color,
+          color: _cssColor(oColor ?? '') ?? color,
           size: _lengthPt(os['font-size']) ?? size,
+          transparentColor: (oColor != null && _isTransparent(oColor)) ||
+              (oColor == null && transparentColor),
         ));
       } else {
         out.add(_spanFragment(
@@ -1144,6 +1153,7 @@ class MarkdownPdfBuilder {
           strike: strike,
           color: color,
           size: size,
+          transparentColor: transparentColor,
         ));
       }
       i = closeEnd;
@@ -1198,6 +1208,7 @@ class MarkdownPdfBuilder {
     bool strike = false,
     PdfColor? color,
     double? size,
+    bool transparentColor = false,
   }) {
     final style = _parseStyle(attrs);
     final decls = _styleDecls(attrs);
@@ -1213,26 +1224,29 @@ class MarkdownPdfBuilder {
 
     if (border != null && !hasText) {
       // A colourless border uses currentColor; if that colour is transparent
-      // (e.g. `color: transparent`) the blank is intentionally invisible.
-      if (_isTransparent(style['color'] ?? '') && !_borderHasColor(decls)) {
+      // (its own `color: transparent`/zero-alpha, or an inherited transparent
+      // from a wrapper span) the blank is intentionally invisible.
+      final own = style['color'];
+      final transparentCurrent = (own != null && _isTransparent(own)) ||
+          (own == null && transparentColor);
+      if (transparentCurrent && !_borderHasColor(decls)) {
         return const pw.TextSpan(text: '');
       }
       // CSS width is subject to the min-width floor, so honour the larger of the
-      // two positive values. Only a *missing* width falls back to the default;
-      // an explicit zero (length or percentage) collapses the blank.
-      final lengths =
-          [_lengthPt(style['width']), _lengthPt(style['min-width'])]
-              .whereType<double>();
-      final positive = lengths.where((v) => v > 0);
+      // two positive values. A collapse happens only when the *width* itself is
+      // explicitly zero (length or %); a bare `min-width:0` is a reset, not a
+      // collapse, and an unresolved non-zero % falls back to the default.
+      final wPt = _lengthPt(style['width']);
+      final mwPt = _lengthPt(style['min-width']);
+      final positive =
+          [wPt, mwPt].whereType<double>().where((v) => v > 0);
       final double width;
       if (positive.isNotEmpty) {
         width = positive.reduce((a, b) => a > b ? a : b);
+      } else if (wPt == 0 || _percent(style['width']) == 0) {
+        return const pw.TextSpan(text: ''); // width explicitly zero → collapsed
       } else {
-        final explicitZero = lengths.any((v) => v <= 0) ||
-            _percent(style['width']) == 0 ||
-            _percent(style['min-width']) == 0;
-        if (explicitZero) return const pw.TextSpan(text: '');
-        width = 108.0; // missing (or an unresolved non-zero %) → default
+        width = 108.0; // missing / min-width:0 / unresolved non-zero % → default
       }
       final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
       final lineSize = size ?? 11.0;

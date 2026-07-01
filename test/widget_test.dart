@@ -253,6 +253,18 @@ void main() {
     final invisible = builder.renderInlineText(
         '<span style="color:transparent; border-bottom:1px solid;"> </span>');
     expect(invisible.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // Transparency inherited from a wrapper span keeps a nested blank invisible.
+    final wrapInvisible = builder.renderInlineText(
+        '<span style="color:transparent;"><span style="border-bottom:1px '
+        'solid; min-width:120px;"> </span></span>');
+    expect(wrapInvisible.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // width:50% with a min-width:0 reset must NOT collapse (falls back default).
+    final pctReset = builder.renderInlineText(
+        '<span style="width:50%; min-width:0; border-bottom:1px solid;"> '
+        '</span>');
+    expect(pctReset.any((s) => s is pw.WidgetSpan), isTrue);
   });
 
   test('Table cells render inline <span> instead of leaking the markup',
