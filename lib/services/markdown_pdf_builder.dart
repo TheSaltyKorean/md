@@ -328,7 +328,8 @@ class MarkdownPdfBuilder {
   /// overrides (later declaration wins) and follows CSS visibility rules: a
   /// border needs a drawable *style* keyword (a width or colour alone leaves the
   /// style at `none`), a positive width, and a non-transparent colour.
-  (double, PdfColor)? _resolveBorder(List<MapEntry<String, String>> decls) {
+  (double, PdfColor)? _resolveBorder(List<MapEntry<String, String>> decls,
+      {PdfColor? currentColor}) {
     double? width;
     String? styleKw;
     PdfColor? color;
@@ -374,7 +375,9 @@ class MarkdownPdfBuilder {
     if (styleKw == null || !_borderStyles.contains(styleKw)) return null;
     final w = width ?? 1.0; // drawable style, no explicit width => medium
     if (w <= 0 || transparent) return null;
-    return (w, color ?? _text);
+    // A border with no explicit colour uses CSS `currentColor` (the element's
+    // text colour) when one is supplied, else the document body colour.
+    return (w, color ?? currentColor ?? _text);
   }
 
   /// The first length token in a border shorthand (the width), or null.
@@ -1011,17 +1014,26 @@ class MarkdownPdfBuilder {
 
   static final _spanTag =
       RegExp(r'<span\b([^>]*)>([\s\S]*?)</span>', caseSensitive: false);
+  static final _spanOpen = RegExp(r'<span\b([^>]*)>', caseSensitive: false);
+  static final _spanAnyTag = RegExp(r'<(/?)span\b[^>]*>', caseSensitive: false);
 
   /// Test hook for the inline-`<span>` rendering (blank lines / styled labels).
   @visibleForTesting
-  List<pw.InlineSpan> renderInlineText(String text) =>
-      _renderTextWithSpans(text);
+  List<pw.InlineSpan> renderInlineText(
+    String text, {
+    bool underline = false,
+    bool strike = false,
+    PdfColor? color,
+  }) =>
+      _renderTextWithSpans(text,
+          underline: underline, strike: strike, color: color);
 
   /// Split raw inline text into styled runs, rendering inline `<span>` HTML that
   /// package:markdown otherwise leaves as literal text. Legal/manuscript docs
   /// use spans for fill-in "blank" lines (a span with a visible bottom border)
   /// and small styled labels. Text without a span returns as a single run, and
-  /// inline code is never touched.
+  /// inline code is never touched. Spans are matched with a balanced scan so a
+  /// nested `<span>` doesn't leak its outer `</span>`.
   List<pw.InlineSpan> _renderTextWithSpans(
     String text, {
     bool bold = false,
@@ -1044,35 +1056,79 @@ class MarkdownPdfBuilder {
             size: size,
           ),
         );
-    if (code || !text.contains('<span') || !_spanTag.hasMatch(text)) {
-      return [run(text)];
-    }
+    // Case-insensitive: HTML tag names are case-insensitive, and _spanTag is too.
+    if (code || !_spanTag.hasMatch(text)) return [run(text)];
+
     final out = <pw.InlineSpan>[];
-    var last = 0;
-    for (final m in _spanTag.allMatches(text)) {
-      if (m.start > last) out.add(run(text.substring(last, m.start)));
-      out.add(_spanFragment(m.group(1) ?? '', m.group(2) ?? '',
-          bold: bold, italic: italic, color: color, size: size));
-      last = m.end;
+    var i = 0;
+    while (i < text.length) {
+      final openIt = _spanOpen.allMatches(text, i).iterator;
+      if (!openIt.moveNext()) {
+        out.add(run(text.substring(i)));
+        break;
+      }
+      final open = openIt.current;
+      if (open.start > i) out.add(run(text.substring(i, open.start)));
+      final matched = _matchSpan(text, open.start);
+      if (matched == null) {
+        // Unbalanced: strip stray span tags from the remainder so nothing leaks.
+        out.add(run(text
+            .substring(open.start)
+            .replaceAll(RegExp(r'</?span[^>]*>', caseSensitive: false), '')));
+        break;
+      }
+      final (contentStart, closeStart, closeEnd) = matched;
+      out.add(_spanFragment(
+        open.group(1) ?? '',
+        text.substring(contentStart, closeStart),
+        bold: bold,
+        italic: italic,
+        underline: underline,
+        strike: strike,
+        color: color,
+        size: size,
+      ));
+      i = closeEnd;
     }
-    if (last < text.length) out.add(run(text.substring(last)));
     return out;
+  }
+
+  /// (contentStart, closeStart, closeEnd) of the `</span>` balancing the `<span>`
+  /// opening at [openAbs], accounting for nested spans; null if unbalanced.
+  (int, int, int)? _matchSpan(String s, int openAbs) {
+    var depth = 0;
+    var contentStart = -1;
+    for (final m in _spanAnyTag.allMatches(s, openAbs)) {
+      if (m.group(1) == '/') {
+        depth--;
+        if (depth == 0) return (contentStart, m.start, m.end);
+      } else {
+        depth++;
+        if (depth == 1) contentStart = m.end; // just past the outer opening tag
+      }
+    }
+    return null;
   }
 
   /// Render one `<span style="…">…</span>`: a visible bottom border with no real
   /// text becomes a baseline rule of the requested width (a signature/date
-  /// blank); anything else becomes a styled text run (colour/weight/size).
+  /// blank); anything else becomes a styled text run (colour/weight/size),
+  /// inheriting the surrounding underline/strike decoration.
   pw.InlineSpan _spanFragment(
     String attrs,
     String innerRaw, {
     bool bold = false,
     bool italic = false,
+    bool underline = false,
+    bool strike = false,
     PdfColor? color,
     double? size,
   }) {
-    final decls = _styleDecls(attrs);
     final style = _parseStyle(attrs);
-    final border = _resolveBorder(decls);
+    // The span's own colour is `currentColor` for a border with no explicit
+    // colour, and the text colour for a label.
+    final spanColor = _cssColor(style['color']) ?? color;
+    final border = _resolveBorder(_styleDecls(attrs), currentColor: spanColor);
     final inner = _decodeEntities(innerRaw
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
         .replaceAll(RegExp(r'<[^>]*>'), '')
@@ -1080,8 +1136,14 @@ class MarkdownPdfBuilder {
     final hasText = inner.trim().isNotEmpty;
 
     if (border != null && !hasText) {
-      final w = _lengthPt(style['min-width']) ?? _lengthPt(style['width']);
-      final width = (w == null || w <= 0) ? 108.0 : w;
+      // CSS width is subject to the min-width floor, so honour the larger of the
+      // two when both are given.
+      final candidates = [_lengthPt(style['width']), _lengthPt(style['min-width'])]
+          .whereType<double>();
+      final resolved = candidates.isEmpty
+          ? 0.0
+          : candidates.reduce((a, b) => a > b ? a : b);
+      final width = resolved <= 0 ? 108.0 : resolved;
       final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
       final lineSize = size ?? 11.0;
       // A zero-baseline WidgetSpan sits on the text baseline, so the container's
@@ -1109,8 +1171,10 @@ class MarkdownPdfBuilder {
       style: _textStyle(
         bold: isBold,
         italic: isItalic,
-        underline: deco.contains('underline'),
-        color: _cssColor(style['color']) ?? color,
+        // Combine the surrounding decoration with the span's own.
+        underline: underline || deco.contains('underline'),
+        strike: strike || deco.contains('line-through'),
+        color: spanColor,
         size: _lengthPt(style['font-size']) ?? size,
       ),
     );

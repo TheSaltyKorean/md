@@ -178,6 +178,20 @@ void main() {
     expect(labelText.contains('<span'), isFalse);
     expect(labelText.contains('label'), isTrue);
     expect(label.every((s) => s is! pw.WidgetSpan), isTrue);
+
+    // Uppercase / mixed-case tags are handled (HTML tags are case-insensitive).
+    final upper = builder.renderInlineText('X <SPAN>Y</SPAN> Z');
+    final upperText = literal(upper);
+    expect(upperText.contains('SPAN'), isFalse);
+    expect(upperText, contains('Y'));
+
+    // Nested spans must not leak the outer </span>.
+    final nested = builder.renderInlineText(
+        'p <span style="color:#c00;">a <span style="font-weight:bold;">b</span> c</span> q');
+    final nestedText = literal(nested);
+    expect(nestedText.contains('span'), isFalse);
+    expect(nestedText.contains('<'), isFalse);
+    expect(nestedText, contains('q'));
   });
 
   test('PDF builder renders a double-spaced, justified, indented body',
