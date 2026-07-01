@@ -55,9 +55,11 @@ class MarkdownPdfBuilder {
   PdfColor get _accent =>
       PdfColor.fromInt(profile.accentColor ?? profile.primaryColor);
 
-  /// Colour for headings. In [PrintProfile.legalMode] headings drop the brand
-  /// colour and print in the body text colour (monochrome court output).
-  PdfColor get _headingColor => profile.legalMode ? _text : _primary;
+  /// The brand colour for headings and body chrome (heading rules, blockquote
+  /// bars, table header fills). In [PrintProfile.legalMode] this drops the brand
+  /// colour and uses the body text colour instead, so the whole document —
+  /// including quotes and tables — prints monochrome (court output).
+  PdfColor get _brandColor => profile.legalMode ? _text : _primary;
 
   /// First-line paragraph indent in PDF points (0 when disabled). The `pdf`
   /// package has no native first-line indent, so we emulate it by prepending a
@@ -584,7 +586,7 @@ class MarkdownPdfBuilder {
       textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
       text: pw.TextSpan(
         children: _inline(el.children,
-            color: _headingColor, sizeOverride: size, boldDefault: true),
+            color: _brandColor, sizeOverride: size, boldDefault: true),
       ),
     );
     // A RichText shrink-wraps to its text, so centring only bites when the
@@ -604,7 +606,7 @@ class MarkdownPdfBuilder {
             pw.Padding(
                 padding: const pw.EdgeInsets.only(bottom: 2.5),
                 child: headingWidget),
-            pw.Container(height: 1, color: _headingColor),
+            pw.Container(height: 1, color: _brandColor),
           ],
         ),
       );
@@ -693,7 +695,7 @@ class MarkdownPdfBuilder {
       margin: const pw.EdgeInsets.only(bottom: 8),
       padding: const pw.EdgeInsets.fromLTRB(12, 4, 8, 4),
       decoration: pw.BoxDecoration(
-        border: pw.Border(left: pw.BorderSide(color: _primary, width: 3)),
+        border: pw.Border(left: pw.BorderSide(color: _brandColor, width: 3)),
         color: PdfColors.grey100,
       ),
       child: pw.Column(
@@ -831,7 +833,7 @@ class MarkdownPdfBuilder {
         }
         rows.add(
           pw.TableRow(
-            decoration: isHead ? pw.BoxDecoration(color: _primary) : null,
+            decoration: isHead ? pw.BoxDecoration(color: _brandColor) : null,
             children: cells,
           ),
         );

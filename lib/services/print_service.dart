@@ -254,8 +254,13 @@ class PrintService {
         alignment: pw.Alignment.center,
         child: pw.Text(
           line,
-          style: const pw.TextStyle(
-              fontSize: 7.5, color: PdfColor.fromInt(0xFF8A8DA0)),
+          // Legal mode prints the footer in the body colour; otherwise the
+          // centred footer keeps its subtle grey.
+          style: pw.TextStyle(
+              fontSize: 7.5,
+              color: profile.legalMode
+                  ? primary
+                  : const PdfColor.fromInt(0xFF8A8DA0)),
         ),
       );
     }
