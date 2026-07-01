@@ -119,9 +119,8 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
       if (_matches.isEmpty) {
         _current = -1;
       } else if (moveToCaret) {
-        final caret = widget.target.selection.isValid
-            ? widget.target.selection.start
-            : 0;
+        final caret =
+            widget.target.selection.isValid ? widget.target.selection.start : 0;
         final at = _matches.indexWhere((m) => m.start >= caret);
         _current = at >= 0 ? at : 0;
       } else {
@@ -129,6 +128,9 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
       }
       _rebuildRects(text);
     });
+    // Reveal the current match on the initial search / option change too, not
+    // just on Next/Previous (no-op until the field has been laid out).
+    _revealCurrent();
   }
 
   void _rebuildRects(String text) {
@@ -240,8 +242,8 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
     _selfEdit = true;
     widget.target.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(
-          offset: caret.clamp(0, newText.length)),
+      selection:
+          TextSelection.collapsed(offset: caret.clamp(0, newText.length)),
     );
     _lastText = newText;
     _selfEdit = false;
@@ -386,12 +388,20 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
           ),
         ),
         const SizedBox(width: 6),
-        _toggle(cs, 'Aa', 'Match case', _options.caseSensitive,
-            () => _setOptions(_options.copyWith(
-                caseSensitive: !_options.caseSensitive))),
-        _toggle(cs, 'W', 'Whole word', _options.wholeWord,
+        _toggle(
+            cs,
+            'Aa',
+            'Match case',
+            _options.caseSensitive,
             () => _setOptions(
-                _options.copyWith(wholeWord: !_options.wholeWord))),
+                _options.copyWith(caseSensitive: !_options.caseSensitive))),
+        _toggle(
+            cs,
+            'W',
+            'Whole word',
+            _options.wholeWord,
+            () =>
+                _setOptions(_options.copyWith(wholeWord: !_options.wholeWord))),
         _toggle(cs, '.*', 'Use regular expression', _options.regex,
             () => _setOptions(_options.copyWith(regex: !_options.regex))),
         Padding(
@@ -420,8 +430,7 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
               isDense: true,
               hintText: 'Replace',
               border: OutlineInputBorder(),
-              contentPadding:
-                  EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             ),
           ),
         ),

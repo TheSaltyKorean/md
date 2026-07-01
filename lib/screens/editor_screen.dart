@@ -6,8 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart'
     show PointerScrollEvent, PointerSignalEvent;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'
-    show LogicalKeyboardKey, SystemNavigator;
+import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemNavigator;
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
@@ -274,46 +273,47 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         // re-trigger this guard. Exit the app explicitly instead.
         if (ok) await SystemNavigator.pop();
       },
-      child: Scaffold(
-        appBar: AppBar(
-          titleSpacing: 0,
-          // The open-document tabs sit where the filename would be.
-          title: _TabStrip(
-            workspace: ws,
-            onClose: _closeTab,
-            onTabDragEnd: _onTabDragEnd,
-          ),
-          actions: _actions(context, ws, active, theme, isNarrow),
-          // On narrow (phone) layouts the mode selector gets its own bar; on
-          // wide layouts it lives in the actions row. The format toolbar is no
-          // longer docked here — it floats over the body (see below).
-          bottom: isNarrow
-              ? PreferredSize(
-                  preferredSize: const Size.fromHeight(48),
-                  child: _ModeBar(doc: active),
-                )
-              : null,
-        ),
-        body: CallbackShortcuts(
-          bindings: {
-            // Ctrl+F / Cmd+F — find; Ctrl+H / Cmd+H — replace; Esc closes.
-            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
-                () => _openFind(active),
-            const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
-                () => _openFind(active),
-            const SingleActivator(LogicalKeyboardKey.keyH, control: true):
-                () => _openFind(active, replace: true),
-            const SingleActivator(LogicalKeyboardKey.keyH, meta: true):
-                () => _openFind(active, replace: true),
-            const SingleActivator(LogicalKeyboardKey.escape): () {
-              if (_find.visible) _find.hide();
-            },
+      // Find shortcuts wrap the whole Scaffold (not just the body) so Ctrl/Cmd+F,
+      // Ctrl/Cmd+H and Esc fire regardless of which chrome control (app bar,
+      // mode toggle, …) currently holds focus. Autofocus so they also work from
+      // the initial Preview, which requests no focus of its own.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
+              _openFind(active),
+          const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
+              _openFind(active),
+          const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
+              _openFind(active, replace: true),
+          const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () =>
+              _openFind(active, replace: true),
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            if (_find.visible) _find.hide();
           },
-          // Autofocus so the shortcuts fire even when the app opens in Preview
-          // (which requests no focus of its own).
-          child: Focus(
-            autofocus: true,
-            child: DropTarget(
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            appBar: AppBar(
+              titleSpacing: 0,
+              // The open-document tabs sit where the filename would be.
+              title: _TabStrip(
+                workspace: ws,
+                onClose: _closeTab,
+                onTabDragEnd: _onTabDragEnd,
+              ),
+              actions: _actions(context, ws, active, theme, isNarrow),
+              // On narrow (phone) layouts the mode selector gets its own bar; on
+              // wide layouts it lives in the actions row. The format toolbar is no
+              // longer docked here — it floats over the body (see below).
+              bottom: isNarrow
+                  ? PreferredSize(
+                      preferredSize: const Size.fromHeight(48),
+                      child: _ModeBar(doc: active),
+                    )
+                  : null,
+            ),
+            body: DropTarget(
               onDragEntered: (_) => setState(() => _dragging = true),
               onDragExited: (_) => setState(() => _dragging = false),
               onDragDone: (detail) => _onFilesDropped(detail, ws),
@@ -322,8 +322,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                   children: [
                     Positioned.fill(child: _body(active)),
                     // The floating, draggable format palette — hidden in Preview
-                    // (nothing to edit there) and, in a source mode, while find
-                    // is open so it can't cover the find card on narrow windows.
+                    // (nothing to edit there) and, in a source mode, while find is
+                    // open so it can't cover the find card on narrow windows.
                     if (active.mode != EditorMode.preview &&
                         !(_find.visible && active.mode.isSource))
                       FloatingFormatToolbar(
@@ -808,9 +808,8 @@ class _TabStripState extends State<_TabStrip> {
     if (event is! PointerScrollEvent || !_scroll.hasClients) return;
     // Translate vertical wheel into horizontal scroll (a horizontal ListView
     // otherwise ignores the wheel on desktop).
-    final primary = event.scrollDelta.dy != 0
-        ? event.scrollDelta.dy
-        : event.scrollDelta.dx;
+    final primary =
+        event.scrollDelta.dy != 0 ? event.scrollDelta.dy : event.scrollDelta.dx;
     final target =
         (_scroll.offset + primary).clamp(0.0, _scroll.position.maxScrollExtent);
     _scroll.jumpTo(target);
@@ -859,69 +858,69 @@ class _TabStripState extends State<_TabStrip> {
                 // after the last one.
                 itemCount: docs.length + 1,
                 itemBuilder: (context, i) {
-                if (i == docs.length) {
-                  return DragTarget<int>(
-                    onWillAcceptWithDetails: (d) => true,
-                    onAcceptWithDetails: (d) =>
-                        workspace.reorder(d.data, docs.length),
-                    builder: (context, candidate, rejected) => Container(
-                      width: 64,
-                      alignment: Alignment.centerLeft,
-                      decoration: BoxDecoration(
-                        border: Border(
-                          left: BorderSide(
-                            color: candidate.isNotEmpty
-                                ? cs.primary
-                                : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }
-                final tab = _Tab(
-                  doc: docs[i],
-                  selected: i == workspace.activeIndex,
-                  onTap: () => workspace.select(i),
-                  onClose: () => widget.onClose(i),
-                );
-                return DragTarget<int>(
-                  onWillAcceptWithDetails: (d) => d.data != i,
-                  onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
-                  builder: (context, candidate, rejected) {
-                    return Container(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          left: BorderSide(
-                            color: candidate.isNotEmpty
-                                ? cs.primary
-                                : Colors.transparent,
-                            width: 2,
-                          ),
-                        ),
-                      ),
-                      child: Draggable<int>(
-                        data: i,
-                        feedback: Material(
-                          color: Colors.transparent,
-                          elevation: 6,
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 220),
-                            child: Container(
-                              color: cs.surfaceContainerHigh,
-                              child: tab,
+                  if (i == docs.length) {
+                    return DragTarget<int>(
+                      onWillAcceptWithDetails: (d) => true,
+                      onAcceptWithDetails: (d) =>
+                          workspace.reorder(d.data, docs.length),
+                      builder: (context, candidate, rejected) => Container(
+                        width: 64,
+                        alignment: Alignment.centerLeft,
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: candidate.isNotEmpty
+                                  ? cs.primary
+                                  : Colors.transparent,
+                              width: 2,
                             ),
                           ),
                         ),
-                        childWhenDragging: Opacity(opacity: 0.3, child: tab),
-                        onDragEnd: (details) =>
-                            widget.onTabDragEnd(i, details),
-                        child: tab,
                       ),
                     );
-                  },
-                );
+                  }
+                  final tab = _Tab(
+                    doc: docs[i],
+                    selected: i == workspace.activeIndex,
+                    onTap: () => workspace.select(i),
+                    onClose: () => widget.onClose(i),
+                  );
+                  return DragTarget<int>(
+                    onWillAcceptWithDetails: (d) => d.data != i,
+                    onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
+                    builder: (context, candidate, rejected) {
+                      return Container(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            left: BorderSide(
+                              color: candidate.isNotEmpty
+                                  ? cs.primary
+                                  : Colors.transparent,
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                        child: Draggable<int>(
+                          data: i,
+                          feedback: Material(
+                            color: Colors.transparent,
+                            elevation: 6,
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 220),
+                              child: Container(
+                                color: cs.surfaceContainerHigh,
+                                child: tab,
+                              ),
+                            ),
+                          ),
+                          childWhenDragging: Opacity(opacity: 0.3, child: tab),
+                          onDragEnd: (details) =>
+                              widget.onTabDragEnd(i, details),
+                          child: tab,
+                        ),
+                      );
+                    },
+                  );
                 },
               ),
             ),
@@ -1000,8 +999,7 @@ class _Tab extends StatelessWidget {
                 tooltip: 'Close',
                 iconSize: 14,
                 visualDensity: VisualDensity.compact,
-                constraints:
-                    const BoxConstraints(minWidth: 28, minHeight: 28),
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                 padding: EdgeInsets.zero,
                 icon: const Icon(Icons.close_rounded),
                 onPressed: onClose,
