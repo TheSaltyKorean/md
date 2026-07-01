@@ -137,6 +137,10 @@ class DocumentController extends ChangeNotifier {
     bool markDirty = false,
   }) {
     _suppressDirty = true;
+    // A fresh buffer replaces both representations, so nothing has been edited
+    // in WYSIWYG yet — otherwise a reload (conflict "Reload", auto-reload) while
+    // in Edit mode would treat untouched content as edited and round-trip it.
+    _wysiwygEdited = false;
     sourceController.text = content;
     _setEditorState(EditorState(document: markdownToDocument(content)));
     _filePath = path;

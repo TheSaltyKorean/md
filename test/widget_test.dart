@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/widgets.dart' show Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
@@ -172,6 +173,29 @@ void main() {
     doc.setMode(EditorMode.preview); // …and leave without editing
 
     expect(doc.currentMarkdown(), source);
+  });
+
+  test('Reloading in Edit mode does not reformat the untouched buffer',
+      () async {
+    final doc = DocumentController(isAutoReloadEnabled: () => false);
+    addTearDown(doc.dispose);
+    doc.loadMarkdown('# Title\n\n* one\n* two\n');
+    doc.setMode(EditorMode.wysiwyg);
+
+    // Make a genuine WYSIWYG edit so the "edited" flag is set.
+    final node = doc.editorState.getNodeAtPath([0])!;
+    await doc.editorState
+        .apply(doc.editorState.transaction..insertText(node, 0, 'X'));
+    await Future<void>.delayed(Duration.zero);
+    expect(doc.isDirty, isTrue); // precondition: the edit registered
+
+    // An external reload arrives while still in Edit mode.
+    const reloaded = '# Reloaded\n\n* a\n* b\n\nPlain __text__.\n';
+    doc.loadMarkdown(reloaded);
+
+    // Leaving Edit must not round-trip the freshly-loaded, untouched buffer.
+    doc.setMode(EditorMode.preview);
+    expect(doc.currentMarkdown(), reloaded);
   });
 
   test('Workspace starts with one tab and manages tabs', () async {
