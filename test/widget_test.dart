@@ -65,6 +65,36 @@ void main() {
     expect(service.profiles.any((p) => p.name == 'Personal'), isTrue);
   });
 
+  test('New built-in seeds merge into a pre-existing saved profile list',
+      () async {
+    // A pre-existing install whose saved profiles predate Court Filing, with no
+    // seeded-ids marker yet.
+    final saved = PrintProfile.encodeList(
+        const [PrintProfile.personal, PrintProfile.work]);
+    SharedPreferences.setMockInitialValues({'print_profiles': saved});
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    expect(service.profiles.any((p) => p.id == 'court-filing'), isTrue);
+    expect(service.profiles.any((p) => p.id == 'work'), isTrue);
+  });
+
+  test('A deliberately-deleted built-in seed is not resurrected on reload',
+      () async {
+    final saved = PrintProfile.encodeList(const [PrintProfile.personal]);
+    SharedPreferences.setMockInitialValues({
+      'print_profiles': saved,
+      // Marker records personal+work as already introduced (work was deleted).
+      'seeded_profile_ids': jsonEncode(['personal', 'work']),
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    expect(service.profiles.any((p) => p.id == 'work'), isFalse);
+    // A genuinely new seed still arrives.
+    expect(service.profiles.any((p) => p.id == 'court-filing'), isTrue);
+  });
+
   test('Court Filing seed carries the legal formatting defaults', () {
     final court =
         PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');

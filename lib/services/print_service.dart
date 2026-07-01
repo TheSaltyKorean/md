@@ -148,7 +148,10 @@ class PrintService {
     pw.MemoryImage? logo, {
     bool hideCompany = false,
   }) {
-    final primary = PdfColor.fromInt(profile.primaryColor);
+    // Legal mode prints monochrome: the header chrome (company name, badge fill,
+    // accent rule) uses the body text colour instead of the brand colour.
+    final primary = PdfColor.fromInt(
+        profile.legalMode ? profile.textColor : profile.primaryColor);
 
     final brandRow = <pw.Widget>[];
     if (logo != null) {
@@ -222,7 +225,9 @@ class PrintService {
   }
 
   pw.Widget _footer(pw.Context context, PrintProfile profile, String title) {
-    final primary = PdfColor.fromInt(profile.primaryColor);
+    // Monochrome footer text in legal mode (see _header).
+    final primary = PdfColor.fromInt(
+        profile.legalMode ? profile.textColor : profile.primaryColor);
 
     // Brand footer: a single centred grey line with a hairline rule above,
     // e.g. "Company — <Title> | Page N of M".

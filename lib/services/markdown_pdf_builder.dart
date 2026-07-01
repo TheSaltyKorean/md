@@ -666,6 +666,13 @@ class MarkdownPdfBuilder {
     if (indentFirstLine && _firstLineIndentPt > 0) {
       // A zero-height spacer on the first line; it advances the pen like a word,
       // so wrapping and justification stay correct.
+      //
+      // Known limitation (accepted): under [justifyBody] the spacer is one of the
+      // line's justifiable spans, so if the first line wraps after very few
+      // words (e.g. a short word then a long URL/citation) an extra justification
+      // gap can appear just after the indent. This is rare and cosmetic; the pdf
+      // package has no native first-line indent, and this WidgetSpan spacer keeps
+      // the indent at an exact width, which is the deliberate trade-off here.
       spans.add(pw.WidgetSpan(child: pw.SizedBox(width: _firstLineIndentPt)));
     }
     spans.addAll(_inline(nodes));
