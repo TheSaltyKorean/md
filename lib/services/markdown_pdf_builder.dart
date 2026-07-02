@@ -880,7 +880,7 @@ class MarkdownPdfBuilder {
                   children: _inline(
                     cell.children,
                     boldDefault: isHead,
-                    color: isHead ? PdfColors.white : null,
+                    forceColor: isHead ? PdfColors.white : null,
                     sizeOverride: 10.5,
                   ),
                 ),
@@ -949,6 +949,9 @@ class MarkdownPdfBuilder {
     bool boldDefault = false,
     PdfColor? color,
     double? sizeOverride,
+    // When set, forces this colour on *all* descendant text, links, code and
+    // spans (overriding their own colours) — e.g. white table-header cells.
+    PdfColor? forceColor,
   }) {
     final spans = <pw.InlineSpan>[];
     if (nodes == null) return spans;
@@ -964,6 +967,7 @@ class MarkdownPdfBuilder {
           underline: underline,
           color: color,
           size: sizeOverride,
+          forceColor: forceColor,
         ));
       } else if (n is md.Element) {
         switch (n.tag) {
@@ -981,7 +985,8 @@ class MarkdownPdfBuilder {
                         ? _primary
                         : null),
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'em':
             spans.addAll(_inline(n.children,
@@ -992,7 +997,8 @@ class MarkdownPdfBuilder {
                 underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'del':
             spans.addAll(_inline(n.children,
@@ -1003,7 +1009,8 @@ class MarkdownPdfBuilder {
                 underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'u':
           case 'ins':
@@ -1015,7 +1022,8 @@ class MarkdownPdfBuilder {
                 underline: true,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'code':
             spans.add(
@@ -1023,28 +1031,27 @@ class MarkdownPdfBuilder {
                 text: n.textContent,
                 style: _textStyle(
                   code: true,
-                  // Honour an explicitly-forced colour (e.g. white table
-                  // headers); otherwise the branded inline-code colour.
-                  color: color ?? const PdfColor.fromInt(0xFFB5179E),
+                  // A forced colour (white table headers) wins; otherwise the
+                  // branded inline-code colour.
+                  color: forceColor ?? const PdfColor.fromInt(0xFFB5179E),
                   size: sizeOverride,
                 ),
               ),
             );
             break;
           case 'a':
-            // Route link text through the span renderer so a `<span>` used as
-            // the link label renders instead of leaking its markup.
-            spans.addAll(_renderTextWithSpans(
-              n.textContent,
-              bold: bold || boldDefault,
+            // Walk the link's children so a `<span>` label renders and an inline
+            // code label stays literal, and force the link colour on the whole
+            // label (a header's forced colour wins).
+            spans.addAll(_inline(
+              n.children,
+              bold: bold,
               italic: italic,
-              // An explicitly-forced colour (white table headers) wins; else
-              // legal mode prints links in the body colour (monochrome).
-              color: color ?? (profile.legalMode ? _text : _accent),
-              size: sizeOverride,
-              // Brand links are coloured but not underlined; legal/plain links
-              // keep the underline.
               underline: profile.legalMode || !profile.headingRule,
+              sizeOverride: sizeOverride,
+              boldDefault: boldDefault,
+              // Brand links: coloured, not underlined; legal links: body colour.
+              forceColor: forceColor ?? (profile.legalMode ? _text : _accent),
             ));
             break;
           case 'br':
@@ -1059,7 +1066,8 @@ class MarkdownPdfBuilder {
                 underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
         }
       }
     }
@@ -1076,9 +1084,13 @@ class MarkdownPdfBuilder {
     bool underline = false,
     bool strike = false,
     PdfColor? color,
+    PdfColor? forceColor,
   }) =>
       _renderTextWithSpans(text,
-          underline: underline, strike: strike, color: color);
+          underline: underline,
+          strike: strike,
+          color: color,
+          forceColor: forceColor);
 
   /// Split raw inline text into styled runs, rendering inline `<span>` HTML that
   /// package:markdown otherwise leaves as literal text. Legal/manuscript docs
@@ -1104,11 +1116,13 @@ class MarkdownPdfBuilder {
     PdfColor? color,
     double? size,
     bool transparentColor = false,
+    PdfColor? forceColor,
   }) {
     // Decode HTML entities in prose/span-adjacent text (but never in code, where
     // `&amp;` is literal), matching the entity handling in _spanFragment. Text
-    // under an inherited transparent currentColor is hidden (redaction).
-    pw.InlineSpan run(String s) => transparentColor
+    // under an inherited transparent currentColor is hidden (redaction) — unless
+    // a forced colour overrides it (e.g. white table headers).
+    pw.InlineSpan run(String s) => (transparentColor && forceColor == null)
         ? const pw.TextSpan(text: '')
         : pw.TextSpan(
             text: _symbols(code ? s : _decodeEntities(s)),
@@ -1118,7 +1132,7 @@ class MarkdownPdfBuilder {
               code: code,
               strike: strike,
               underline: underline,
-              color: color,
+              color: forceColor ?? color,
               size: size,
             ),
           );
@@ -1156,7 +1170,8 @@ class MarkdownPdfBuilder {
               strike: strike,
               color: color,
               size: size,
-              transparentColor: transparentColor));
+              transparentColor: transparentColor,
+              forceColor: forceColor));
         }
         i = open.end;
         continue;
@@ -1181,7 +1196,8 @@ class MarkdownPdfBuilder {
             strike: strike,
             color: color,
             size: size,
-            transparentColor: transparentColor));
+            transparentColor: transparentColor,
+            forceColor: forceColor));
       } else if (_spanOpen.hasMatch(content)) {
         // Nested span(s): recurse so an inner blank/label still renders instead
         // of being flattened to text, inheriting the outer span's styling
@@ -1201,6 +1217,7 @@ class MarkdownPdfBuilder {
           size: _lengthPt(os['font-size']) ?? size,
           transparentColor: (oColor != null && _isTransparent(oColor)) ||
               (oColor == null && transparentColor),
+          forceColor: forceColor,
         ));
       } else {
         out.add(_spanFragment(
@@ -1213,6 +1230,7 @@ class MarkdownPdfBuilder {
           color: color,
           size: size,
           transparentColor: transparentColor,
+          forceColor: forceColor,
         ));
       }
       i = closeEnd;
@@ -1271,12 +1289,14 @@ class MarkdownPdfBuilder {
     PdfColor? color,
     double? size,
     bool transparentColor = false,
+    PdfColor? forceColor,
   }) {
     final style = _parseStyle(attrs);
     final decls = _styleDecls(attrs);
-    // The span's own colour is `currentColor` for a border with no explicit
-    // colour, and the text colour for a label.
-    final spanColor = _cssColor(style['color']) ?? color;
+    // A forced colour (white table headers) overrides the span's own; otherwise
+    // its own colour is `currentColor` for a colourless border and the label
+    // text colour.
+    final spanColor = forceColor ?? _cssColor(style['color']) ?? color;
     final border = _resolveBorder(decls, currentColor: spanColor);
     final inner = _decodeEntities(innerRaw
         .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
@@ -1292,7 +1312,8 @@ class MarkdownPdfBuilder {
       final own = style['color'];
       final transparentCurrent = (own != null && _isTransparent(own)) ||
           (own == null && transparentColor);
-      if (transparentCurrent && !_borderHasColor(decls)) {
+      // A forced colour makes the border visible regardless of transparency.
+      if (forceColor == null && transparentCurrent && !_borderHasColor(decls)) {
         return const pw.TextSpan(text: '');
       }
       // CSS width is subject to the min-width floor, so honour the larger of the
@@ -1322,7 +1343,8 @@ class MarkdownPdfBuilder {
           margin: const pw.EdgeInsets.symmetric(horizontal: 2),
           decoration: pw.BoxDecoration(
             border: pw.Border(
-                bottom: pw.BorderSide(color: border.$2, width: thickness)),
+                bottom: pw.BorderSide(
+                    color: forceColor ?? border.$2, width: thickness)),
           ),
         ),
       );
@@ -1341,10 +1363,11 @@ class MarkdownPdfBuilder {
 
     // Transparent text (its own `color: transparent`/zero-alpha, or an inherited
     // transparent currentColor) is intentionally hidden — e.g. redacted
-    // placeholder text — so it must not print in the inherited colour.
+    // placeholder text — unless a forced colour overrides it.
     final own = style['color'];
-    if ((own != null && _isTransparent(own)) ||
-        (own == null && transparentColor)) {
+    if (forceColor == null &&
+        ((own != null && _isTransparent(own)) ||
+            (own == null && transparentColor))) {
       return const pw.TextSpan(text: '');
     }
 

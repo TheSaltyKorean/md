@@ -12,6 +12,7 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
+import 'package:pdf/pdf.dart' show PdfColors;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -321,6 +322,24 @@ void main() {
       final t = widgetLiteral(rich.text);
       expect(t.contains('<span'), isFalse);
       expect(t, contains('label'));
+    }
+
+    // A forced colour (white table headers) overrides a styled span's own
+    // colour, so header links/labels don't go dark-on-fill.
+    final forced = builder.renderInlineText(
+        '<span style="color:#111111;">Docs</span>',
+        forceColor: PdfColors.white);
+    final forcedSpan =
+        forced.whereType<pw.TextSpan>().firstWhere((s) => s.text == 'Docs');
+    expect(forcedSpan.style?.color, PdfColors.white);
+
+    // An inline-code link label that references a span tag stays literal.
+    final codeLink = builder
+        .build('[`<span>x</span>`](https://example.com)');
+    final cpara = codeLink.first;
+    final crich = cpara is pw.Padding ? cpara.child : cpara;
+    if (crich is pw.RichText) {
+      expect(widgetLiteral(crich.text), contains('<span>x</span>'));
     }
   });
 
