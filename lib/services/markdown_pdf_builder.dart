@@ -380,16 +380,23 @@ class MarkdownPdfBuilder {
     return (w, color ?? currentColor ?? _text);
   }
 
-  /// Whether the bottom-border declarations carry an explicit colour (so a
-  /// span's `currentColor` is not used to colour the rule).
+  /// Whether the *effective* bottom-border colour is explicit (so a span's
+  /// `currentColor` isn't used). Walks declarations in source order because a
+  /// later `border-bottom` shorthand resets the colour to its initial value
+  /// (currentColor) even if an earlier longhand set one.
   bool _borderHasColor(List<MapEntry<String, String>> decls) {
+    var explicit = false;
     for (final e in decls) {
-      if ((e.key == 'border-bottom' || e.key == 'border-bottom-color') &&
-          _cssColor(e.value) != null) {
-        return true;
+      switch (e.key) {
+        case 'border-bottom': // shorthand resets, then applies any colour token
+          explicit = _cssColor(e.value) != null;
+          break;
+        case 'border-bottom-color':
+          explicit = _cssColor(e.value) != null;
+          break;
       }
     }
-    return false;
+    return explicit;
   }
 
   /// The first length token in a border shorthand (the width), or null.
@@ -1102,6 +1109,12 @@ class MarkdownPdfBuilder {
         // Strip any stray closing tag that precedes the next opener.
         out.add(run(_stripSpanTags(text.substring(i, open.start))));
       }
+      if (open.group(0)!.endsWith('/>')) {
+        // Self-closing structural span (e.g. a bookmark) — no content; skip it
+        // so it doesn't swallow a following, valid fill-in span.
+        i = open.end;
+        continue;
+      }
       final matched = _matchSpan(text, open.start);
       if (matched == null) {
         // Unbalanced open: strip stray span tags from the remainder.
@@ -1173,6 +1186,8 @@ class MarkdownPdfBuilder {
       if (m.group(1) == '/') {
         depth--;
         if (depth == 0) return (contentStart, m.start, m.end);
+      } else if (m.group(0)!.endsWith('/>')) {
+        continue; // self-closing span — not a nesting open
       } else {
         depth++;
         if (depth == 1) contentStart = m.end; // just past the outer opening tag
@@ -1274,6 +1289,15 @@ class MarkdownPdfBuilder {
       // whitespace-only span is a separator and must keep a space so adjacent
       // words don't merge.
       return pw.TextSpan(text: inner.isEmpty ? '' : ' ');
+    }
+
+    // Transparent text (its own `color: transparent`/zero-alpha, or an inherited
+    // transparent currentColor) is intentionally hidden — e.g. redacted
+    // placeholder text — so it must not print in the inherited colour.
+    final own = style['color'];
+    if ((own != null && _isTransparent(own)) ||
+        (own == null && transparentColor)) {
+      return const pw.TextSpan(text: '');
     }
 
     final deco = (style['text-decoration'] ?? '').toLowerCase();

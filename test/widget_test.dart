@@ -265,6 +265,28 @@ void main() {
         '<span style="width:50%; min-width:0; border-bottom:1px solid;"> '
         '</span>');
     expect(pctReset.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A self-closing bookmark span must not swallow a following fill-in line.
+    final selfClose = builder.renderInlineText(
+        'A<span id="bm"/> <span style="min-width:120px; '
+        'border-bottom:1px solid;"> </span>');
+    expect(selfClose.any((s) => s is pw.WidgetSpan), isTrue);
+    expect(literal(selfClose).contains('span'), isFalse);
+    expect(literal(selfClose), contains('A'));
+
+    // A later border-bottom shorthand resets an earlier explicit colour, so the
+    // transparent currentColor makes the blank invisible.
+    final shorthandReset = builder.renderInlineText(
+        '<span style="color:transparent; border-bottom-color:#555; '
+        'border-bottom:1px solid;"> </span>');
+    expect(shorthandReset.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // Transparent label text is hidden, not printed in the inherited colour.
+    final redacted =
+        builder.renderInlineText('A<span style="color:transparent;">secret'
+            '</span>B');
+    expect(literal(redacted).contains('secret'), isFalse);
+    expect(literal(redacted), contains('A'));
   });
 
   test('Table cells render inline <span> instead of leaking the markup',
