@@ -341,6 +341,41 @@ void main() {
     if (crich is pw.RichText) {
       expect(widgetLiteral(crich.text), contains('<span>x</span>'));
     }
+
+    // A transparent span inside a link is still hidden (not forced visible).
+    final linkHidden = builder.build(
+        'A [<span style="color:transparent;">secret</span>](https://example.com) B');
+    final lhpara = linkHidden.first;
+    final lhrich = lhpara is pw.Padding ? lhpara.child : lhpara;
+    if (lhrich is pw.RichText) {
+      expect(widgetLiteral(lhrich.text).contains('secret'), isFalse);
+    }
+
+    // An unbalanced opening span before a balanced fill-in span must not eat it.
+    final truncated = builder.renderInlineText(
+        'A <span style="color:#555;">note <span style="min-width:120px; '
+        'border-bottom:1px solid;"> </span>');
+    expect(truncated.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A code link label keeps the link underline affordance.
+    final codeUnderline =
+        builder.build('[`code`](https://example.com)');
+    final cupara = codeUnderline.first;
+    final curich = cupara is pw.Padding ? cupara.child : cupara;
+    if (curich is pw.RichText) {
+      pw.TextSpan? codeSpan;
+      void find(pw.InlineSpan s) {
+        if (s is pw.TextSpan) {
+          if (s.text == 'code') codeSpan = s;
+          for (final c in s.children ?? const <pw.InlineSpan>[]) {
+            find(c);
+          }
+        }
+      }
+
+      find(curich.text);
+      expect(codeSpan?.style?.decoration, isNotNull);
+    }
   });
 
   test('Table cells render inline <span> instead of leaking the markup',

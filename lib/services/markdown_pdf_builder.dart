@@ -1031,6 +1031,9 @@ class MarkdownPdfBuilder {
                 text: n.textContent,
                 style: _textStyle(
                   code: true,
+                  // Honour a surrounding underline (e.g. a code link label or
+                  // `<u>`) so links keep their affordance.
+                  underline: underline,
                   // A forced colour (white table headers) wins; otherwise the
                   // branded inline-code colour.
                   color: forceColor ?? const PdfColor.fromInt(0xFFB5179E),
@@ -1041,8 +1044,10 @@ class MarkdownPdfBuilder {
             break;
           case 'a':
             // Walk the link's children so a `<span>` label renders and an inline
-            // code label stays literal, and force the link colour on the whole
-            // label (a header's forced colour wins).
+            // code label stays literal. The link colour is a *fallback* (a
+            // span's own colour / `transparent` still wins, so redacted link
+            // text stays hidden); only a truly forced context (a header) forces
+            // the colour via forceColor.
             spans.addAll(_inline(
               n.children,
               bold: bold,
@@ -1050,8 +1055,8 @@ class MarkdownPdfBuilder {
               underline: profile.legalMode || !profile.headingRule,
               sizeOverride: sizeOverride,
               boldDefault: boldDefault,
-              // Brand links: coloured, not underlined; legal links: body colour.
-              forceColor: forceColor ?? (profile.legalMode ? _text : _accent),
+              color: profile.legalMode ? _text : _accent,
+              forceColor: forceColor,
             ));
             break;
           case 'br':
@@ -1178,9 +1183,11 @@ class MarkdownPdfBuilder {
       }
       final matched = _matchSpan(text, open.start);
       if (matched == null) {
-        // Unbalanced open: strip stray span tags from the remainder.
-        out.add(run(_stripSpanTags(text.substring(open.start))));
-        break;
+        // Unbalanced opening tag — drop just this tag and keep parsing the rest,
+        // so a following *balanced* fill-in span is still rendered rather than
+        // the whole remainder being stripped to text.
+        i = open.end;
+        continue;
       }
       final (contentStart, closeStart, closeEnd) = matched;
       final attrs = open.group(1) ?? '';
