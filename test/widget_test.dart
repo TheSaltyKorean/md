@@ -12,6 +12,7 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
+import 'package:pdf/pdf.dart' show PdfColors;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -137,6 +138,266 @@ void main() {
     expect(clamped.firstLineIndentIn, 0.0);
   });
 
+  test('Inline <span> fill-in lines and labels never leak as literal HTML', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+
+    String literal(List<pw.InlineSpan> spans) {
+      final sb = StringBuffer();
+      void walk(pw.InlineSpan s) {
+        if (s is pw.TextSpan) {
+          if (s.text != null) sb.write(s.text);
+          for (final c in s.children ?? const <pw.InlineSpan>[]) {
+            walk(c);
+          }
+        }
+      }
+
+      for (final s in spans) {
+        walk(s);
+      }
+      return sb.toString();
+    }
+
+    // A signature/date blank: a span with a bottom border and only whitespace.
+    final blank = builder.renderInlineText(
+      'Name: <span style="display:inline-block; min-width:150px; '
+      'border-bottom:1px solid #555;"> </span> Date',
+    );
+    final blankText = literal(blank);
+    expect(blankText.contains('<span'), isFalse);
+    expect(blankText.contains('min-width'), isFalse);
+    expect(blankText.contains('Name:'), isTrue);
+    expect(blankText.contains('Date'), isTrue);
+    // The blank line itself is drawn as a widget, not text.
+    expect(blank.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A styled label span keeps its text but drops the markup.
+    final label = builder.renderInlineText(
+        'A <span style="color:#c00; font-weight:bold;">label</span> here.');
+    final labelText = literal(label);
+    expect(labelText.contains('<span'), isFalse);
+    expect(labelText.contains('label'), isTrue);
+    expect(label.every((s) => s is! pw.WidgetSpan), isTrue);
+
+    // Uppercase / mixed-case tags are handled (HTML tags are case-insensitive).
+    final upper = builder.renderInlineText('X <SPAN>Y</SPAN> Z');
+    final upperText = literal(upper);
+    expect(upperText.contains('SPAN'), isFalse);
+    expect(upperText, contains('Y'));
+
+    // Nested spans must not leak the outer </span>.
+    final nested = builder.renderInlineText(
+        'p <span style="color:#c00;">a <span style="font-weight:bold;">b</span> c</span> q');
+    final nestedText = literal(nested);
+    expect(nestedText.contains('span'), isFalse);
+    expect(nestedText.contains('<'), isFalse);
+    expect(nestedText, contains('q'));
+
+    // A single unclosed span (truncated export) must not leak either.
+    final unclosed =
+        builder.renderInlineText('Name: <span style="min-width:150px">');
+    final unclosedText = literal(unclosed);
+    expect(unclosedText.contains('span'), isFalse);
+    expect(unclosedText.contains('min-width'), isFalse);
+    expect(unclosedText, contains('Name:'));
+
+    // A blank wrapped in an outer styling span still renders as a blank line.
+    final wrappedBlank = builder.renderInlineText(
+        '<span style="color:#555;"><span style="min-width:150px; '
+        'border-bottom:1px solid;"> </span></span>');
+    expect(wrappedBlank.any((s) => s is pw.WidgetSpan), isTrue);
+    expect(literal(wrappedBlank).contains('span'), isFalse);
+
+    // A stray closing tag before a later span must not leak.
+    final stray = builder.renderInlineText(
+        '</span> <span style="min-width:150px; border-bottom:1px solid;"> '
+        '</span>');
+    expect(literal(stray).contains('span'), isFalse);
+    expect(stray.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // HTML entities in span-adjacent text are decoded (not shown literally).
+    final ent = builder.renderInlineText(
+        'AT&amp;T <span style="color:#333;">x</span>');
+    expect(literal(ent), contains('AT&T'));
+    expect(literal(ent).contains('&amp;'), isFalse);
+
+    // An explicit zero-width blank collapses (no visible rule).
+    final zero = builder
+        .renderInlineText('<span style="width:0; border-bottom:1px solid;"> '
+            '</span>');
+    expect(zero.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // A borderless empty span contributes nothing (no stray space).
+    final empty = builder.renderInlineText('X<span id="bookmark"></span>Y');
+    expect(literal(empty), 'XY');
+
+    // The bordered (blank) span is the *outer* one; its whitespace is wrapped in
+    // a nested span. The fill-in line must still be drawn.
+    final outerBlank = builder.renderInlineText(
+        '<span style="min-width:150px; border-bottom:1px solid;">'
+        '<span>&nbsp;</span></span>');
+    expect(outerBlank.any((s) => s is pw.WidgetSpan), isTrue);
+    expect(literal(outerBlank).contains('span'), isFalse);
+
+    // A zero-percent width collapses like an absolute zero.
+    final zeroPct = builder.renderInlineText(
+        '<span style="width:0%; border-bottom:1px solid;"> </span>');
+    expect(zeroPct.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // A whitespace-only styled span is a separator — keep the space.
+    final sep = builder
+        .renderInlineText('First<span style="color:#555;">&nbsp;</span>Last');
+    expect(literal(sep), 'First Last');
+
+    // A colourless border with a transparent currentColor stays invisible.
+    final invisible = builder.renderInlineText(
+        '<span style="color:transparent; border-bottom:1px solid;"> </span>');
+    expect(invisible.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // Transparency inherited from a wrapper span keeps a nested blank invisible.
+    final wrapInvisible = builder.renderInlineText(
+        '<span style="color:transparent;"><span style="border-bottom:1px '
+        'solid; min-width:120px;"> </span></span>');
+    expect(wrapInvisible.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // width:50% with a min-width:0 reset must NOT collapse (falls back default).
+    final pctReset = builder.renderInlineText(
+        '<span style="width:50%; min-width:0; border-bottom:1px solid;"> '
+        '</span>');
+    expect(pctReset.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A self-closing bookmark span must not swallow a following fill-in line.
+    final selfClose = builder.renderInlineText(
+        'A<span id="bm"/> <span style="min-width:120px; '
+        'border-bottom:1px solid;"> </span>');
+    expect(selfClose.any((s) => s is pw.WidgetSpan), isTrue);
+    expect(literal(selfClose).contains('span'), isFalse);
+    expect(literal(selfClose), contains('A'));
+
+    // A later border-bottom shorthand resets an earlier explicit colour, so the
+    // transparent currentColor makes the blank invisible.
+    final shorthandReset = builder.renderInlineText(
+        '<span style="color:transparent; border-bottom-color:#555; '
+        'border-bottom:1px solid;"> </span>');
+    expect(shorthandReset.any((s) => s is pw.WidgetSpan), isFalse);
+
+    // Transparent label text is hidden, not printed in the inherited colour.
+    final redacted =
+        builder.renderInlineText('A<span style="color:transparent;">secret'
+            '</span>B');
+    expect(literal(redacted).contains('secret'), isFalse);
+    expect(literal(redacted), contains('A'));
+
+    // Transparent wrapper hides its plain text too, not just a nested span.
+    final wrapHide = builder.renderInlineText(
+        '<span style="color:transparent;">secret <span>x</span> tail</span>');
+    final wrapText = literal(wrapHide);
+    expect(wrapText.contains('secret'), isFalse);
+    expect(wrapText.contains('tail'), isFalse);
+
+    // A self-closing bordered span is a fill-in line, not a skipped bookmark.
+    final selfBlank = builder.renderInlineText(
+        '<span style="min-width:150px; border-bottom:1px solid #555;" />');
+    expect(selfBlank.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A <span> used as a Markdown link label must not leak its markup.
+    final linkSpan = builder.build(
+        '[<span style="color:#c00;">label</span>](https://example.com)');
+    String widgetLiteral(pw.InlineSpan s) {
+      final sb = StringBuffer();
+      if (s is pw.TextSpan) {
+        if (s.text != null) sb.write(s.text);
+        for (final c in s.children ?? const <pw.InlineSpan>[]) {
+          sb.write(widgetLiteral(c));
+        }
+      }
+      return sb.toString();
+    }
+
+    // The paragraph is a Padding → RichText; dig out the RichText span text.
+    final para = linkSpan.first;
+    final rich = para is pw.Padding ? para.child : para;
+    if (rich is pw.RichText) {
+      final t = widgetLiteral(rich.text);
+      expect(t.contains('<span'), isFalse);
+      expect(t, contains('label'));
+    }
+
+    // A forced colour (white table headers) overrides a styled span's own
+    // colour, so header links/labels don't go dark-on-fill.
+    final forced = builder.renderInlineText(
+        '<span style="color:#111111;">Docs</span>',
+        forceColor: PdfColors.white);
+    final forcedSpan =
+        forced.whereType<pw.TextSpan>().firstWhere((s) => s.text == 'Docs');
+    expect(forcedSpan.style?.color, PdfColors.white);
+
+    // An inline-code link label that references a span tag stays literal.
+    final codeLink = builder
+        .build('[`<span>x</span>`](https://example.com)');
+    final cpara = codeLink.first;
+    final crich = cpara is pw.Padding ? cpara.child : cpara;
+    if (crich is pw.RichText) {
+      expect(widgetLiteral(crich.text), contains('<span>x</span>'));
+    }
+
+    // A transparent span inside a link is still hidden (not forced visible).
+    final linkHidden = builder.build(
+        'A [<span style="color:transparent;">secret</span>](https://example.com) B');
+    final lhpara = linkHidden.first;
+    final lhrich = lhpara is pw.Padding ? lhpara.child : lhpara;
+    if (lhrich is pw.RichText) {
+      expect(widgetLiteral(lhrich.text).contains('secret'), isFalse);
+    }
+
+    // An unbalanced opening span before a balanced fill-in span must not eat it.
+    final truncated = builder.renderInlineText(
+        'A <span style="color:#555;">note <span style="min-width:120px; '
+        'border-bottom:1px solid;"> </span>');
+    expect(truncated.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A code link label keeps the link underline affordance.
+    final codeUnderline =
+        builder.build('[`code`](https://example.com)');
+    final cupara = codeUnderline.first;
+    final curich = cupara is pw.Padding ? cupara.child : cupara;
+    if (curich is pw.RichText) {
+      pw.TextSpan? codeSpan;
+      void find(pw.InlineSpan s) {
+        if (s is pw.TextSpan) {
+          if (s.text == 'code') codeSpan = s;
+          for (final c in s.children ?? const <pw.InlineSpan>[]) {
+            find(c);
+          }
+        }
+      }
+
+      find(curich.text);
+      expect(codeSpan?.style?.decoration, isNotNull);
+    }
+  });
+
+  test('Table cells render inline <span> instead of leaking the markup',
+      () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    // A form-row table with a fill-in blank in a cell.
+    final widgets = builder.build(
+      '| Field | Value |\n'
+      '|---|---|\n'
+      '| Signed | <span style="min-width:150px; border-bottom:1px solid #555;"> '
+      '</span> |\n'
+      // A cell with inline code that mentions a span tag must keep it literal.
+      '| Code | `<span>x</span>` |\n',
+    );
+    expect(widgets, isNotEmpty);
+    // Lays out end-to-end (the cell's WidgetSpan blank would otherwise throw).
+    final doc = pw.Document();
+    doc.addPage(pw.MultiPage(build: (_) => widgets));
+    expect(await doc.save(), isNotEmpty);
+  });
+
   test('PDF builder renders a double-spaced, justified, indented body',
       () async {
     // Exercises the justify + first-line-indent WidgetSpan + centred-heading
@@ -150,7 +411,9 @@ void main() {
       'This is a body paragraph long enough to wrap onto several lines so '
       'that justification, double spacing and the first-line indent all take '
       'effect during layout. It keeps going to force at least one wrap.\n\n'
-      'A second paragraph with **bold** text and a [link](https://example.com).',
+      'A second paragraph with **bold** text and a [link](https://example.com).\n\n'
+      'Signed: <span style="min-width:180px; border-bottom:1px solid #555;"> '
+      '</span>',
     );
     expect(widgets, isNotEmpty);
 

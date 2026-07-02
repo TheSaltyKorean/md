@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:markdown/markdown.dart' as md;
 import 'package:path/path.dart' as p;
 import 'package:pdf/pdf.dart';
@@ -141,8 +142,8 @@ class MarkdownPdfBuilder {
         break;
       }
       final contentStart = openAbs + open.group(0)!.length;
-      final w =
-          _htmlDiv(open.group(1) ?? '', raw.substring(contentStart, closeStart));
+      final w = _htmlDiv(
+          open.group(1) ?? '', raw.substring(contentStart, closeStart));
       if (w != null) out.add(w);
       i = closeEnd;
     }
@@ -237,7 +238,8 @@ class MarkdownPdfBuilder {
               ]);
       }
       return pw.Padding(
-        padding: pw.EdgeInsets.only(top: gapTop + height, bottom: gapBottom + 2),
+        padding:
+            pw.EdgeInsets.only(top: gapTop + height, bottom: gapBottom + 2),
         child: sized,
       );
     }
@@ -254,9 +256,9 @@ class MarkdownPdfBuilder {
   /// Declarations from a style attribute, in source order (so shorthand vs
   /// longhand precedence can follow CSS "later wins" rules).
   List<MapEntry<String, String>> _styleDecls(String attrs) {
-    final m = RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''',
-            caseSensitive: false)
-        .firstMatch(attrs);
+    final m =
+        RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''', caseSensitive: false)
+            .firstMatch(attrs);
     final out = <MapEntry<String, String>>[];
     if (m == null) return out;
     for (final decl in (m.group(2) ?? m.group(3) ?? '').split(';')) {
@@ -319,7 +321,14 @@ class MarkdownPdfBuilder {
   }
 
   static const _borderStyles = {
-    'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset'
+    'solid',
+    'dashed',
+    'dotted',
+    'double',
+    'groove',
+    'ridge',
+    'inset',
+    'outset'
   };
 
   /// The effective bottom border as (widthPt, colour), or null when invisible.
@@ -327,7 +336,8 @@ class MarkdownPdfBuilder {
   /// overrides (later declaration wins) and follows CSS visibility rules: a
   /// border needs a drawable *style* keyword (a width or colour alone leaves the
   /// style at `none`), a positive width, and a non-transparent colour.
-  (double, PdfColor)? _resolveBorder(List<MapEntry<String, String>> decls) {
+  (double, PdfColor)? _resolveBorder(List<MapEntry<String, String>> decls,
+      {PdfColor? currentColor}) {
     double? width;
     String? styleKw;
     PdfColor? color;
@@ -373,14 +383,34 @@ class MarkdownPdfBuilder {
     if (styleKw == null || !_borderStyles.contains(styleKw)) return null;
     final w = width ?? 1.0; // drawable style, no explicit width => medium
     if (w <= 0 || transparent) return null;
-    return (w, color ?? _text);
+    // A border with no explicit colour uses CSS `currentColor` (the element's
+    // text colour) when one is supplied, else the document body colour.
+    return (w, color ?? currentColor ?? _text);
+  }
+
+  /// Whether the *effective* bottom-border colour is explicit (so a span's
+  /// `currentColor` isn't used). Walks declarations in source order because a
+  /// later `border-bottom` shorthand resets the colour to its initial value
+  /// (currentColor) even if an earlier longhand set one.
+  bool _borderHasColor(List<MapEntry<String, String>> decls) {
+    var explicit = false;
+    for (final e in decls) {
+      switch (e.key) {
+        case 'border-bottom': // shorthand resets, then applies any colour token
+          explicit = _cssColor(e.value) != null;
+          break;
+        case 'border-bottom-color':
+          explicit = _cssColor(e.value) != null;
+          break;
+      }
+    }
+    return explicit;
   }
 
   /// The first length token in a border shorthand (the width), or null.
   double? _firstBorderWidth(String v) {
-    final s = v
-        .replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ')
-        .replaceAll(RegExp(r'(rgba?|hsla?)\([^)]*\)', caseSensitive: false), ' ');
+    final s = v.replaceAll(RegExp(r'#[0-9a-fA-F]{3,8}'), ' ').replaceAll(
+        RegExp(r'(rgba?|hsla?)\([^)]*\)', caseSensitive: false), ' ');
     for (final tok in s.split(RegExp(r'\s+'))) {
       if (RegExp(r'^-?[\d.]').hasMatch(tok)) {
         final l = _lengthPt(tok);
@@ -398,7 +428,9 @@ class MarkdownPdfBuilder {
     if (h8 != null && h8.group(1) == '00') return true;
     final h4 = RegExp(r'#[0-9a-f]{3}([0-9a-f])\b').firstMatch(s); // #RGBA
     if (h4 != null && h4.group(1) == '0') return true;
-    if (RegExp(r'(rgba|hsla)\([^)]*,\s*0?\.?0+%?\s*\)').hasMatch(s)) return true;
+    if (RegExp(r'(rgba|hsla)\([^)]*,\s*0?\.?0+%?\s*\)').hasMatch(s)) {
+      return true;
+    }
     return false;
   }
 
@@ -431,10 +463,12 @@ class MarkdownPdfBuilder {
   /// render their real text (e.g. "AT&amp;T" -> "AT&T").
   String _decodeEntities(String s) {
     if (!s.contains('&')) return s;
-    String charOf(int? code) =>
-        (code == null || code < 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF))
-            ? ''
-            : String.fromCharCode(code);
+    String charOf(int? code) => (code == null ||
+            code < 0 ||
+            code > 0x10FFFF ||
+            (code >= 0xD800 && code <= 0xDFFF))
+        ? ''
+        : String.fromCharCode(code);
     return s
         .replaceAllMapped(RegExp(r'&#x([0-9a-fA-F]+);'),
             (m) => charOf(int.tryParse(m.group(1)!, radix: 16)))
@@ -461,14 +495,32 @@ class MarkdownPdfBuilder {
   }
 
   static const _namedColors = <String, int>{
-    'black': 0x000000, 'white': 0xFFFFFF, 'red': 0xFF0000, 'green': 0x008000,
-    'blue': 0x0000FF, 'navy': 0x000080, 'gray': 0x808080, 'grey': 0x808080,
-    'silver': 0xC0C0C0, 'maroon': 0x800000, 'olive': 0x808000,
-    'lime': 0x00FF00, 'teal': 0x008080, 'aqua': 0x00FFFF, 'cyan': 0x00FFFF,
-    'purple': 0x800080, 'fuchsia': 0xFF00FF, 'magenta': 0xFF00FF,
-    'yellow': 0xFFFF00, 'orange': 0xFFA500, 'darkgray': 0xA9A9A9,
-    'darkgrey': 0xA9A9A9, 'lightgray': 0xD3D3D3, 'lightgrey': 0xD3D3D3,
-    'dimgray': 0x696969, 'dimgrey': 0x696969,
+    'black': 0x000000,
+    'white': 0xFFFFFF,
+    'red': 0xFF0000,
+    'green': 0x008000,
+    'blue': 0x0000FF,
+    'navy': 0x000080,
+    'gray': 0x808080,
+    'grey': 0x808080,
+    'silver': 0xC0C0C0,
+    'maroon': 0x800000,
+    'olive': 0x808000,
+    'lime': 0x00FF00,
+    'teal': 0x008080,
+    'aqua': 0x00FFFF,
+    'cyan': 0x00FFFF,
+    'purple': 0x800080,
+    'fuchsia': 0xFF00FF,
+    'magenta': 0xFF00FF,
+    'yellow': 0xFFFF00,
+    'orange': 0xFFA500,
+    'darkgray': 0xA9A9A9,
+    'darkgrey': 0xA9A9A9,
+    'lightgray': 0xD3D3D3,
+    'lightgrey': 0xD3D3D3,
+    'dimgray': 0x696969,
+    'dimgrey': 0x696969,
   };
 
   /// Parse a CSS colour (hex 3/6/8-digit, rgb()/rgba(), hsl()/hsla(), or a
@@ -476,8 +528,10 @@ class MarkdownPdfBuilder {
   PdfColor? _cssColor(String? v) {
     if (v == null) return null;
     final s = v.trim().toLowerCase();
-    PdfColor rgb(int r, int g, int b) => PdfColor.fromInt(
-        0xFF000000 | (r.clamp(0, 255) << 16) | (g.clamp(0, 255) << 8) | b.clamp(0, 255));
+    PdfColor rgb(int r, int g, int b) => PdfColor.fromInt(0xFF000000 |
+        (r.clamp(0, 255) << 16) |
+        (g.clamp(0, 255) << 8) |
+        b.clamp(0, 255));
 
     // #RRGGBB(AA) / #RGB(A) — longest first so "#111344" isn't read as "#111".
     final hex = RegExp(r'#([0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})\b')
@@ -497,11 +551,11 @@ class MarkdownPdfBuilder {
       int ch(String x) => (double.tryParse(x) ?? 0).round();
       return rgb(ch(m.group(1)!), ch(m.group(2)!), ch(m.group(3)!));
     }
-    final hsl =
-        RegExp(r'hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%')
-            .firstMatch(s);
+    final hsl = RegExp(r'hsla?\(\s*([\d.]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%')
+        .firstMatch(s);
     if (hsl != null) {
-      return _hslToColor(double.tryParse(hsl.group(1)!) ?? 0,
+      return _hslToColor(
+          double.tryParse(hsl.group(1)!) ?? 0,
           (double.tryParse(hsl.group(2)!) ?? 0) / 100,
           (double.tryParse(hsl.group(3)!) ?? 0) / 100);
     }
@@ -679,8 +733,7 @@ class MarkdownPdfBuilder {
     }
     spans.addAll(_inline(nodes));
     final rich = pw.RichText(
-      textAlign:
-          profile.justifyBody ? pw.TextAlign.justify : pw.TextAlign.left,
+      textAlign: profile.justifyBody ? pw.TextAlign.justify : pw.TextAlign.left,
       text: pw.TextSpan(children: spans),
     );
     return profile.justifyBody
@@ -806,14 +859,6 @@ class MarkdownPdfBuilder {
 
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
-    final headerStyle = pw.TextStyle(
-      font: fonts.bold,
-      fontSize: 10.5,
-      color: PdfColors.white,
-    );
-    final cellStyle =
-        pw.TextStyle(font: fonts.base, fontSize: 10.5, color: _text);
-
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
       final isHead = section.tag == 'thead';
@@ -826,8 +871,20 @@ class MarkdownPdfBuilder {
             pw.Padding(
               padding:
                   const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: pw.Text(cell.textContent,
-                  style: isHead ? headerStyle : cellStyle),
+              // Walk inline children so `<span>` fill-in lines / labels render
+              // and inline code stays literal (the `code` case). Header cells
+              // force white so links/code don't adopt their own colour on the
+              // coloured header fill.
+              child: pw.RichText(
+                text: pw.TextSpan(
+                  children: _inline(
+                    cell.children,
+                    boldDefault: isHead,
+                    forceColor: isHead ? PdfColors.white : null,
+                    sizeOverride: 10.5,
+                  ),
+                ),
+              ),
             ),
           );
         }
@@ -892,26 +949,26 @@ class MarkdownPdfBuilder {
     bool boldDefault = false,
     PdfColor? color,
     double? sizeOverride,
+    // When set, forces this colour on *all* descendant text, links, code and
+    // spans (overriding their own colours) — e.g. white table-header cells.
+    PdfColor? forceColor,
   }) {
     final spans = <pw.InlineSpan>[];
     if (nodes == null) return spans;
 
     for (final n in nodes) {
       if (n is md.Text) {
-        spans.add(
-          pw.TextSpan(
-            text: _symbols(n.text),
-            style: _textStyle(
-              bold: bold || boldDefault,
-              italic: italic,
-              code: code,
-              strike: strike,
-              underline: underline,
-              color: color,
-              size: sizeOverride,
-            ),
-          ),
-        );
+        spans.addAll(_renderTextWithSpans(
+          n.text,
+          bold: bold || boldDefault,
+          italic: italic,
+          code: code,
+          strike: strike,
+          underline: underline,
+          color: color,
+          size: sizeOverride,
+          forceColor: forceColor,
+        ));
       } else if (n is md.Element) {
         switch (n.tag) {
           case 'strong':
@@ -928,7 +985,8 @@ class MarkdownPdfBuilder {
                         ? _primary
                         : null),
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'em':
             spans.addAll(_inline(n.children,
@@ -939,7 +997,8 @@ class MarkdownPdfBuilder {
                 underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'del':
             spans.addAll(_inline(n.children,
@@ -950,7 +1009,8 @@ class MarkdownPdfBuilder {
                 underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'u':
           case 'ins':
@@ -962,7 +1022,8 @@ class MarkdownPdfBuilder {
                 underline: true,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
             break;
           case 'code':
             spans.add(
@@ -970,28 +1031,33 @@ class MarkdownPdfBuilder {
                 text: n.textContent,
                 style: _textStyle(
                   code: true,
-                  color: const PdfColor.fromInt(0xFFB5179E),
+                  // Honour a surrounding underline (e.g. a code link label or
+                  // `<u>`) so links keep their affordance.
+                  underline: underline,
+                  // A forced colour (white table headers) wins; otherwise the
+                  // branded inline-code colour.
+                  color: forceColor ?? const PdfColor.fromInt(0xFFB5179E),
                   size: sizeOverride,
                 ),
               ),
             );
             break;
           case 'a':
-            spans.add(
-              pw.TextSpan(
-                text: n.textContent,
-                style: _textStyle(
-                  bold: bold || boldDefault,
-                  italic: italic,
-                  // Legal mode prints links in the body colour (monochrome).
-                  color: profile.legalMode ? _text : _accent,
-                  size: sizeOverride,
-                  // Brand links are coloured but not underlined; legal/plain
-                  // links keep the underline.
-                  underline: profile.legalMode || !profile.headingRule,
-                ),
-              ),
-            );
+            // Walk the link's children so a `<span>` label renders and an inline
+            // code label stays literal. The link colour is a *fallback* (a
+            // span's own colour / `transparent` still wins, so redacted link
+            // text stays hidden); only a truly forced context (a header) forces
+            // the colour via forceColor.
+            spans.addAll(_inline(
+              n.children,
+              bold: bold,
+              italic: italic,
+              underline: profile.legalMode || !profile.headingRule,
+              sizeOverride: sizeOverride,
+              boldDefault: boldDefault,
+              color: profile.legalMode ? _text : _accent,
+              forceColor: forceColor,
+            ));
             break;
           case 'br':
             spans.add(const pw.TextSpan(text: '\n'));
@@ -1005,11 +1071,326 @@ class MarkdownPdfBuilder {
                 underline: underline,
                 color: color,
                 sizeOverride: sizeOverride,
-                boldDefault: boldDefault));
+                boldDefault: boldDefault,
+                forceColor: forceColor));
         }
       }
     }
     return spans;
+  }
+
+  static final _spanOpen = RegExp(r'<span\b([^>]*)>', caseSensitive: false);
+  static final _spanAnyTag = RegExp(r'<(/?)span\b[^>]*>', caseSensitive: false);
+
+  /// Test hook for the inline-`<span>` rendering (blank lines / styled labels).
+  @visibleForTesting
+  List<pw.InlineSpan> renderInlineText(
+    String text, {
+    bool underline = false,
+    bool strike = false,
+    PdfColor? color,
+    PdfColor? forceColor,
+  }) =>
+      _renderTextWithSpans(text,
+          underline: underline,
+          strike: strike,
+          color: color,
+          forceColor: forceColor);
+
+  /// Split raw inline text into styled runs, rendering inline `<span>` HTML that
+  /// package:markdown otherwise leaves as literal text. Legal/manuscript docs
+  /// use spans for fill-in "blank" lines (a span with a visible bottom border)
+  /// and small styled labels. Text without a span returns as a single run, and
+  /// inline code is never touched. Spans are matched with a balanced scan so a
+  /// nested `<span>` doesn't leak its outer `</span>`.
+  ///
+  /// Known limitation (accepted): when a span wraps Markdown inline syntax, e.g.
+  /// `<span style="color:red">**bold**</span>`, the Markdown parser splits the
+  /// span's open/close tags into separate sibling nodes from the parsed
+  /// `strong`/`a`/… element, so each text node is handled in isolation here. The
+  /// tags are stripped (no leak) and the emphasis still renders, but the span's
+  /// own colour/weight is not applied to that inner element — the same behaviour
+  /// as the existing inline `<u>` handling.
+  List<pw.InlineSpan> _renderTextWithSpans(
+    String text, {
+    bool bold = false,
+    bool italic = false,
+    bool code = false,
+    bool strike = false,
+    bool underline = false,
+    PdfColor? color,
+    double? size,
+    bool transparentColor = false,
+    PdfColor? forceColor,
+  }) {
+    // Decode HTML entities in prose/span-adjacent text (but never in code, where
+    // `&amp;` is literal), matching the entity handling in _spanFragment. Text
+    // under an inherited transparent currentColor is hidden (redaction) — unless
+    // a forced colour overrides it (e.g. white table headers).
+    pw.InlineSpan run(String s) => (transparentColor && forceColor == null)
+        ? const pw.TextSpan(text: '')
+        : pw.TextSpan(
+            text: _symbols(code ? s : _decodeEntities(s)),
+            style: _textStyle(
+              bold: bold,
+              italic: italic,
+              code: code,
+              strike: strike,
+              underline: underline,
+              color: forceColor ?? color,
+              size: size,
+            ),
+          );
+    // Enter the parser for *any* span tag (open or close). Gating on a complete
+    // pair would let a single unclosed/stray tag fall through and leak; the loop
+    // strips those instead. HTML tag names are case-insensitive (as is the regex).
+    if (code || !_spanAnyTag.hasMatch(text)) return [run(text)];
+
+    final out = <pw.InlineSpan>[];
+    var i = 0;
+    while (i < text.length) {
+      final openIt = _spanOpen.allMatches(text, i).iterator;
+      if (!openIt.moveNext()) {
+        // No further opening tag — emit the remainder, stripping any stray
+        // closing tags so nothing leaks.
+        out.add(run(_stripSpanTags(text.substring(i))));
+        break;
+      }
+      final open = openIt.current;
+      if (open.start > i) {
+        // Strip any stray closing tag that precedes the next opener.
+        out.add(run(_stripSpanTags(text.substring(i, open.start))));
+      }
+      if (open.group(0)!.endsWith('/>')) {
+        // Self-closing span. A bordered one is an empty fill-in line; an
+        // unstyled one is structural (e.g. a bookmark) and contributes nothing.
+        // Either way it has no content, so don't run the balanced scan (which
+        // would otherwise swallow a following, valid fill-in span).
+        final selfAttrs = open.group(1) ?? '';
+        if (_spanIsBlank(selfAttrs, '')) {
+          out.add(_spanFragment(selfAttrs, '',
+              bold: bold,
+              italic: italic,
+              underline: underline,
+              strike: strike,
+              color: color,
+              size: size,
+              transparentColor: transparentColor,
+              forceColor: forceColor));
+        }
+        i = open.end;
+        continue;
+      }
+      final matched = _matchSpan(text, open.start);
+      if (matched == null) {
+        // Unbalanced opening tag — drop just this tag and keep parsing the rest,
+        // so a following *balanced* fill-in span is still rendered rather than
+        // the whole remainder being stripped to text.
+        i = open.end;
+        continue;
+      }
+      final (contentStart, closeStart, closeEnd) = matched;
+      final attrs = open.group(1) ?? '';
+      final content = text.substring(contentStart, closeStart);
+      if (_spanIsBlank(attrs, content)) {
+        // The outer span itself is the fill-in line (even if its whitespace is
+        // wrapped in a nested span) — draw it rather than recursing into the
+        // empty child.
+        out.add(_spanFragment(attrs, content,
+            bold: bold,
+            italic: italic,
+            underline: underline,
+            strike: strike,
+            color: color,
+            size: size,
+            transparentColor: transparentColor,
+            forceColor: forceColor));
+      } else if (_spanOpen.hasMatch(content)) {
+        // Nested span(s): recurse so an inner blank/label still renders instead
+        // of being flattened to text, inheriting the outer span's styling
+        // (including a transparent currentColor, so an inner colourless border
+        // stays invisible).
+        final os = _parseStyle(attrs);
+        final ofw = (os['font-weight'] ?? '').toLowerCase();
+        final odeco = (os['text-decoration'] ?? '').toLowerCase();
+        final oColor = os['color'];
+        out.addAll(_renderTextWithSpans(
+          content,
+          bold: bold || ofw == 'bold' || (int.tryParse(ofw) ?? 0) >= 600,
+          italic: italic || (os['font-style'] ?? '').toLowerCase() == 'italic',
+          underline: underline || odeco.contains('underline'),
+          strike: strike || odeco.contains('line-through'),
+          color: _cssColor(oColor ?? '') ?? color,
+          size: _lengthPt(os['font-size']) ?? size,
+          transparentColor: (oColor != null && _isTransparent(oColor)) ||
+              (oColor == null && transparentColor),
+          forceColor: forceColor,
+        ));
+      } else {
+        out.add(_spanFragment(
+          attrs,
+          content,
+          bold: bold,
+          italic: italic,
+          underline: underline,
+          strike: strike,
+          color: color,
+          size: size,
+          transparentColor: transparentColor,
+          forceColor: forceColor,
+        ));
+      }
+      i = closeEnd;
+    }
+    return out;
+  }
+
+  static final _spanStrip = RegExp(r'</?span[^>]*>', caseSensitive: false);
+  String _stripSpanTags(String s) => s.replaceAll(_spanStrip, '');
+
+  /// (contentStart, closeStart, closeEnd) of the `</span>` balancing the `<span>`
+  /// opening at [openAbs], accounting for nested spans; null if unbalanced.
+  (int, int, int)? _matchSpan(String s, int openAbs) {
+    var depth = 0;
+    var contentStart = -1;
+    for (final m in _spanAnyTag.allMatches(s, openAbs)) {
+      if (m.group(1) == '/') {
+        depth--;
+        if (depth == 0) return (contentStart, m.start, m.end);
+      } else if (m.group(0)!.endsWith('/>')) {
+        continue; // self-closing span — not a nesting open
+      } else {
+        depth++;
+        if (depth == 1) contentStart = m.end; // just past the outer opening tag
+      }
+    }
+    return null;
+  }
+
+  /// A span's raw content with all tags and entities removed and trimmed — used
+  /// to decide whether a bordered span is an empty fill-in blank.
+  String _effectiveText(String raw) => _decodeEntities(raw
+          .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll(
+              RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' '))
+      .trim();
+
+  /// Whether a span is a fill-in blank: a visible bottom border and no real text
+  /// (its whitespace may itself be wrapped in nested spans).
+  bool _spanIsBlank(String attrs, String content) =>
+      _resolveBorder(_styleDecls(attrs)) != null &&
+      _effectiveText(content).isEmpty;
+
+  /// Render one `<span style="…">…</span>`: a visible bottom border with no real
+  /// text becomes a baseline rule of the requested width (a signature/date
+  /// blank); anything else becomes a styled text run (colour/weight/size),
+  /// inheriting the surrounding underline/strike decoration.
+  pw.InlineSpan _spanFragment(
+    String attrs,
+    String innerRaw, {
+    bool bold = false,
+    bool italic = false,
+    bool underline = false,
+    bool strike = false,
+    PdfColor? color,
+    double? size,
+    bool transparentColor = false,
+    PdfColor? forceColor,
+  }) {
+    final style = _parseStyle(attrs);
+    final decls = _styleDecls(attrs);
+    // A forced colour (white table headers) overrides the span's own; otherwise
+    // its own colour is `currentColor` for a colourless border and the label
+    // text colour.
+    final spanColor = forceColor ?? _cssColor(style['color']) ?? color;
+    final border = _resolveBorder(decls, currentColor: spanColor);
+    final inner = _decodeEntities(innerRaw
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .replaceAll(
+            RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' '));
+    final hasText = inner.trim().isNotEmpty;
+
+    if (border != null && !hasText) {
+      // A colourless border uses currentColor; if that colour is transparent
+      // (its own `color: transparent`/zero-alpha, or an inherited transparent
+      // from a wrapper span) the blank is intentionally invisible.
+      final own = style['color'];
+      final transparentCurrent = (own != null && _isTransparent(own)) ||
+          (own == null && transparentColor);
+      // A forced colour makes the border visible regardless of transparency.
+      if (forceColor == null && transparentCurrent && !_borderHasColor(decls)) {
+        return const pw.TextSpan(text: '');
+      }
+      // CSS width is subject to the min-width floor, so honour the larger of the
+      // two positive values. A collapse happens only when the *width* itself is
+      // explicitly zero (length or %); a bare `min-width:0` is a reset, not a
+      // collapse, and an unresolved non-zero % falls back to the default.
+      final wPt = _lengthPt(style['width']);
+      final mwPt = _lengthPt(style['min-width']);
+      final positive = [wPt, mwPt].whereType<double>().where((v) => v > 0);
+      final double width;
+      if (positive.isNotEmpty) {
+        width = positive.reduce((a, b) => a > b ? a : b);
+      } else if (wPt == 0 || _percent(style['width']) == 0) {
+        return const pw.TextSpan(text: ''); // width explicitly zero → collapsed
+      } else {
+        width =
+            108.0; // missing / min-width:0 / unresolved non-zero % → default
+      }
+      final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
+      final lineSize = size ?? 11.0;
+      // A zero-baseline WidgetSpan sits on the text baseline, so the container's
+      // bottom border renders as an underline blank at the baseline.
+      return pw.WidgetSpan(
+        child: pw.Container(
+          width: width,
+          height: lineSize,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 2),
+          decoration: pw.BoxDecoration(
+            border: pw.Border(
+                bottom: pw.BorderSide(
+                    color: forceColor ?? border.$2, width: thickness)),
+          ),
+        ),
+      );
+    }
+
+    final fw = (style['font-weight'] ?? '').toLowerCase();
+    final isBold = bold || fw == 'bold' || (int.tryParse(fw) ?? 0) >= 600;
+    final isItalic =
+        italic || (style['font-style'] ?? '').toLowerCase() == 'italic';
+    if (!hasText) {
+      // A truly empty structural span (anchor/bookmark) contributes nothing; a
+      // whitespace-only span is a separator and must keep a space so adjacent
+      // words don't merge.
+      return pw.TextSpan(text: inner.isEmpty ? '' : ' ');
+    }
+
+    // Transparent text (its own `color: transparent`/zero-alpha, or an inherited
+    // transparent currentColor) is intentionally hidden — e.g. redacted
+    // placeholder text — unless a forced colour overrides it.
+    final own = style['color'];
+    if (forceColor == null &&
+        ((own != null && _isTransparent(own)) ||
+            (own == null && transparentColor))) {
+      return const pw.TextSpan(text: '');
+    }
+
+    final deco = (style['text-decoration'] ?? '').toLowerCase();
+    return pw.TextSpan(
+      text: _symbols(inner),
+      style: _textStyle(
+        bold: isBold,
+        italic: isItalic,
+        // Combine the surrounding decoration with the span's own.
+        underline: underline || deco.contains('underline'),
+        strike: strike || deco.contains('line-through'),
+        color: spanColor,
+        size: _lengthPt(style['font-size']) ?? size,
+      ),
+    );
   }
 
   pw.TextStyle _textStyle({
