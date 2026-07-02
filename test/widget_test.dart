@@ -287,6 +287,41 @@ void main() {
             '</span>B');
     expect(literal(redacted).contains('secret'), isFalse);
     expect(literal(redacted), contains('A'));
+
+    // Transparent wrapper hides its plain text too, not just a nested span.
+    final wrapHide = builder.renderInlineText(
+        '<span style="color:transparent;">secret <span>x</span> tail</span>');
+    final wrapText = literal(wrapHide);
+    expect(wrapText.contains('secret'), isFalse);
+    expect(wrapText.contains('tail'), isFalse);
+
+    // A self-closing bordered span is a fill-in line, not a skipped bookmark.
+    final selfBlank = builder.renderInlineText(
+        '<span style="min-width:150px; border-bottom:1px solid #555;" />');
+    expect(selfBlank.any((s) => s is pw.WidgetSpan), isTrue);
+
+    // A <span> used as a Markdown link label must not leak its markup.
+    final linkSpan = builder.build(
+        '[<span style="color:#c00;">label</span>](https://example.com)');
+    String widgetLiteral(pw.InlineSpan s) {
+      final sb = StringBuffer();
+      if (s is pw.TextSpan) {
+        if (s.text != null) sb.write(s.text);
+        for (final c in s.children ?? const <pw.InlineSpan>[]) {
+          sb.write(widgetLiteral(c));
+        }
+      }
+      return sb.toString();
+    }
+
+    // The paragraph is a Padding → RichText; dig out the RichText span text.
+    final para = linkSpan.first;
+    final rich = para is pw.Padding ? para.child : para;
+    if (rich is pw.RichText) {
+      final t = widgetLiteral(rich.text);
+      expect(t.contains('<span'), isFalse);
+      expect(t, contains('label'));
+    }
   });
 
   test('Table cells render inline <span> instead of leaking the markup',
