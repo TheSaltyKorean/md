@@ -183,11 +183,17 @@ class MarkdownPdfBuilder {
     if (_divOpen.hasMatch(content)) {
       final style = _parseStyle(attrs);
       // A `display:flex` wrapper lays its child divs out horizontally (a court
-      // caption's name-left / role-right row); otherwise they stack in a column.
-      final isFlex = (style['display'] ?? '').toLowerCase().contains('flex');
-      final inner = _renderDivSequence(content, inRow: isFlex);
+      // caption's name-left / role-right row) — unless flex-direction is a
+      // column, which stacks (CSS default is row). Anything else is a column.
+      final display = (style['display'] ?? '').toLowerCase();
+      final dir = (style['flex-direction'] ?? '').trim().toLowerCase();
+      final isFlexRow = display.contains('flex') && !dir.startsWith('column');
+      // Children of a row must shrink-wrap; propagate that context to nested
+      // (even non-flex) wrappers so a grandchild doesn't take the full-width
+      // path and overflow the outer Row.
+      final inner = _renderDivSequence(content, inRow: isFlexRow || inRow);
       if (inner.isEmpty) return null;
-      final pw.Widget layout = isFlex
+      final pw.Widget layout = isFlexRow
           ? pw.Row(
               mainAxisAlignment: _mainAxis(style['justify-content']),
               crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -236,14 +242,19 @@ class MarkdownPdfBuilder {
       final widthPt = _lengthPt(style['width']);
       final widthPct = _percent(style['width']);
       final pw.Widget sized;
-      if (widthPt != null) {
-        sized = widthPt <= 0
-            ? pw.SizedBox()
-            : pw.Align(
-                alignment: pw.Alignment.centerLeft,
-                child: pw.SizedBox(width: widthPt, child: line));
+      if (widthPt != null && widthPt <= 0) {
+        sized = pw.SizedBox(); // explicit 0 => collapsed rule
       } else if (widthPct != null && widthPct <= 0) {
         sized = pw.SizedBox(); // explicit 0% => collapsed rule
+      } else if (inRow) {
+        // Inside a flex row the rule must be bounded (a full-width or
+        // percentage/Expanded rule would overflow the Row): use the explicit
+        // width, else a fixed default.
+        sized = pw.SizedBox(width: widthPt ?? 108, child: line);
+      } else if (widthPt != null) {
+        sized = pw.Align(
+            alignment: pw.Alignment.centerLeft,
+            child: pw.SizedBox(width: widthPt, child: line));
       } else {
         final pct = (widthPct ?? 60).clamp(1.0, 100.0);
         sized = pct >= 99

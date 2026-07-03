@@ -489,6 +489,56 @@ void main() {
         isFalse);
   });
 
+  test('display:flex; flex-direction:column stacks (not a row)', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '<div style="display:flex; flex-direction:column">'
+        '<div>A</div><div>B</div></div>');
+    // A column direction must not become a horizontal Row.
+    expect(_walk(ws).whereType<pw.Row>(), isEmpty);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('A nested wrapper + aligned grandchild inside a flex row lays out',
+      () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    // The 2nd column wraps a centered grandchild — it must shrink-wrap, not
+    // take the full-width path (which would overflow the Row and throw).
+    final ws = builder.build(
+        '<div style="display:flex; justify-content:space-between">'
+        '<div>MEGHAN MAIN</div>'
+        '<div><div style="text-align:center">v.</div></div></div>');
+    // No full-width stretch box leaked into the row context.
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        isFalse);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('A fill-in blank inside a flex row is bounded (no overflow)', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '<div style="display:flex; justify-content:space-between">'
+        '<div>Signed:</div>'
+        '<div style="border-bottom:1px solid; width:150px"></div></div>');
+    // The blank is a bounded finite-width rule (150px → 112.5pt), not a
+    // full-width / Expanded rule that would overflow the Row.
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any(
+            (b) => b.width != null && b.width!.isFinite && b.width! > 0),
+        isTrue);
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        isFalse);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
   test('Visiting Edit mode without editing preserves the exact source', () {
     // Regression: AppFlowy's Markdown round-trip drops blank lines and rewrites
     // markers, so a no-op Edit → back visit used to reformat untouched text.
