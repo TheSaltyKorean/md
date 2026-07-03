@@ -114,7 +114,9 @@ class MarkdownPdfBuilder {
 
   /// Render text interleaved with *balanced* `<div>…</div>` blocks (so a wrapper
   /// div containing a signature line + label is handled, not just flat divs).
-  List<pw.Widget> _renderDivSequence(String raw) {
+  /// [inRow] is set when these widgets become children of a `display:flex` row,
+  /// so a text block must shrink-wrap (a full-width box would overflow a Row).
+  List<pw.Widget> _renderDivSequence(String raw, {bool inRow = false}) {
     final out = <pw.Widget>[];
     void addText(String s) {
       // Text between divs is raw HTML too — normalise <br>, strip tags, decode
@@ -143,7 +145,8 @@ class MarkdownPdfBuilder {
       }
       final contentStart = openAbs + open.group(0)!.length;
       final w = _htmlDiv(
-          open.group(1) ?? '', raw.substring(contentStart, closeStart));
+          open.group(1) ?? '', raw.substring(contentStart, closeStart),
+          inRow: inRow);
       if (w != null) out.add(w);
       i = closeEnd;
     }
@@ -167,23 +170,44 @@ class MarkdownPdfBuilder {
   }
 
   /// Render a single `<div style="…">content</div>`. A wrapper div (whose content
-  /// holds more divs) recurses; an empty div with a *visible* `border-bottom`
-  /// becomes a signature/blank line; a div with text becomes a styled label.
-  /// Returns null for an empty, borderless/structural div.
-  pw.Widget? _htmlDiv(String attrs, String content) {
+  /// holds more divs) recurses into a column — or, with `display:flex`, a row
+  /// (the two-column court caption); an empty div with a *visible* `border-bottom`
+  /// becomes a signature/blank line; a div with text becomes a styled label
+  /// honouring `text-align`. Returns null for an empty, borderless/structural div.
+  ///
+  /// [inRow] is set when this div is itself a child of a `display:flex` row, so
+  /// a text block shrink-wraps rather than stretching to the full width (which
+  /// would overflow a [pw.Row]).
+  pw.Widget? _htmlDiv(String attrs, String content, {bool inRow = false}) {
     final decls = _styleDecls(attrs);
     if (_divOpen.hasMatch(content)) {
-      final inner = _renderDivSequence(content);
+      final style = _parseStyle(attrs);
+      // A `display:flex` wrapper lays its child divs out horizontally (a court
+      // caption's name-left / role-right row) — unless flex-direction is a
+      // column, which stacks (CSS default is row). Anything else is a column.
+      final display = (style['display'] ?? '').toLowerCase();
+      final dir = (style['flex-direction'] ?? '').trim().toLowerCase();
+      final isFlexRow = display.contains('flex') && !dir.startsWith('column');
+      // Children of a row must shrink-wrap; propagate that context to nested
+      // (even non-flex) wrappers so a grandchild doesn't take the full-width
+      // path and overflow the outer Row.
+      final inner = _renderDivSequence(content, inRow: isFlexRow || inRow);
       if (inner.isEmpty) return null;
-      final col = pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start, children: inner);
+      final pw.Widget layout = isFlexRow
+          ? pw.Row(
+              mainAxisAlignment: _mainAxis(style['justify-content']),
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: inner,
+            )
+          : pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start, children: inner);
       // Apply the wrapper div's own vertical spacing around the inner content.
       final mt = _marginPt(decls, 'top');
       final mb = _marginPt(decls, 'bottom');
       return (mt > 0 || mb > 0)
           ? pw.Padding(
-              padding: pw.EdgeInsets.only(top: mt, bottom: mb), child: col)
-          : col;
+              padding: pw.EdgeInsets.only(top: mt, bottom: mb), child: layout)
+          : layout;
     }
     final style = _parseStyle(attrs);
     // Inline markup inside a label (<b>…</b>) and HTML whitespace entities are
@@ -218,14 +242,19 @@ class MarkdownPdfBuilder {
       final widthPt = _lengthPt(style['width']);
       final widthPct = _percent(style['width']);
       final pw.Widget sized;
-      if (widthPt != null) {
-        sized = widthPt <= 0
-            ? pw.SizedBox()
-            : pw.Align(
-                alignment: pw.Alignment.centerLeft,
-                child: pw.SizedBox(width: widthPt, child: line));
+      if (widthPt != null && widthPt <= 0) {
+        sized = pw.SizedBox(); // explicit 0 => collapsed rule
       } else if (widthPct != null && widthPct <= 0) {
         sized = pw.SizedBox(); // explicit 0% => collapsed rule
+      } else if (inRow) {
+        // Inside a flex row the rule must be bounded (a full-width or
+        // percentage/Expanded rule would overflow the Row): use the explicit
+        // width, else a fixed default.
+        sized = pw.SizedBox(width: widthPt ?? 108, child: line);
+      } else if (widthPt != null) {
+        sized = pw.Align(
+            alignment: pw.Alignment.centerLeft,
+            child: pw.SizedBox(width: widthPt, child: line));
       } else {
         final pct = (widthPct ?? 60).clamp(1.0, 100.0);
         sized = pct >= 99
@@ -246,11 +275,61 @@ class MarkdownPdfBuilder {
 
     final size = _lengthPt(style['font-size']) ?? 10;
     final color = _cssColor(style['color']) ?? _text;
+    final align = _textAlign(style['text-align']);
+    final textWidget = pw.Text(
+      text,
+      textAlign: align ?? pw.TextAlign.left,
+      style: pw.TextStyle(fontSize: size, color: color, font: fonts.base),
+    );
     return pw.Padding(
       padding: pw.EdgeInsets.only(top: gapTop, bottom: gapBottom + 4),
-      child: pw.Text(text,
-          style: pw.TextStyle(fontSize: size, color: color, font: fonts.base)),
+      // An explicit alignment only bites when the text fills the content width;
+      // stretch it (unless inside a flex row, where a full-width box would
+      // overflow). Unset alignment keeps the original left-aligned shrink-wrap.
+      child: (align == null || inRow)
+          ? textWidget
+          : pw.SizedBox(width: double.infinity, child: textWidget),
     );
+  }
+
+  /// Map a CSS `text-align` value to a [pw.TextAlign], or null when unset/unknown
+  /// (so the default left shrink-wrap is preserved).
+  pw.TextAlign? _textAlign(String? v) {
+    switch ((v ?? '').trim().toLowerCase()) {
+      case 'center':
+        return pw.TextAlign.center;
+      case 'right':
+      case 'end':
+        return pw.TextAlign.right;
+      case 'justify':
+        return pw.TextAlign.justify;
+      case 'left':
+      case 'start':
+        return pw.TextAlign.left;
+      default:
+        return null;
+    }
+  }
+
+  /// Map a CSS `justify-content` value to a [pw.MainAxisAlignment] for a
+  /// `display:flex` row (default start).
+  pw.MainAxisAlignment _mainAxis(String? v) {
+    switch ((v ?? '').trim().toLowerCase()) {
+      case 'space-between':
+        return pw.MainAxisAlignment.spaceBetween;
+      case 'space-around':
+        return pw.MainAxisAlignment.spaceAround;
+      case 'space-evenly':
+        return pw.MainAxisAlignment.spaceEvenly;
+      case 'center':
+        return pw.MainAxisAlignment.center;
+      case 'flex-end':
+      case 'end':
+      case 'right':
+        return pw.MainAxisAlignment.end;
+      default:
+        return pw.MainAxisAlignment.start;
+    }
   }
 
   /// Declarations from a style attribute, in source order (so shorthand vs

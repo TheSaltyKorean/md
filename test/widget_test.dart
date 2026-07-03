@@ -26,6 +26,27 @@ PdfFontSet _standardFonts() => PdfFontSet(
       mono: pw.Font.courier(),
     );
 
+/// Walk the layout-widget tree (the container types the builder emits) so tests
+/// can assert structure without rendering.
+Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
+  yield w;
+  if (w is pw.Padding && w.child != null) {
+    yield* _allWidgets(w.child!);
+  } else if (w is pw.SizedBox && w.child != null) {
+    yield* _allWidgets(w.child!);
+  } else if (w is pw.Column) {
+    for (final c in w.children) {
+      yield* _allWidgets(c);
+    }
+  } else if (w is pw.Row) {
+    for (final c in w.children) {
+      yield* _allWidgets(c);
+    }
+  }
+}
+
+Iterable<pw.Widget> _walk(List<pw.Widget> ws) => ws.expand(_allWidgets);
+
 void main() {
   testWidgets('App boots and shows the mode selector', (tester) async {
     // Desktop-sized surface (this is a desktop-first app; the default 800x600
@@ -421,6 +442,101 @@ void main() {
     doc.addPage(pw.MultiPage(build: (_) => widgets));
     final bytes = await doc.save();
     expect(bytes, isNotEmpty);
+  });
+
+  test('A text-align:center <div> renders a centered Text block', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '<div style="text-align:center">IN THE CIRCUIT COURT OF BENTON '
+        'COUNTY, ARKANSAS<br>DOMESTIC RELATIONS DIVISION</div>');
+    final texts = _walk(ws).whereType<pw.Text>();
+    expect(texts.any((t) => t.textAlign == pw.TextAlign.center), isTrue);
+    // Centered text is stretched to full width so alignment positions it.
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        isTrue);
+    // Lays out without a crash.
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('A display:flex; space-between <div> renders a two-column Row',
+      () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '<div style="display:flex; justify-content:space-between">'
+        '<div>MEGHAN MAIN</div><div>PLAINTIFF</div></div>');
+    final row = _walk(ws).whereType<pw.Row>().first;
+    expect(row.mainAxisAlignment, pw.MainAxisAlignment.spaceBetween);
+    expect(row.children.length, 2);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('A plain <div> still renders left-aligned and un-stretched (regression)',
+      () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build('<div>Plain left text</div>');
+    final texts = _walk(ws).whereType<pw.Text>().toList();
+    expect(texts, isNotEmpty);
+    expect(texts.every((t) => t.textAlign == pw.TextAlign.left), isTrue);
+    // No full-width stretch box was introduced for an unstyled div.
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        isFalse);
+  });
+
+  test('display:flex; flex-direction:column stacks (not a row)', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '<div style="display:flex; flex-direction:column">'
+        '<div>A</div><div>B</div></div>');
+    // A column direction must not become a horizontal Row.
+    expect(_walk(ws).whereType<pw.Row>(), isEmpty);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('A nested wrapper + aligned grandchild inside a flex row lays out',
+      () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    // The 2nd column wraps a centered grandchild — it must shrink-wrap, not
+    // take the full-width path (which would overflow the Row and throw).
+    final ws = builder.build(
+        '<div style="display:flex; justify-content:space-between">'
+        '<div>MEGHAN MAIN</div>'
+        '<div><div style="text-align:center">v.</div></div></div>');
+    // No full-width stretch box leaked into the row context.
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        isFalse);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('A fill-in blank inside a flex row is bounded (no overflow)', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '<div style="display:flex; justify-content:space-between">'
+        '<div>Signed:</div>'
+        '<div style="border-bottom:1px solid; width:150px"></div></div>');
+    // The blank is a bounded finite-width rule (150px → 112.5pt), not a
+    // full-width / Expanded rule that would overflow the Row.
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any(
+            (b) => b.width != null && b.width!.isFinite && b.width! > 0),
+        isTrue);
+    expect(
+        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        isFalse);
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
   });
 
   test('Visiting Edit mode without editing preserves the exact source', () {
