@@ -80,6 +80,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # Test-only: synthesize a tall image to exercise the PDF image height cap.
+  image: ^4.0.0
 
 flutter:
   uses-material-design: true

@@ -43,13 +43,21 @@ class PdfFontSet {
 /// [pw.MultiPage] so headers/footers/watermarks are applied by the caller.
 class MarkdownPdfBuilder {
   MarkdownPdfBuilder(
-      {required this.profile, required this.fonts, this.baseDir});
+      {required this.profile,
+      required this.fonts,
+      this.baseDir,
+      this.maxImageHeight});
 
   final PrintProfile profile;
   final PdfFontSet fonts;
 
   /// Directory of the source document, used to resolve relative image paths.
   final String? baseDir;
+
+  /// Max height (pt) for an embedded image, so a tall image is scaled to fit a
+  /// single page instead of overflowing (a [pw.MultiPage] cannot split a single
+  /// image). Null = no cap. Supplied by the caller, which knows the page size.
+  final double? maxImageHeight;
 
   PdfColor get _primary => PdfColor.fromInt(profile.primaryColor);
   PdfColor get _text => PdfColor.fromInt(profile.textColor);
@@ -743,17 +751,28 @@ class MarkdownPdfBuilder {
 
   pw.Widget _blockquote(md.Element el) {
     final children =
-        (el.children ?? []).map(_block).whereType<pw.Widget>().toList();
-    return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 8),
-      padding: const pw.EdgeInsets.fromLTRB(12, 4, 8, 4),
-      decoration: pw.BoxDecoration(
-        border: pw.Border(left: pw.BorderSide(color: _brandColor, width: 3)),
-        color: PdfColors.grey100,
-      ),
+        (el.children ?? const <md.Node>[]).map(_block).whereType<pw.Widget>();
+    // Draw the left bar + tint per child inside a Column (rather than one
+    // decorated Container around everything) so a tall quote can paginate; the
+    // contiguous per-child decoration reads as one continuous quote block.
+    final decorated = <pw.Widget>[
+      for (final c in children)
+        pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.fromLTRB(12, 2, 8, 2),
+          decoration: pw.BoxDecoration(
+            border:
+                pw.Border(left: pw.BorderSide(color: _brandColor, width: 3)),
+            color: PdfColors.grey100,
+          ),
+          child: c,
+        ),
+    ];
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 8),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: children,
+        children: decorated,
       ),
     );
   }
@@ -762,23 +781,33 @@ class MarkdownPdfBuilder {
     // <pre><code>...</code></pre>
     var code = el.textContent;
     if (code.endsWith('\n')) code = code.substring(0, code.length - 1);
-    return pw.Container(
-      width: double.infinity,
-      margin: const pw.EdgeInsets.only(bottom: 8),
-      padding: const pw.EdgeInsets.all(10),
-      decoration: pw.BoxDecoration(
-        color: const PdfColor.fromInt(0xFF2B2B2B),
-        borderRadius: pw.BorderRadius.circular(6),
-      ),
-      child: pw.Text(
-        code,
-        style: pw.TextStyle(
-          font: fonts.mono,
-          fontSize: 9.5,
-          color: const PdfColor.fromInt(0xFFEDEDED),
-          lineSpacing: 2,
+    // Render each line in its own short, dark-backed row inside a Column so a
+    // long code block can paginate. A single Container (as before) cannot split
+    // across pages and throws "won't fit" once it exceeds one page height. The
+    // contiguous per-line backgrounds read as one block (flat, not rounded).
+    final lines = code.isEmpty ? const [''] : code.split('\n');
+    const bg = PdfColor.fromInt(0xFF2B2B2B);
+    final style = pw.TextStyle(
+      font: fonts.mono,
+      fontSize: 9.5,
+      color: const PdfColor.fromInt(0xFFEDEDED),
+      lineSpacing: 2,
+    );
+    final rows = <pw.Widget>[
+      for (var i = 0; i < lines.length; i++)
+        pw.Container(
+          width: double.infinity,
+          color: bg,
+          padding: pw.EdgeInsets.fromLTRB(
+              10, i == 0 ? 10 : 0, 10, i == lines.length - 1 ? 10 : 0),
+          // An empty line still needs a glyph-height row to keep the background.
+          child: pw.Text(lines[i].isEmpty ? ' ' : lines[i], style: style),
         ),
-      ),
+    ];
+    return pw.Padding(
+      padding: const pw.EdgeInsets.only(bottom: 8),
+      child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start, children: rows),
     );
   }
 
@@ -916,9 +945,16 @@ class MarkdownPdfBuilder {
             ? p.join(baseDir!, src)
             : src;
         final bytes = File(resolved).readAsBytesSync();
+        final image = pw.Image(pw.MemoryImage(bytes), fit: pw.BoxFit.contain);
         return pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 6),
-          child: pw.Image(pw.MemoryImage(bytes), fit: pw.BoxFit.contain),
+          // Cap the height so a tall image scales down to one page rather than
+          // overflowing (an image can't be split across pages).
+          child: maxImageHeight == null
+              ? image
+              : pw.ConstrainedBox(
+                  constraints: pw.BoxConstraints(maxHeight: maxImageHeight!),
+                  child: image),
         );
       } catch (_) {
         // fall through to placeholder

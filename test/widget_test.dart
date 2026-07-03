@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/widgets.dart' show Size, TextSelection;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
 import 'package:markdown_studio/models/print_profile.dart';
@@ -12,7 +15,7 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
-import 'package:pdf/pdf.dart' show PdfColors;
+import 'package:pdf/pdf.dart' show PdfColors, PdfPageFormat;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,6 +28,22 @@ PdfFontSet _standardFonts() => PdfFontSet(
       boldItalic: pw.Font.helveticaBoldOblique(),
       mono: pw.Font.courier(),
     );
+
+/// Lay [widgets] into an A4 MultiPage with 2cm margins and return the bytes —
+/// throws if any single widget can't fit/paginate (the bug these tests guard).
+Future<Uint8List> _renderA4(List<pw.Widget> widgets) async {
+  final doc = pw.Document();
+  doc.addPage(pw.MultiPage(
+    pageFormat: PdfPageFormat.a4.copyWith(
+      marginLeft: 2 * PdfPageFormat.cm,
+      marginRight: 2 * PdfPageFormat.cm,
+      marginTop: 2 * PdfPageFormat.cm,
+      marginBottom: 2 * PdfPageFormat.cm,
+    ),
+    build: (_) => widgets,
+  ));
+  return doc.save();
+}
 
 void main() {
   testWidgets('App boots and shows the mode selector', (tester) async {
@@ -421,6 +440,44 @@ void main() {
     doc.addPage(pw.MultiPage(build: (_) => widgets));
     final bytes = await doc.save();
     expect(bytes, isNotEmpty);
+  });
+
+  test('A long code block paginates instead of overflowing the page',
+      () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final code =
+        '```\n${List.generate(90, (i) => 'line $i of code').join('\n')}\n```';
+    // Before the fix this threw "Widget won't fit into the page…".
+    expect(await _renderA4(builder.build(code)), isNotEmpty);
+  });
+
+  test('A long multi-paragraph blockquote paginates', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final quote =
+        List.generate(60, (i) => '> Paragraph $i of the quoted passage.')
+            .join('\n>\n');
+    expect(await _renderA4(builder.build(quote)), isNotEmpty);
+  });
+
+  test('A tall image is capped to one page (no overflow)', () async {
+    final tmp = Directory.systemTemp.createTempSync('mdimg');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final image = img.Image(width: 400, height: 3000);
+    img.fill(image, color: img.ColorRgb8(120, 120, 200));
+    File('${tmp.path}/tall.png')
+        .writeAsBytesSync(Uint8List.fromList(img.encodePng(image)));
+
+    final builder = MarkdownPdfBuilder(
+      profile: PrintProfile.personal,
+      fonts: _standardFonts(),
+      baseDir: tmp.path,
+      maxImageHeight: 600,
+    );
+    // With the cap the tall image scales to fit one page; without it the image
+    // (3000px at ~400px wide, scaled to content width) overflows and throws.
+    expect(await _renderA4(builder.build('![tall](tall.png)')), isNotEmpty);
   });
 
   test('Visiting Edit mode without editing preserves the exact source', () {

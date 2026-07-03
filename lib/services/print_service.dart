@@ -69,8 +69,18 @@ class PrintService {
   }) async {
     final fonts = await _resolveFonts(profile.fontFamily);
     final logo = await _loadLogo(profile.logoPath);
-    final builder =
-        MarkdownPdfBuilder(profile: profile, fonts: fonts, baseDir: baseDir);
+    final margin = profile.marginCm * PdfPageFormat.cm;
+    // Height available to body content on one page (page minus margins, with an
+    // allowance for the running header/footer). Used to cap image height so a
+    // tall image scales to fit rather than overflowing the page.
+    final contentHeight =
+        (format.height - 2 * margin - 80).clamp(144.0, double.infinity);
+    final builder = MarkdownPdfBuilder(
+      profile: profile,
+      fonts: fonts,
+      baseDir: baseDir,
+      maxImageHeight: contentHeight,
+    );
     final content = builder.build(markdown);
 
     // Brand "cover" mode: the logo appears once at the top of the document
@@ -81,7 +91,6 @@ class PrintService {
       ...content,
     ];
 
-    final margin = profile.marginCm * PdfPageFormat.cm;
     final doc = pw.Document(title: title);
 
     doc.addPage(
