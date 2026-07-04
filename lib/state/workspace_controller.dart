@@ -22,11 +22,18 @@ class PrintPreviewTab extends WorkspaceTab {
     required this.markdown,
     required this.title,
     required this.docPath,
+    this.sourceKey,
   });
 
   String markdown;
   String title;
   String? docPath;
+
+  /// Identity of the source document (its controller), used to match a
+  /// preview to its origin when the document has no path (unsaved/pathless
+  /// docs can share titles). Cleared when the source tab closes so an orphan
+  /// preview is never hijacked by a different document later.
+  Object? sourceKey;
 
   /// Bumped on refresh so the preview widget rebuilds from the new snapshot.
   int epoch = 0;
@@ -132,11 +139,16 @@ class WorkspaceController extends ChangeNotifier {
       }
     }
 
-    final sole = _tabs.length == 1 ? _tabs.first : null;
-    if (sole is DocumentTab && sole.doc.isPristine) {
-      sole.doc.loadMarkdown(content,
+    // If the only open *document* is a pristine "Untitled", replace it rather
+    // than stacking an empty tab — even when print previews are also open.
+    final docTabs = [
+      for (final t in _tabs)
+        if (t is DocumentTab) t
+    ];
+    if (docTabs.length == 1 && docTabs.first.doc.isPristine) {
+      docTabs.first.doc.loadMarkdown(content,
           path: path, displayName: displayName, markDirty: markDirty);
-      _activeIndex = 0;
+      _activeIndex = _tabs.indexOf(docTabs.first);
       notifyListeners();
       return;
     }
@@ -150,29 +162,36 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   /// Open (or refresh) a print-preview tab for the given document snapshot.
-  /// A preview of the same file (or, for unsaved documents, the same title)
-  /// is reused: its snapshot is replaced and the tab focused, so printing
-  /// twice never stacks duplicate previews.
+  /// A preview of the same source — matched by file path, or by document
+  /// identity ([sourceKey]) for pathless documents — is reused: its snapshot
+  /// is replaced and the tab focused, so printing twice never stacks
+  /// duplicate previews, while distinct unsaved documents (which can share a
+  /// title like "Untitled") each get their own preview.
   void openPrintPreview({
     required String markdown,
     required String title,
     required String? docPath,
+    Object? sourceKey,
   }) {
     final existing = _tabs.indexWhere((t) =>
         t is PrintPreviewTab &&
         (docPath != null
             ? t.docPath == docPath
-            : t.docPath == null && t.title == title));
+            : t.sourceKey != null && identical(t.sourceKey, sourceKey)));
     if (existing >= 0) {
       final tab = _tabs[existing] as PrintPreviewTab;
       tab
         ..markdown = markdown
         ..title = title
+        ..sourceKey = sourceKey
         ..epoch += 1;
       _activeIndex = existing;
     } else {
-      _tabs.add(
-          PrintPreviewTab(markdown: markdown, title: title, docPath: docPath));
+      _tabs.add(PrintPreviewTab(
+          markdown: markdown,
+          title: title,
+          docPath: docPath,
+          sourceKey: sourceKey));
       _activeIndex = _tabs.length - 1;
     }
     notifyListeners();
@@ -207,6 +226,13 @@ class WorkspaceController extends ChangeNotifier {
     if (tab is DocumentTab) {
       tab.doc.removeListener(_relay);
       tab.doc.dispose();
+      // Orphan any preview of this document: don't retain the disposed
+      // controller, and don't let a later pathless document adopt the tab.
+      for (final t in _tabs) {
+        if (t is PrintPreviewTab && identical(t.sourceKey, tab.doc)) {
+          t.sourceKey = null;
+        }
+      }
     }
 
     if (_tabs.isEmpty) {

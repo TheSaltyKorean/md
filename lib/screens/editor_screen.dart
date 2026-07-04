@@ -418,14 +418,28 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
             onPressed: theme.cycle),
         PopupMenuButton<String>(
           onSelected: (value) => _onMenu(context, ws, active, value),
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'open', child: Text('Open…')),
-            PopupMenuItem(value: 'new', child: Text('New tab')),
-            PopupMenuItem(value: 'find', child: Text('Find / Replace')),
-            PopupMenuItem(value: 'save', child: Text('Save')),
-            PopupMenuItem(value: 'saveAs', child: Text('Save As…')),
-            PopupMenuItem(value: 'print', child: Text('Print / Export PDF')),
-            PopupMenuItem(value: 'about', child: Text('About')),
+          // Document-bound commands are disabled while a print preview tab is
+          // active (there is no document to act on).
+          itemBuilder: (_) => [
+            const PopupMenuItem(value: 'open', child: Text('Open…')),
+            const PopupMenuItem(value: 'new', child: Text('New tab')),
+            PopupMenuItem(
+                value: 'find',
+                enabled: active != null,
+                child: const Text('Find / Replace')),
+            PopupMenuItem(
+                value: 'save',
+                enabled: active != null,
+                child: const Text('Save')),
+            PopupMenuItem(
+                value: 'saveAs',
+                enabled: active != null,
+                child: const Text('Save As…')),
+            PopupMenuItem(
+                value: 'print',
+                enabled: active != null,
+                child: const Text('Print / Export PDF')),
+            const PopupMenuItem(value: 'about', child: Text('About')),
           ],
         ),
       ];
@@ -465,10 +479,13 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           onPressed: theme.cycle),
       PopupMenuButton<String>(
         onSelected: (value) => _onMenu(context, ws, active, value),
-        itemBuilder: (_) => const [
-          PopupMenuItem(value: 'new', child: Text('New tab')),
-          PopupMenuItem(value: 'saveAs', child: Text('Save As…')),
-          PopupMenuItem(value: 'about', child: Text('About')),
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: 'new', child: Text('New tab')),
+          PopupMenuItem(
+              value: 'saveAs',
+              enabled: active != null,
+              child: const Text('Save As…')),
+          const PopupMenuItem(value: 'about', child: Text('About')),
         ],
       ),
     ];
@@ -546,6 +563,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           markdown: doc.currentMarkdown(),
           title: title,
           docPath: doc.filePath,
+          // Identity key so pathless documents (which can share a title)
+          // each refresh their own preview.
+          sourceKey: doc,
         );
   }
 

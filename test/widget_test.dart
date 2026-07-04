@@ -674,6 +674,60 @@ void main() {
     expect(ws.documents.length, 1);
   });
 
+  test('Pathless documents with the same title get their own previews',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    // Two unsaved documents — both are titled "Untitled".
+    final docA = ws.activeDocument!;
+    ws.newDocument();
+    final docB = ws.activeDocument!;
+
+    ws.openPrintPreview(
+        markdown: 'A', title: docA.title, docPath: null, sourceKey: docA);
+    ws.openPrintPreview(
+        markdown: 'B', title: docB.title, docPath: null, sourceKey: docB);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 2);
+
+    // Re-printing doc A refreshes A's preview, not B's.
+    ws.openPrintPreview(
+        markdown: 'A v2', title: docA.title, docPath: null, sourceKey: docA);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 2);
+    expect((ws.activeTab as PrintPreviewTab).markdown, 'A v2');
+
+    // Closing doc A orphans its preview: printing a fresh pathless document
+    // opens a new tab instead of hijacking the orphan.
+    ws.closeAt(ws.tabs.indexWhere((t) => t is DocumentTab && t.doc == docA));
+    ws.newDocument();
+    final docC = ws.activeDocument!;
+    ws.openPrintPreview(
+        markdown: 'C', title: docC.title, docPath: null, sourceKey: docC);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 3);
+  });
+
+  test('A sole pristine Untitled is replaced even with previews open',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    final untitled = ws.activeDocument!;
+    ws.openPrintPreview(
+        markdown: '',
+        title: untitled.title,
+        docPath: null,
+        sourceKey: untitled);
+    expect(ws.tabs.length, 2);
+
+    // Opening a real file replaces the pristine Untitled document rather
+    // than stacking a third tab next to it.
+    ws.openDocument('# Hello', path: '/tmp/a.md');
+    expect(ws.documents.length, 1);
+    expect(ws.documents.single.filePath, '/tmp/a.md');
+    expect(ws.tabs.length, 2);
+    expect(ws.activeDocument?.filePath, '/tmp/a.md');
+  });
+
   test('Auto-reload defaults on and persists when toggled', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
