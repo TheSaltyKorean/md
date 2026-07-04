@@ -22,7 +22,7 @@ import '../state/workspace_controller.dart';
 import '../widgets/find_controller.dart';
 import '../widgets/format_toolbar.dart';
 import '../widgets/preview_view.dart';
-import '../widgets/print_dialog.dart';
+import '../widgets/print_preview_view.dart';
 import '../widgets/raw_view.dart';
 import '../widgets/split_view.dart';
 import '../widgets/wysiwyg_view.dart';
@@ -178,7 +178,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   void _runBannerCheck() {
     if (!mounted) return;
-    final doc = context.read<WorkspaceController>().active;
+    final doc = context.read<WorkspaceController>().activeDocument;
+    if (doc == null) return; // print preview active — nothing to check
     final messenger = ScaffoldMessenger.of(context);
 
     if (doc.takeAutoReloadNotice()) {
@@ -232,15 +233,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   Widget build(BuildContext context) {
     final ws = context.watch<WorkspaceController>();
     final theme = context.watch<ThemeController>();
-    final active = ws.active;
+    final activeTab = ws.activeTab;
+    // Null when the active tab is a print preview rather than a document.
+    final active = ws.activeDocument;
 
     // Find is a source-mode feature and only mounts inside a source view. If the
     // active view is no longer a source mode (switched to Edit/Preview, or moved
     // to a tab that is), close find so no invisible state lingers and the format
     // toolbar returns.
-    if (_find.visible && !active.mode.isSource) {
+    if (_find.visible && !(active?.mode.isSource ?? false)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !ws.active.mode.isSource) _find.hide();
+        final doc = mounted ? ws.activeDocument : null;
+        if (mounted && !(doc?.mode.isSource ?? false)) _find.hide();
       });
     }
 
@@ -248,7 +252,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     if (!identical(active, _bannerDoc)) {
       _bannerDoc?.removeListener(_onActiveDocChanged);
       _bannerDoc = active;
-      _bannerDoc!.addListener(_onActiveDocChanged);
+      _bannerDoc?.addListener(_onActiveDocChanged);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         // Dismiss any banner belonging to the previously active document so its
@@ -279,14 +283,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       // the initial Preview, which requests no focus of its own.
       child: CallbackShortcuts(
         bindings: {
-          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () =>
-              _openFind(active),
-          const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () =>
-              _openFind(active),
-          const SingleActivator(LogicalKeyboardKey.keyH, control: true): () =>
-              _openFind(active, replace: true),
-          const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () =>
-              _openFind(active, replace: true),
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
+            if (active != null) _openFind(active);
+          },
+          const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
+            if (active != null) _openFind(active);
+          },
+          const SingleActivator(LogicalKeyboardKey.keyH, control: true): () {
+            if (active != null) _openFind(active, replace: true);
+          },
+          const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () {
+            if (active != null) _openFind(active, replace: true);
+          },
           const SingleActivator(LogicalKeyboardKey.escape): () {
             if (_find.visible) _find.hide();
           },
@@ -306,7 +314,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               // On narrow (phone) layouts the mode selector gets its own bar; on
               // wide layouts it lives in the actions row. The format toolbar is no
               // longer docked here — it floats over the body (see below).
-              bottom: isNarrow
+              bottom: isNarrow && active != null
                   ? PreferredSize(
                       preferredSize: const Size.fromHeight(48),
                       child: _ModeBar(doc: active),
@@ -320,11 +328,13 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               child: LayoutBuilder(
                 builder: (context, constraints) => Stack(
                   children: [
-                    Positioned.fill(child: _body(active)),
+                    Positioned.fill(child: _body(activeTab)),
                     // The floating, draggable format palette — hidden in Preview
-                    // (nothing to edit there) and, in a source mode, while find is
-                    // open so it can't cover the find card on narrow windows.
-                    if (active.mode != EditorMode.preview &&
+                    // and print-preview tabs (nothing to edit there) and, in a
+                    // source mode, while find is open so it can't cover the find
+                    // card on narrow windows.
+                    if (active != null &&
+                        active.mode != EditorMode.preview &&
                         !(_find.visible && active.mode.isSource))
                       FloatingFormatToolbar(
                         controller: active,
@@ -341,7 +351,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     );
   }
 
-  Widget _body(DocumentController doc) {
+  Widget _body(WorkspaceTab tab) {
+    if (tab is PrintPreviewTab) {
+      // Key by tab identity + epoch so re-printing the same document rebuilds
+      // the preview from the fresh snapshot.
+      return PrintPreviewView(
+        key: ValueKey('print-${identityHashCode(tab)}-${tab.epoch}'),
+        markdown: tab.markdown,
+        title: tab.title,
+        docPath: tab.docPath,
+      );
+    }
+    final doc = (tab as DocumentTab).doc;
     // Key by the document so switching tabs recreates the view's State (e.g.
     // SplitView re-attaches its text listener to the new document's controller).
     final key = ValueKey(doc);
@@ -357,10 +378,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
   }
 
+  /// [active] is null when the active tab is a print preview; document-bound
+  /// actions (mode toggle, find, save, print) are then hidden or disabled.
   List<Widget> _actions(
     BuildContext context,
     WorkspaceController ws,
-    DocumentController active,
+    DocumentController? active,
     ThemeController theme,
     bool isNarrow,
   ) {
@@ -386,7 +409,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         IconButton(
           tooltip: 'Save',
           icon: const Icon(Icons.save_outlined),
-          onPressed: () => _save(context, active),
+          onPressed: active == null ? null : () => _save(context, active),
         ),
         autoReloadButton,
         IconButton(
@@ -409,11 +432,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
 
     return [
-      // Compact icon-only view-mode toggle (wide layouts).
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        child: Center(child: _ModeToggle(doc: active)),
-      ),
+      // Compact icon-only view-mode toggle (wide layouts; document tabs only).
+      if (active != null)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Center(child: _ModeToggle(doc: active)),
+        ),
       IconButton(
         tooltip: 'Open',
         icon: const Icon(Icons.folder_open_outlined),
@@ -422,17 +446,17 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       IconButton(
         tooltip: 'Find / Replace (Ctrl+F)',
         icon: const Icon(Icons.search_rounded),
-        onPressed: () => _openFind(active),
+        onPressed: active == null ? null : () => _openFind(active),
       ),
       IconButton(
         tooltip: 'Save',
         icon: const Icon(Icons.save_outlined),
-        onPressed: () => _save(context, active),
+        onPressed: active == null ? null : () => _save(context, active),
       ),
       IconButton(
         tooltip: 'Print / Export PDF',
         icon: const Icon(Icons.print_outlined),
-        onPressed: () => _print(context, active),
+        onPressed: active == null ? null : () => _print(context, active),
       ),
       autoReloadButton,
       IconButton(
@@ -514,23 +538,23 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
   }
 
-  Future<void> _print(BuildContext context, DocumentController doc) async {
+  /// Open (or refresh) the document's print preview in its own workspace tab.
+  void _print(BuildContext context, DocumentController doc) {
     // Use the file name, or the display name for pathless (mobile) documents.
     final title = p.basenameWithoutExtension(doc.filePath ?? doc.title);
-    await PrintDialog.show(
-      context,
-      markdown: doc.currentMarkdown(),
-      title: title,
-      docPath: doc.filePath,
-    );
+    context.read<WorkspaceController>().openPrintPreview(
+          markdown: doc.currentMarkdown(),
+          title: title,
+          docPath: doc.filePath,
+        );
   }
 
   Future<void> _closeTab(int index) async {
     final ws = context.read<WorkspaceController>();
-    if (index < 0 || index >= ws.documents.length) return;
-    final doc = ws.documents[index];
-    if (doc.isDirty) {
-      final ok = await _confirmDiscard(context, '"${doc.title}"');
+    if (index < 0 || index >= ws.tabs.length) return;
+    final tab = ws.tabs[index];
+    if (tab is DocumentTab && tab.doc.isDirty) {
+      final ok = await _confirmDiscard(context, '"${tab.doc.title}"');
       if (!ok) return;
     }
     ws.closeAt(index);
@@ -616,10 +640,13 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   /// Tear a tab off into its own standalone window. The in-memory content (and
   /// dirty state) is handed off via a temp file so unsaved edits aren't lost.
+  /// Print previews are ephemeral and are not torn off.
   Future<void> _tearOff(int index) async {
     final ws = context.read<WorkspaceController>();
-    if (index < 0 || index >= ws.documents.length) return;
-    final doc = ws.documents[index];
+    if (index < 0 || index >= ws.tabs.length) return;
+    final tab = ws.tabs[index];
+    if (tab is! DocumentTab) return;
+    final doc = tab.doc;
     final handoff = <String, dynamic>{
       'path': doc.filePath,
       'content': doc.currentMarkdown(),
@@ -648,7 +675,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   }
 
   void _onMenu(BuildContext context, WorkspaceController ws,
-      DocumentController active, String value) {
+      DocumentController? active, String value) {
     switch (value) {
       case 'open':
         _open(context, ws);
@@ -657,16 +684,16 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         ws.newDocument();
         break;
       case 'find':
-        _openFind(active);
+        if (active != null) _openFind(active);
         break;
       case 'save':
-        _save(context, active);
+        if (active != null) _save(context, active);
         break;
       case 'saveAs':
-        _saveAs(context, active);
+        if (active != null) _saveAs(context, active);
         break;
       case 'print':
-        _print(context, active);
+        if (active != null) _print(context, active);
         break;
       case 'about':
         showAboutDialog(
@@ -819,7 +846,7 @@ class _TabStripState extends State<_TabStrip> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final workspace = widget.workspace;
-    final docs = workspace.documents;
+    final tabs = workspace.tabs;
     // Recompute overflow after every layout so the chevrons appear/disappear on
     // a pure window-width change, not only on tab add/remove or scroll.
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
@@ -856,13 +883,13 @@ class _TabStripState extends State<_TabStrip> {
                 scrollDirection: Axis.horizontal,
                 // One extra slot for an end drop target so a tab can be dropped
                 // after the last one.
-                itemCount: docs.length + 1,
+                itemCount: tabs.length + 1,
                 itemBuilder: (context, i) {
-                  if (i == docs.length) {
+                  if (i == tabs.length) {
                     return DragTarget<int>(
                       onWillAcceptWithDetails: (d) => true,
                       onAcceptWithDetails: (d) =>
-                          workspace.reorder(d.data, docs.length),
+                          workspace.reorder(d.data, tabs.length),
                       builder: (context, candidate, rejected) => Container(
                         width: 64,
                         alignment: Alignment.centerLeft,
@@ -880,7 +907,7 @@ class _TabStripState extends State<_TabStrip> {
                     );
                   }
                   final tab = _Tab(
-                    doc: docs[i],
+                    tab: tabs[i],
                     selected: i == workspace.activeIndex,
                     onTap: () => workspace.select(i),
                     onClose: () => widget.onClose(i),
@@ -941,13 +968,13 @@ class _TabStripState extends State<_TabStrip> {
 
 class _Tab extends StatelessWidget {
   const _Tab({
-    required this.doc,
+    required this.tab,
     required this.selected,
     required this.onTap,
     required this.onClose,
   });
 
-  final DocumentController doc;
+  final WorkspaceTab tab;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onClose;
@@ -955,10 +982,25 @@ class _Tab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final path = doc.filePath;
-    final tooltip = path != null
-        ? '${doc.title}\n${p.dirname(path)}'
-        : 'Unsaved — not yet saved to disk';
+    final String title;
+    final String tooltip;
+    final bool dirty;
+    final IconData? leading;
+    switch (tab) {
+      case DocumentTab(:final doc):
+        title = doc.title;
+        dirty = doc.isDirty;
+        leading = null;
+        final path = doc.filePath;
+        tooltip = path != null
+            ? '${doc.title}\n${p.dirname(path)}'
+            : 'Unsaved — not yet saved to disk';
+      case PrintPreviewTab(title: final previewTitle):
+        title = previewTitle;
+        dirty = false;
+        leading = Icons.print_outlined;
+        tooltip = 'Print preview — print the document again to refresh it';
+    }
     return Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 500),
@@ -979,14 +1021,19 @@ class _Tab extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (doc.isDirty)
+              if (leading != null)
+                Padding(
+                  padding: const EdgeInsets.only(right: 5),
+                  child: Icon(leading, size: 14, color: cs.onSurfaceVariant),
+                ),
+              if (dirty)
                 Padding(
                   padding: const EdgeInsets.only(right: 5),
                   child: Icon(Icons.circle, size: 7, color: cs.primary),
                 ),
               Flexible(
                 child: Text(
-                  doc.title,
+                  title,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13,

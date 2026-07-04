@@ -4,15 +4,44 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'document_controller.dart';
 
-/// Owns the set of open documents (tabs), the active tab, and the global
-/// auto-reload setting. Each tab is its own [DocumentController].
+/// A tab in the workspace strip: an editable document or a print preview.
+sealed class WorkspaceTab {}
+
+/// A regular editable Markdown document.
+class DocumentTab extends WorkspaceTab {
+  DocumentTab(this.doc);
+
+  final DocumentController doc;
+}
+
+/// A print / PDF-export preview opened from the print action. Holds a snapshot
+/// of the Markdown at the moment it was opened; printing the same document
+/// again refreshes the snapshot in place (bumping [epoch]).
+class PrintPreviewTab extends WorkspaceTab {
+  PrintPreviewTab({
+    required this.markdown,
+    required this.title,
+    required this.docPath,
+  });
+
+  String markdown;
+  String title;
+  String? docPath;
+
+  /// Bumped on refresh so the preview widget rebuilds from the new snapshot.
+  int epoch = 0;
+}
+
+/// Owns the set of open tabs (documents and print previews), the active tab,
+/// and the global auto-reload setting. Each document tab is its own
+/// [DocumentController].
 class WorkspaceController extends ChangeNotifier {
   WorkspaceController(this._prefs) {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
     final tx = _prefs.getDouble(_toolbarXKey);
     final ty = _prefs.getDouble(_toolbarYKey);
     if (tx != null && ty != null) _toolbarOffset = Offset(tx, ty);
-    _docs.add(_newDoc());
+    _tabs.add(DocumentTab(_newDoc()));
     _activeIndex = 0;
   }
 
@@ -22,7 +51,7 @@ class WorkspaceController extends ChangeNotifier {
 
   final SharedPreferences _prefs;
 
-  final List<DocumentController> _docs = [];
+  final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
   bool _autoReload = true;
 
@@ -44,9 +73,23 @@ class WorkspaceController extends ChangeNotifier {
     return result;
   }
 
-  List<DocumentController> get documents => List.unmodifiable(_docs);
+  List<WorkspaceTab> get tabs => List.unmodifiable(_tabs);
+
+  /// The open editable documents (print previews excluded).
+  List<DocumentController> get documents => List.unmodifiable([
+        for (final tab in _tabs)
+          if (tab is DocumentTab) tab.doc
+      ]);
+
   int get activeIndex => _activeIndex;
-  DocumentController get active => _docs[_activeIndex];
+  WorkspaceTab get activeTab => _tabs[_activeIndex];
+
+  /// The active tab's document, or null when a print preview is active.
+  DocumentController? get activeDocument => switch (_tabs[_activeIndex]) {
+        DocumentTab(:final doc) => doc,
+        PrintPreviewTab() => null,
+      };
+
   bool get autoReload => _autoReload;
 
   DocumentController _newDoc() {
@@ -63,8 +106,8 @@ class WorkspaceController extends ChangeNotifier {
 
   /// Add a fresh empty document and focus it.
   void newDocument() {
-    _docs.add(_newDoc());
-    _activeIndex = _docs.length - 1;
+    _tabs.add(DocumentTab(_newDoc()));
+    _activeIndex = _tabs.length - 1;
     notifyListeners();
   }
 
@@ -80,7 +123,8 @@ class WorkspaceController extends ChangeNotifier {
     // For a clean open of an already-open file, just focus it. (Handoffs with
     // unsaved edits always open their own tab.)
     if (path != null && !markDirty) {
-      final existing = _docs.indexWhere((d) => d.filePath == path);
+      final existing =
+          _tabs.indexWhere((t) => t is DocumentTab && t.doc.filePath == path);
       if (existing >= 0) {
         _activeIndex = existing;
         notifyListeners();
@@ -88,8 +132,9 @@ class WorkspaceController extends ChangeNotifier {
       }
     }
 
-    if (_docs.length == 1 && _docs.first.isPristine) {
-      _docs.first.loadMarkdown(content,
+    final sole = _tabs.length == 1 ? _tabs.first : null;
+    if (sole is DocumentTab && sole.doc.isPristine) {
+      sole.doc.loadMarkdown(content,
           path: path, displayName: displayName, markDirty: markDirty);
       _activeIndex = 0;
       notifyListeners();
@@ -99,45 +144,76 @@ class WorkspaceController extends ChangeNotifier {
     final doc = _newDoc()
       ..loadMarkdown(content,
           path: path, displayName: displayName, markDirty: markDirty);
-    _docs.add(doc);
-    _activeIndex = _docs.length - 1;
+    _tabs.add(DocumentTab(doc));
+    _activeIndex = _tabs.length - 1;
+    notifyListeners();
+  }
+
+  /// Open (or refresh) a print-preview tab for the given document snapshot.
+  /// A preview of the same file (or, for unsaved documents, the same title)
+  /// is reused: its snapshot is replaced and the tab focused, so printing
+  /// twice never stacks duplicate previews.
+  void openPrintPreview({
+    required String markdown,
+    required String title,
+    required String? docPath,
+  }) {
+    final existing = _tabs.indexWhere((t) =>
+        t is PrintPreviewTab &&
+        (docPath != null
+            ? t.docPath == docPath
+            : t.docPath == null && t.title == title));
+    if (existing >= 0) {
+      final tab = _tabs[existing] as PrintPreviewTab;
+      tab
+        ..markdown = markdown
+        ..title = title
+        ..epoch += 1;
+      _activeIndex = existing;
+    } else {
+      _tabs.add(
+          PrintPreviewTab(markdown: markdown, title: title, docPath: docPath));
+      _activeIndex = _tabs.length - 1;
+    }
     notifyListeners();
   }
 
   void select(int index) {
-    if (index < 0 || index >= _docs.length || index == _activeIndex) return;
+    if (index < 0 || index >= _tabs.length || index == _activeIndex) return;
     _activeIndex = index;
     notifyListeners();
   }
 
   /// Move the tab at [oldIndex] to [newIndex] (drag-to-reorder), keeping the
-  /// same document active.
+  /// same tab active.
   void reorder(int oldIndex, int newIndex) {
-    if (oldIndex < 0 || oldIndex >= _docs.length) return;
+    if (oldIndex < 0 || oldIndex >= _tabs.length) return;
     if (oldIndex == newIndex) return;
-    final active = _docs[_activeIndex];
-    final doc = _docs.removeAt(oldIndex);
+    final active = _tabs[_activeIndex];
+    final tab = _tabs.removeAt(oldIndex);
     // Removing a lower index shifts the target left by one, so insert before the
     // highlighted tab in both directions.
     final target =
-        (oldIndex < newIndex ? newIndex - 1 : newIndex).clamp(0, _docs.length);
-    _docs.insert(target, doc);
-    _activeIndex = _docs.indexOf(active);
+        (oldIndex < newIndex ? newIndex - 1 : newIndex).clamp(0, _tabs.length);
+    _tabs.insert(target, tab);
+    _activeIndex = _tabs.indexOf(active);
     notifyListeners();
   }
 
   /// Close the tab at [index]. Always keeps at least one tab open.
   void closeAt(int index) {
-    if (index < 0 || index >= _docs.length) return;
-    final doc = _docs.removeAt(index);
-    doc.removeListener(_relay);
-    doc.dispose();
+    if (index < 0 || index >= _tabs.length) return;
+    final tab = _tabs.removeAt(index);
+    if (tab is DocumentTab) {
+      tab.doc.removeListener(_relay);
+      tab.doc.dispose();
+    }
 
-    if (_docs.isEmpty) {
-      _docs.add(_newDoc());
+    if (_tabs.isEmpty) {
+      _tabs.add(DocumentTab(_newDoc()));
       _activeIndex = 0;
-    } else if (_activeIndex >= _docs.length) {
-      _activeIndex = _docs.length - 1;
+    } else if (_activeIndex >= _tabs.length) {
+      _activeIndex = _tabs.length - 1;
     } else if (index < _activeIndex) {
       _activeIndex -= 1;
     }
@@ -162,21 +238,21 @@ class WorkspaceController extends ChangeNotifier {
     notifyListeners();
     await _track(() => _prefs.setBool(_autoReloadKey, value));
     // Resolve any pending conflicts that no longer need the user.
-    for (final d in _docs) {
+    for (final d in documents) {
       d.resolveIfSafe();
     }
   }
 
   /// Stop all file watchers (used on app shutdown for a prompt exit).
   void disposeWatchers() {
-    for (final d in _docs) {
+    for (final d in documents) {
       d.stopWatching();
     }
   }
 
   @override
   void dispose() {
-    for (final d in _docs) {
+    for (final d in documents) {
       d.removeListener(_relay);
       d.dispose();
     }
