@@ -353,13 +353,16 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   Widget _body(WorkspaceTab tab) {
     if (tab is PrintPreviewTab) {
-      // Key by tab identity + epoch so re-printing the same document rebuilds
-      // the preview from the fresh snapshot.
+      // Key by tab identity only: a refresh (epoch bump) must update the
+      // existing State — not recreate it — so the user's profile and
+      // page-format selections survive; the view re-renders the PDF itself
+      // when refreshEpoch changes.
       return PrintPreviewView(
-        key: ValueKey('print-${identityHashCode(tab)}-${tab.epoch}'),
+        key: ObjectKey(tab),
         markdown: tab.markdown,
         title: tab.title,
         docPath: tab.docPath,
+        refreshEpoch: tab.epoch,
       );
     }
     final doc = (tab as DocumentTab).doc;

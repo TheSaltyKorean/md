@@ -706,6 +706,28 @@ void main() {
     expect(ws.tabs.whereType<PrintPreviewTab>().length, 3);
   });
 
+  test('A preview follows its document through Save As', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    final doc = ws.activeDocument!;
+
+    // Printed while unsaved: preview is matched by document identity.
+    ws.openPrintPreview(
+        markdown: 'draft', title: doc.title, docPath: null, sourceKey: doc);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 1);
+
+    // After Save As, printing again refreshes the same preview (no
+    // duplicate) and the preview adopts the new path.
+    ws.openPrintPreview(
+        markdown: 'saved', title: 'a', docPath: '/tmp/a.md', sourceKey: doc);
+    final previews = ws.tabs.whereType<PrintPreviewTab>().toList();
+    expect(previews.length, 1);
+    expect(previews.single.docPath, '/tmp/a.md');
+    expect(previews.single.markdown, 'saved');
+    expect(previews.single.epoch, 1);
+  });
+
   test('A sole pristine Untitled is replaced even with previews open',
       () async {
     SharedPreferences.setMockInitialValues({});

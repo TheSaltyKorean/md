@@ -26,11 +26,17 @@ class PrintPreviewView extends StatefulWidget {
     required this.markdown,
     required this.title,
     required this.docPath,
+    this.refreshEpoch = 0,
   });
 
   final String markdown;
   final String title;
   final String? docPath;
+
+  /// Bumped by the workspace when the same preview tab is refreshed with a
+  /// new snapshot. The state reacts by re-rendering the PDF — without being
+  /// recreated, so the user's profile / page-format selections survive.
+  final int refreshEpoch;
 
   @override
   State<PrintPreviewView> createState() => _PrintPreviewViewState();
@@ -52,6 +58,16 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     super.initState();
     final profiles = context.read<PrintProfileService>();
     _selectedId = profiles.forDocument(widget.docPath).id;
+  }
+
+  @override
+  void didUpdateWidget(PrintPreviewView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A refreshed snapshot (print pressed again): re-render the PDF but keep
+    // the user's in-preview selections (profile, page size/orientation).
+    if (oldWidget.refreshEpoch != widget.refreshEpoch) {
+      setState(() => _previewEpoch++);
+    }
   }
 
   Future<void> _editProfile(PrintProfile profile, {required bool isNew}) async {

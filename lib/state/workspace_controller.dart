@@ -162,11 +162,12 @@ class WorkspaceController extends ChangeNotifier {
   }
 
   /// Open (or refresh) a print-preview tab for the given document snapshot.
-  /// A preview of the same source — matched by file path, or by document
-  /// identity ([sourceKey]) for pathless documents — is reused: its snapshot
-  /// is replaced and the tab focused, so printing twice never stacks
-  /// duplicate previews, while distinct unsaved documents (which can share a
-  /// title like "Untitled") each get their own preview.
+  /// A preview of the same source — matched by file path **or** by document
+  /// identity ([sourceKey]) — is reused: its snapshot is replaced and the tab
+  /// focused, so printing twice never stacks duplicate previews. Identity
+  /// matching keeps distinct unsaved documents (which can share a title like
+  /// "Untitled") on separate previews, and lets a preview follow its document
+  /// through Save As (the stored path is updated on refresh).
   void openPrintPreview({
     required String markdown,
     required String title,
@@ -175,14 +176,14 @@ class WorkspaceController extends ChangeNotifier {
   }) {
     final existing = _tabs.indexWhere((t) =>
         t is PrintPreviewTab &&
-        (docPath != null
-            ? t.docPath == docPath
-            : t.sourceKey != null && identical(t.sourceKey, sourceKey)));
+        ((docPath != null && t.docPath == docPath) ||
+            (t.sourceKey != null && identical(t.sourceKey, sourceKey))));
     if (existing >= 0) {
       final tab = _tabs[existing] as PrintPreviewTab;
       tab
         ..markdown = markdown
         ..title = title
+        ..docPath = docPath
         ..sourceKey = sourceKey
         ..epoch += 1;
       _activeIndex = existing;
