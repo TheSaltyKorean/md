@@ -489,6 +489,10 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
         Expanded(
           child: PdfPreview(
             key: ValueKey('preview-$_selectedId-$_previewEpoch'),
+            // A refresh or profile switch remounts the preview; start it at
+            // the page size/orientation the user was previewing so their
+            // selection carries across (and Print/Save keep matching it).
+            initialPageFormat: _previewFormat,
             build: (format) {
               // Remember the page size/orientation the user is currently
               // previewing so "Save as PDF" matches it (not always A4).
