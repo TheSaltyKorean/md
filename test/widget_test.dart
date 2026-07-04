@@ -121,8 +121,7 @@ void main() {
   });
 
   test('Court Filing seed carries the legal formatting defaults', () {
-    final court =
-        PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
     expect(court.legalMode, isTrue);
     expect(court.justifyBody, isTrue);
     expect(court.centerHeadings, isTrue);
@@ -238,8 +237,8 @@ void main() {
     expect(stray.any((s) => s is pw.WidgetSpan), isTrue);
 
     // HTML entities in span-adjacent text are decoded (not shown literally).
-    final ent = builder.renderInlineText(
-        'AT&amp;T <span style="color:#333;">x</span>');
+    final ent =
+        builder.renderInlineText('AT&amp;T <span style="color:#333;">x</span>');
     expect(literal(ent), contains('AT&T'));
     expect(literal(ent).contains('&amp;'), isFalse);
 
@@ -289,9 +288,9 @@ void main() {
     expect(pctReset.any((s) => s is pw.WidgetSpan), isTrue);
 
     // A self-closing bookmark span must not swallow a following fill-in line.
-    final selfClose = builder.renderInlineText(
-        'A<span id="bm"/> <span style="min-width:120px; '
-        'border-bottom:1px solid;"> </span>');
+    final selfClose = builder
+        .renderInlineText('A<span id="bm"/> <span style="min-width:120px; '
+            'border-bottom:1px solid;"> </span>');
     expect(selfClose.any((s) => s is pw.WidgetSpan), isTrue);
     expect(literal(selfClose).contains('span'), isFalse);
     expect(literal(selfClose), contains('A'));
@@ -323,8 +322,8 @@ void main() {
     expect(selfBlank.any((s) => s is pw.WidgetSpan), isTrue);
 
     // A <span> used as a Markdown link label must not leak its markup.
-    final linkSpan = builder.build(
-        '[<span style="color:#c00;">label</span>](https://example.com)');
+    final linkSpan = builder
+        .build('[<span style="color:#c00;">label</span>](https://example.com)');
     String widgetLiteral(pw.InlineSpan s) {
       final sb = StringBuffer();
       if (s is pw.TextSpan) {
@@ -355,8 +354,7 @@ void main() {
     expect(forcedSpan.style?.color, PdfColors.white);
 
     // An inline-code link label that references a span tag stays literal.
-    final codeLink = builder
-        .build('[`<span>x</span>`](https://example.com)');
+    final codeLink = builder.build('[`<span>x</span>`](https://example.com)');
     final cpara = codeLink.first;
     final crich = cpara is pw.Padding ? cpara.child : cpara;
     if (crich is pw.RichText) {
@@ -379,8 +377,7 @@ void main() {
     expect(truncated.any((s) => s is pw.WidgetSpan), isTrue);
 
     // A code link label keeps the link underline affordance.
-    final codeUnderline =
-        builder.build('[`code`](https://example.com)');
+    final codeUnderline = builder.build('[`code`](https://example.com)');
     final cupara = codeUnderline.first;
     final curich = cupara is pw.Padding ? cupara.child : cupara;
     if (curich is pw.RichText) {
@@ -423,10 +420,8 @@ void main() {
       () async {
     // Exercises the justify + first-line-indent WidgetSpan + centred-heading
     // paths; a layout crash in any of them would fail here.
-    final court =
-        PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
-    final builder =
-        MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     final widgets = builder.build(
       '# In re: Example Matter\n\n'
       'This is a body paragraph long enough to wrap onto several lines so '
@@ -447,14 +442,16 @@ void main() {
   test('A text-align:center <div> renders a centered Text block', () async {
     final builder = MarkdownPdfBuilder(
         profile: PrintProfile.personal, fonts: _standardFonts());
-    final ws = builder.build(
-        '<div style="text-align:center">IN THE CIRCUIT COURT OF BENTON '
-        'COUNTY, ARKANSAS<br>DOMESTIC RELATIONS DIVISION</div>');
+    final ws = builder
+        .build('<div style="text-align:center">IN THE CIRCUIT COURT OF BENTON '
+            'COUNTY, ARKANSAS<br>DOMESTIC RELATIONS DIVISION</div>');
     final texts = _walk(ws).whereType<pw.Text>();
     expect(texts.any((t) => t.textAlign == pw.TextAlign.center), isTrue);
     // Centered text is stretched to full width so alignment positions it.
     expect(
-        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        _walk(ws)
+            .whereType<pw.SizedBox>()
+            .any((b) => b.width == double.infinity),
         isTrue);
     // Lays out without a crash.
     final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
@@ -465,9 +462,9 @@ void main() {
       () async {
     final builder = MarkdownPdfBuilder(
         profile: PrintProfile.personal, fonts: _standardFonts());
-    final ws = builder.build(
-        '<div style="display:flex; justify-content:space-between">'
-        '<div>MEGHAN MAIN</div><div>PLAINTIFF</div></div>');
+    final ws = builder
+        .build('<div style="display:flex; justify-content:space-between">'
+            '<div>MEGHAN MAIN</div><div>PLAINTIFF</div></div>');
     final row = _walk(ws).whereType<pw.Row>().first;
     expect(row.mainAxisAlignment, pw.MainAxisAlignment.spaceBetween);
     expect(row.children.length, 2);
@@ -485,15 +482,16 @@ void main() {
     expect(texts.every((t) => t.textAlign == pw.TextAlign.left), isTrue);
     // No full-width stretch box was introduced for an unstyled div.
     expect(
-        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        _walk(ws)
+            .whereType<pw.SizedBox>()
+            .any((b) => b.width == double.infinity),
         isFalse);
   });
 
   test('display:flex; flex-direction:column stacks (not a row)', () async {
     final builder = MarkdownPdfBuilder(
         profile: PrintProfile.personal, fonts: _standardFonts());
-    final ws = builder.build(
-        '<div style="display:flex; flex-direction:column">'
+    final ws = builder.build('<div style="display:flex; flex-direction:column">'
         '<div>A</div><div>B</div></div>');
     // A column direction must not become a horizontal Row.
     expect(_walk(ws).whereType<pw.Row>(), isEmpty);
@@ -507,13 +505,15 @@ void main() {
         profile: PrintProfile.personal, fonts: _standardFonts());
     // The 2nd column wraps a centered grandchild — it must shrink-wrap, not
     // take the full-width path (which would overflow the Row and throw).
-    final ws = builder.build(
-        '<div style="display:flex; justify-content:space-between">'
-        '<div>MEGHAN MAIN</div>'
-        '<div><div style="text-align:center">v.</div></div></div>');
+    final ws = builder
+        .build('<div style="display:flex; justify-content:space-between">'
+            '<div>MEGHAN MAIN</div>'
+            '<div><div style="text-align:center">v.</div></div></div>');
     // No full-width stretch box leaked into the row context.
     expect(
-        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        _walk(ws)
+            .whereType<pw.SizedBox>()
+            .any((b) => b.width == double.infinity),
         isFalse);
     final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
     expect(await doc.save(), isNotEmpty);
@@ -522,18 +522,21 @@ void main() {
   test('A fill-in blank inside a flex row is bounded (no overflow)', () async {
     final builder = MarkdownPdfBuilder(
         profile: PrintProfile.personal, fonts: _standardFonts());
-    final ws = builder.build(
-        '<div style="display:flex; justify-content:space-between">'
-        '<div>Signed:</div>'
-        '<div style="border-bottom:1px solid; width:150px"></div></div>');
+    final ws = builder
+        .build('<div style="display:flex; justify-content:space-between">'
+            '<div>Signed:</div>'
+            '<div style="border-bottom:1px solid; width:150px"></div></div>');
     // The blank is a bounded finite-width rule (150px → 112.5pt), not a
     // full-width / Expanded rule that would overflow the Row.
     expect(
-        _walk(ws).whereType<pw.SizedBox>().any(
-            (b) => b.width != null && b.width!.isFinite && b.width! > 0),
+        _walk(ws)
+            .whereType<pw.SizedBox>()
+            .any((b) => b.width != null && b.width!.isFinite && b.width! > 0),
         isTrue);
     expect(
-        _walk(ws).whereType<pw.SizedBox>().any((b) => b.width == double.infinity),
+        _walk(ws)
+            .whereType<pw.SizedBox>()
+            .any((b) => b.width == double.infinity),
         isFalse);
     final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
     expect(await doc.save(), isNotEmpty);
@@ -606,7 +609,7 @@ void main() {
     // Opening into a pristine untitled tab replaces it rather than stacking.
     ws.openDocument('# Hello', path: '/tmp/a.md');
     expect(ws.documents.length, 1);
-    expect(ws.active.filePath, '/tmp/a.md');
+    expect(ws.activeDocument?.filePath, '/tmp/a.md');
 
     // A second distinct file adds a tab.
     ws.openDocument('# Second', path: '/tmp/b.md');
@@ -638,6 +641,113 @@ void main() {
 
     ws.reorder(0, 3); // move B to the end
     expect(ws.documents.map((d) => d.filePath), ['/a.md', '/c.md', '/b.md']);
+  });
+
+  test('Print preview opens as a tab and refreshes in place', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    ws.openDocument('# Hello', path: '/tmp/a.md');
+
+    ws.openPrintPreview(markdown: '# Hello', title: 'a', docPath: '/tmp/a.md');
+    expect(ws.tabs.length, 2);
+    expect(ws.activeTab, isA<PrintPreviewTab>());
+    // Previews are not documents: no dirty state, no save, no watcher.
+    expect(ws.documents.length, 1);
+    expect(ws.activeDocument, isNull);
+
+    // Printing the same file again refreshes the existing preview in place.
+    ws.openPrintPreview(
+        markdown: '# Hello v2', title: 'a', docPath: '/tmp/a.md');
+    expect(ws.tabs.length, 2);
+    final preview = ws.activeTab as PrintPreviewTab;
+    expect(preview.markdown, '# Hello v2');
+    expect(preview.epoch, 1);
+
+    // A different document gets its own preview tab.
+    ws.openPrintPreview(markdown: '# B', title: 'b', docPath: '/tmp/b.md');
+    expect(ws.tabs.length, 3);
+
+    // Closing a preview never touches the document tabs.
+    ws.closeAt(ws.activeIndex);
+    expect(ws.tabs.length, 2);
+    expect(ws.documents.length, 1);
+  });
+
+  test('Pathless documents with the same title get their own previews',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    // Two unsaved documents — both are titled "Untitled".
+    final docA = ws.activeDocument!;
+    ws.newDocument();
+    final docB = ws.activeDocument!;
+
+    ws.openPrintPreview(
+        markdown: 'A', title: docA.title, docPath: null, sourceKey: docA);
+    ws.openPrintPreview(
+        markdown: 'B', title: docB.title, docPath: null, sourceKey: docB);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 2);
+
+    // Re-printing doc A refreshes A's preview, not B's.
+    ws.openPrintPreview(
+        markdown: 'A v2', title: docA.title, docPath: null, sourceKey: docA);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 2);
+    expect((ws.activeTab as PrintPreviewTab).markdown, 'A v2');
+
+    // Closing doc A orphans its preview: printing a fresh pathless document
+    // opens a new tab instead of hijacking the orphan.
+    ws.closeAt(ws.tabs.indexWhere((t) => t is DocumentTab && t.doc == docA));
+    ws.newDocument();
+    final docC = ws.activeDocument!;
+    ws.openPrintPreview(
+        markdown: 'C', title: docC.title, docPath: null, sourceKey: docC);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 3);
+  });
+
+  test('A preview follows its document through Save As', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    final doc = ws.activeDocument!;
+
+    // Printed while unsaved: preview is matched by document identity.
+    ws.openPrintPreview(
+        markdown: 'draft', title: doc.title, docPath: null, sourceKey: doc);
+    expect(ws.tabs.whereType<PrintPreviewTab>().length, 1);
+
+    // After Save As, printing again refreshes the same preview (no
+    // duplicate) and the preview adopts the new path.
+    ws.openPrintPreview(
+        markdown: 'saved', title: 'a', docPath: '/tmp/a.md', sourceKey: doc);
+    final previews = ws.tabs.whereType<PrintPreviewTab>().toList();
+    expect(previews.length, 1);
+    expect(previews.single.docPath, '/tmp/a.md');
+    expect(previews.single.markdown, 'saved');
+    expect(previews.single.epoch, 1);
+  });
+
+  test('A sole pristine Untitled is replaced even with previews open',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs);
+    final untitled = ws.activeDocument!;
+    ws.openPrintPreview(
+        markdown: '',
+        title: untitled.title,
+        docPath: null,
+        sourceKey: untitled);
+    expect(ws.tabs.length, 2);
+
+    // Opening a real file replaces the pristine Untitled document rather
+    // than stacking a third tab next to it.
+    ws.openDocument('# Hello', path: '/tmp/a.md');
+    expect(ws.documents.length, 1);
+    expect(ws.documents.single.filePath, '/tmp/a.md');
+    expect(ws.tabs.length, 2);
+    expect(ws.activeDocument?.filePath, '/tmp/a.md');
   });
 
   test('Auto-reload defaults on and persists when toggled', () async {

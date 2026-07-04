@@ -11,13 +11,20 @@ with **Flutter** and **Material 3**. Targets **Linux, Windows, Android, iOS**
 
 See `README.md` for full feature/build/store docs. High level:
 
-- Three view modes: **Edit** (AppFlowy block/Notion-style WYSIWYG), **Split**
-  (source + live preview), **Preview** (read-only render).
+- Four view modes: **Edit** (AppFlowy block/Notion-style WYSIWYG), **Split**
+  (source + live preview), **Raw** (full-width source), **Preview** (read-only
+  render). Multi-document tabs with reorder + tear-off; find & replace in the
+  source modes; a floating format toolbar.
 - Material 3 with **light / dark / system** themes (persisted).
-- File open/save across platforms.
-- **Print + PDF export** with a per-document **branding-profile** system
-  (logo, fonts, colors, header/footer, page numbers, classification label +
-  `CONFIDENTIAL` watermark). Seeded profiles: **Personal** and **Work**.
+- File open/save across platforms; single-instance desktop app; `.md` file
+  association; drag & drop.
+- **Print + PDF export** in a **print-preview tab** (never a modal dialog —
+  user rule), with a per-document **branding-profile** system (logo, fonts,
+  colors, header/footer, page numbers, classification label + `CONFIDENTIAL`
+  watermark, legal/manuscript layout). Seeded profiles: **Personal**, **Work**,
+  and **Court Filing**. The PDF renderer also supports a small inline-HTML
+  subset (span fill-in blanks/labels, div alignment + flex rows) — see
+  `docs/pdf-inline-html.md`.
 
 ## Standing rules (from the user — always follow)
 
@@ -59,14 +66,20 @@ See `README.md` for full feature/build/store docs. High level:
      explicit user approval, and never re-review only part of a change — re-run
      Codex on the **final** head before merge so nothing slips through
      unreviewed (this exact gap shipped a P1 once; don't repeat it).
-2. **Tooling lives under `C:\git`, not the `C:\` root.** e.g. the Flutter SDK is
+2. **Prune branches after every merge.** As soon as a PR is merged, delete its
+   remote branch (`git push origin --delete <branch>`, or `gh pr merge`'s
+   `--delete-branch` flag) and run `git remote prune origin` (plus delete any
+   local copy). Never delete a branch with an **open** PR or unmerged work —
+   check `gh pr list` / `git branch -r --no-merged origin/main` first.
+3. **Tooling lives under `C:\git`, not the `C:\` root.** e.g. the Flutter SDK is
    at `C:\git\flutter-sdk` (not `C:\flutter-sdk`). Keep build tooling out of the
    drive root.
-3. **Cross-platform is non-negotiable.** Changes must keep Linux + Windows +
+4. **Cross-platform is non-negotiable.** Changes must keep Linux + Windows +
    Android + iOS building. Don't add platform-locked code without guards.
-4. **Material Design + light & dark themes** must be preserved in any UI work.
-5. **Printing must stay functional**, including the themeable header/footer and
-   the per-document branding-profile system.
+5. **Material Design + light & dark themes** must be preserved in any UI work.
+6. **Printing must stay functional**, including the themeable header/footer and
+   the per-document branding-profile system. The print preview opens in a
+   **workspace tab**, not a modal dialog — keep it that way.
 
 ## Known security limitation — re-check before related edits
 
@@ -91,6 +104,8 @@ and the fix is only in v11. **Tracked in issue #2.**
 - SDK location: `C:\git\flutter-sdk`. Run via FVM, or put that `bin/` on `PATH`.
 - `intl` is overridden to `0.20.2` in `pubspec.yaml` to reconcile AppFlowy
   (`intl ^0.19`) with `flutter_localizations` (`intl 0.20.2`).
+- `path_provider_foundation` is overridden to `>=2.4.1 <2.6.0` (2.6.0's
+  native-assets implementation breaks macOS App Store uploads / crashes iOS).
 - App / bundle id org: **`com.markdownstudio`** (→ `com.markdownstudio.markdown_studio`).
 
 ## Standard commands
@@ -114,18 +129,25 @@ fvm flutter create --org com.markdownstudio --project-name markdown_studio \
 - `flutter analyze` clean and `flutter test` green.
 - Cross-platform preserved; Material + light/dark intact.
 - Open a PR, run the **Codex loop**, get the all-clear, **then** merge.
+- After the merge: **delete the PR branch and prune** (`git remote prune
+  origin`) — see standing rule 2.
 
 ## Architecture map
 
 ```
 lib/
-├── main.dart / app.dart              # entry, providers, MaterialApp + themes
-├── models/        editor_mode, print_profile
-├── state/         theme_controller, document_controller (WYSIWYG<->Markdown sync)
-├── services/      file_service, print_profile_service,
-│                  markdown_pdf_builder, print_service
-├── screens/       editor_screen
+├── main.dart / app.dart              # entry, providers, launch args/handoff,
+│                                     # MaterialApp + themes
+├── models/        editor_mode (Edit/Split/Raw/Preview), print_profile
+├── state/         theme_controller,
+│                  document_controller (per-tab WYSIWYG<->Markdown sync, dirty),
+│                  workspace_controller (tabs: documents + print previews)
+├── services/      file_service, file_association_service, open_file_channel,
+│                  single_instance_service, text_search,
+│                  print_profile_service, markdown_pdf_builder, print_service
+├── screens/       editor_screen (tab strip, toolbar, mode switching)
 ├── theme/         app_theme (M3 light/dark)
-└── widgets/       wysiwyg_view, split_view, preview_view,
-                   print_dialog, print_profile_editor
+└── widgets/       wysiwyg_view, split_view, raw_view, source_pane, preview_view,
+                   find_replace_bar, find_controller, format_toolbar,
+                   print_preview_view, print_profile_editor
 ```

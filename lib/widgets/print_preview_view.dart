@@ -15,41 +15,34 @@ import '../services/print_profile_service.dart';
 import '../services/print_service.dart';
 import 'print_profile_editor.dart';
 
-/// Full-screen print / PDF-export experience: choose a branding profile, preview
-/// the rendered document, then print or share. Profiles can be created, edited,
-/// set as default, and associated with the current document.
-class PrintDialog extends StatefulWidget {
-  const PrintDialog({
+/// Print / PDF-export experience, hosted in its own workspace tab (not a modal
+/// dialog): choose a branding profile, preview the rendered document, then
+/// print or share. Profiles can be created, edited, set as default, and
+/// associated with the current document. The Markdown shown is a snapshot —
+/// printing the document again refreshes the tab in place.
+class PrintPreviewView extends StatefulWidget {
+  const PrintPreviewView({
     super.key,
     required this.markdown,
     required this.title,
     required this.docPath,
+    this.refreshEpoch = 0,
   });
 
   final String markdown;
   final String title;
   final String? docPath;
 
-  static Future<void> show(
-    BuildContext context, {
-    required String markdown,
-    required String title,
-    required String? docPath,
-  }) {
-    return Navigator.of(context).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) =>
-            PrintDialog(markdown: markdown, title: title, docPath: docPath),
-      ),
-    );
-  }
+  /// Bumped by the workspace when the same preview tab is refreshed with a
+  /// new snapshot. The state reacts by re-rendering the PDF — without being
+  /// recreated, so the user's profile / page-format selections survive.
+  final int refreshEpoch;
 
   @override
-  State<PrintDialog> createState() => _PrintDialogState();
+  State<PrintPreviewView> createState() => _PrintPreviewViewState();
 }
 
-class _PrintDialogState extends State<PrintDialog> {
+class _PrintPreviewViewState extends State<PrintPreviewView> {
   final _service = PrintService();
   // Anchors the iPad share popover to the Share button.
   final GlobalKey _shareButtonKey = GlobalKey();
@@ -65,6 +58,16 @@ class _PrintDialogState extends State<PrintDialog> {
     super.initState();
     final profiles = context.read<PrintProfileService>();
     _selectedId = profiles.forDocument(widget.docPath).id;
+  }
+
+  @override
+  void didUpdateWidget(PrintPreviewView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // A refreshed snapshot (print pressed again): re-render the PDF but keep
+    // the user's in-preview selections (profile, page size/orientation).
+    if (oldWidget.refreshEpoch != widget.refreshEpoch) {
+      setState(() => _previewEpoch++);
+    }
   }
 
   Future<void> _editProfile(PrintProfile profile, {required bool isNew}) async {
@@ -181,8 +184,8 @@ class _PrintDialogState extends State<PrintDialog> {
       return;
     }
     if (mounted) {
-      messenger.showSnackBar(
-          SnackBar(content: Text('Exported "${profile.name}"')));
+      messenger
+          .showSnackBar(SnackBar(content: Text('Exported "${profile.name}"')));
     }
   }
 
@@ -289,13 +292,13 @@ class _PrintDialogState extends State<PrintDialog> {
         ),
       // Make this profile the global default.
       IconButton(
-        tooltip:
-            isDefault ? 'This is the default profile' : 'Set as default profile',
+        tooltip: isDefault
+            ? 'This is the default profile'
+            : 'Set as default profile',
         icon: Icon(isDefault ? Icons.star_rounded : Icons.star_border_rounded),
         color: isDefault ? cs.primary : null,
-        onPressed: isDefault
-            ? null
-            : () => profilesService.setDefault(_selectedId),
+        onPressed:
+            isDefault ? null : () => profilesService.setDefault(_selectedId),
       ),
       // Pin this profile to the current file ("use for this document"): it is
       // auto-selected next time you print/export it.
@@ -305,8 +308,7 @@ class _PrintDialogState extends State<PrintDialog> {
             : (assigned
                 ? 'Always using this profile for this file — tap to stop'
                 : 'Always use this profile for this file'),
-        icon: Icon(
-            assigned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
+        icon: Icon(assigned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
         color: assigned ? cs.primary : null,
         onPressed: !hasPath
             ? null
@@ -407,130 +409,127 @@ class _PrintDialogState extends State<PrintDialog> {
     final selected = profilesService.byId(_selectedId);
     final cs = Theme.of(context).colorScheme;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Print / Export PDF'),
-        leading: IconButton(
-          icon: const Icon(Icons.close_rounded),
-          onPressed: () => Navigator.of(context).pop(),
+    // No Scaffold/AppBar of its own: this view fills a workspace tab, so the
+    // tab strip provides the title and the close affordance.
+    return Column(
+      children: [
+        Card(
+          margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // The dropdown fills the row and the action icons sit
+                // right-aligned in two groups (profile management | output).
+                // On comfortable widths the dropdown expands and the icons
+                // show at natural width; on narrow widths the icons become a
+                // horizontal scroll view so the row can never overflow.
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final dropdown = DropdownButtonFormField<String>(
+                      // Key by selection so the field rebuilds with a valid
+                      // value after a profile is created/deleted (avoids a
+                      // stale/duplicate-value assertion).
+                      key: ValueKey('profile-dd-$_selectedId'),
+                      initialValue: _selectedId,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Branding profile',
+                        isDense: true,
+                      ),
+                      items: [
+                        for (final pr in profiles)
+                          DropdownMenuItem(
+                            value: pr.id,
+                            child: Text(
+                              pr.id == profilesService.defaultId
+                                  ? '${pr.name}  (default)'
+                                  : pr.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) => setState(() {
+                        _selectedId = v ?? _selectedId;
+                        _previewEpoch++;
+                      }),
+                    );
+                    final actions = Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: _profileActions(
+                          selected, profiles, profilesService, cs),
+                    );
+                    // Enough room for the dropdown plus the icon cluster at
+                    // natural width? Then expand the dropdown; otherwise let
+                    // the icons scroll.
+                    const comfortable = 620.0;
+                    return Row(
+                      children: [
+                        Expanded(child: dropdown),
+                        const SizedBox(width: 8),
+                        if (constraints.maxWidth >= comfortable)
+                          actions
+                        else
+                          Flexible(
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              reverse: true,
+                              child: actions,
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
-      body: Column(
-        children: [
-          Card(
-            margin: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // The dropdown fills the row and the action icons sit
-                  // right-aligned in two groups (profile management | output).
-                  // On comfortable widths the dropdown expands and the icons
-                  // show at natural width; on narrow widths the icons become a
-                  // horizontal scroll view so the row can never overflow.
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final dropdown = DropdownButtonFormField<String>(
-                        // Key by selection so the field rebuilds with a valid
-                        // value after a profile is created/deleted (avoids a
-                        // stale/duplicate-value assertion).
-                        key: ValueKey('profile-dd-$_selectedId'),
-                        initialValue: _selectedId,
-                        isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Branding profile',
-                          isDense: true,
-                        ),
-                        items: [
-                          for (final pr in profiles)
-                            DropdownMenuItem(
-                              value: pr.id,
-                              child: Text(
-                                pr.id == profilesService.defaultId
-                                    ? '${pr.name}  (default)'
-                                    : pr.name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                        ],
-                        onChanged: (v) => setState(() {
-                          _selectedId = v ?? _selectedId;
-                          _previewEpoch++;
-                        }),
-                      );
-                      final actions = Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: _profileActions(
-                            selected, profiles, profilesService, cs),
-                      );
-                      // Enough room for the dropdown plus the icon cluster at
-                      // natural width? Then expand the dropdown; otherwise let
-                      // the icons scroll.
-                      const comfortable = 620.0;
-                      return Row(
-                        children: [
-                          Expanded(child: dropdown),
-                          const SizedBox(width: 8),
-                          if (constraints.maxWidth >= comfortable)
-                            actions
-                          else
-                            Flexible(
-                              child: SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                reverse: true,
-                                child: actions,
-                              ),
-                            ),
-                        ],
-                      );
-                    },
+        Expanded(
+          child: PdfPreview(
+            key: ValueKey('preview-$_selectedId-$_previewEpoch'),
+            // A refresh or profile switch remounts the preview; start it at
+            // the page size/orientation the user was previewing so their
+            // selection carries across (and Print/Save keep matching it).
+            initialPageFormat: _previewFormat,
+            build: (format) {
+              // Remember the page size/orientation the user is currently
+              // previewing so "Save as PDF" matches it (not always A4).
+              _previewFormat = format;
+              return _service.generate(
+                markdown: widget.markdown,
+                profile: selected,
+                title: widget.title,
+                format: format,
+                baseDir: _baseDir,
+              );
+            },
+            canChangePageFormat: true,
+            canChangeOrientation: true,
+            // Print/Share live in the profile row above now, so hide the
+            // preview's own print/share buttons (keep page-size/orientation).
+            allowPrinting: false,
+            allowSharing: false,
+            pdfFileName: '${widget.title}.pdf',
+            loadingWidget: const Center(child: CircularProgressIndicator()),
+            // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
+            // printers are flaky on repeat jobs (the spooler can refuse the
+            // second one until you switch printers and back). When a print
+            // fails, point the user at the reliable in-app export instead.
+            onPrintError: (ctx, error) {
+              ScaffoldMessenger.of(ctx).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Printing failed. To make a PDF, use the “Save as PDF” '
+                    'icon above — it exports directly with selectable text.',
                   ),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
-          Expanded(
-            child: PdfPreview(
-              key: ValueKey('preview-$_selectedId-$_previewEpoch'),
-              build: (format) {
-                // Remember the page size/orientation the user is currently
-                // previewing so "Save as PDF" matches it (not always A4).
-                _previewFormat = format;
-                return _service.generate(
-                  markdown: widget.markdown,
-                  profile: selected,
-                  title: widget.title,
-                  format: format,
-                  baseDir: _baseDir,
-                );
-              },
-              canChangePageFormat: true,
-              canChangeOrientation: true,
-              // Print/Share live in the profile row above now, so hide the
-              // preview's own print/share buttons (keep page-size/orientation).
-              allowPrinting: false,
-              allowSharing: false,
-              pdfFileName: '${widget.title}.pdf',
-              loadingWidget: const Center(child: CircularProgressIndicator()),
-              // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
-              // printers are flaky on repeat jobs (the spooler can refuse the
-              // second one until you switch printers and back). When a print
-              // fails, point the user at the reliable in-app export instead.
-              onPrintError: (ctx, error) {
-                ScaffoldMessenger.of(ctx).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Printing failed. To make a PDF, use the “Save as PDF” '
-                      'icon above — it exports directly with selectable text.',
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
