@@ -45,7 +45,10 @@ JSON, you can [have your AI generate the template itself](ai-profile-authoring.m
 
 ## Creating & managing profiles in the app
 
-Open **Print / Export PDF** (the printer icon in the toolbar). From there you can:
+Open **Print / Export PDF** (the printer icon in the toolbar). The preview
+opens in its **own tab** in the tab strip — switch back to the document any
+time, and print again to refresh the preview with your latest edits. From
+there you can:
 
 | Action | What it does |
 | --- | --- |
@@ -285,3 +288,6 @@ Each block is a complete, importable profile. Save as
 - **[AI profile authoring](ai-profile-authoring.md)** — a self-contained prompt
   you can paste into any AI assistant, plus the machine-readable schema, so it
   generates an importable profile from a plain-English description.
+- **[Fill-in lines & inline HTML in PDFs](pdf-inline-html.md)** — signature
+  lines, fill-in blanks, redactions, and flex-row captions for printed forms
+  and court filings.
