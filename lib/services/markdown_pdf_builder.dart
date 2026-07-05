@@ -80,6 +80,18 @@ class MarkdownPdfBuilder {
     return v < 0 ? 0 : v;
   }
 
+  /// Bottom gap after a body-level block (paragraph, list item, heading,
+  /// quote). Court/manuscript documents are *uniformly* spaced: the gap after
+  /// a paragraph must continue the in-paragraph line rhythm, so the
+  /// baseline-to-baseline distance across a paragraph break equals the spaced
+  /// line height. Within a paragraph that distance is line-height +
+  /// [_leadingFor]; across a break it is line-height + bottom padding — so the
+  /// padding must equal the leading itself (≈13.5pt for 11pt double-spaced;
+  /// using the full `size × multiple` here would double-count the line box and
+  /// open a visibly larger gap at every break). Non-legal documents keep the
+  /// historical fixed 8pt so existing output is unchanged.
+  double get _blockGap => profile.legalMode ? _leadingFor(11.0) : 8.0;
+
   List<pw.Widget> build(String markdown) {
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
@@ -89,7 +101,59 @@ class MarkdownPdfBuilder {
       inlineSyntaxes: [_UnderlineSyntax()],
     );
     final nodes = document.parseLines(const LineSplitter().convert(markdown));
-    return nodes.map(_block).whereType<pw.Widget>().toList();
+    return nodes.expand(_emit).toList();
+  }
+
+  /// Emit the widgets for one block-level node. Raw-HTML blocks are scanned
+  /// for standalone page-break directives and split around them, so every
+  /// [pw.NewPage] lands at the top level of the returned list —
+  /// [pw.MultiPage] ignores a NewPage nested inside a column. The scan
+  /// matters because package:markdown keeps *adjacent* HTML lines in a single
+  /// text node, so a break div may share its block with other divs (e.g. a
+  /// break directly above a caption). Blocks without a directive take the
+  /// unchanged [_block] path.
+  Iterable<pw.Widget> _emit(md.Node node) sync* {
+    final raw = _rawHtmlText(node);
+    if (raw != null && _findPageBreak(raw) != null) {
+      var rest = raw;
+      for (var m = _findPageBreak(rest); m != null; m = _findPageBreak(rest)) {
+        final before = rest.substring(0, m.start).trim();
+        if (before.isNotEmpty) {
+          yield _divBlock(before) ?? _paragraph([md.Text(before)]);
+        }
+        // The element may be visible in its own right (a signature line that
+        // also carries the directive): render it on the side of the break its
+        // directive names, so `…-before` breaks first and then draws it.
+        final style = _breakStyleOf(m);
+        final rendered = _divBlock(m.group(0)!);
+        final visible = rendered != null && rendered is! pw.SizedBox;
+        if (_breakValue(style, before: true)) yield pw.NewPage();
+        if (visible) yield rendered;
+        if (_breakValue(style, before: false)) yield pw.NewPage();
+        rest = rest.substring(m.end);
+      }
+      final tail = rest.trim();
+      if (tail.isNotEmpty) {
+        yield _divBlock(tail) ?? _paragraph([md.Text(tail)]);
+      }
+      return;
+    }
+    final w = _block(node);
+    if (w != null) yield w;
+  }
+
+  /// The raw text of a block package:markdown left as HTML — a text node, or
+  /// a paragraph whose children are pure text (the same guard [_block] uses so
+  /// inline-code samples are never treated as markup). Null otherwise.
+  String? _rawHtmlText(md.Node node) {
+    if (node is md.Text) return node.text;
+    if (node is md.Element && node.tag == 'p') {
+      final pc = node.children ?? const <md.Node>[];
+      if (pc.isNotEmpty && pc.every((c) => c is md.Text)) {
+        return node.textContent;
+      }
+    }
+    return null;
   }
 
   // --- Inline-styled <div> blocks (signature lines & labels) ------------------
@@ -663,6 +727,66 @@ class MarkdownPdfBuilder {
 
   // --- Block-level rendering --------------------------------------------------
 
+  /// Bare elements able to carry a page-break directive with no visible
+  /// content: an empty `<div …></div>`, a self-closed `<div …/>`, or `<hr …>`.
+  static final _breakCandidate = RegExp(
+    r'<div\b([^>]*?)>\s*</div\s*>|<div\b([^>]*?)/>|<hr\b([^>]*?)/?>',
+    caseSensitive: false,
+  );
+
+  /// Style declarations of a [_breakCandidate] match (whichever alternative
+  /// captured the attributes).
+  Map<String, String> _breakStyleOf(Match m) =>
+      _parseStyle(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
+
+  /// Whether [style] carries a page-break directive on the requested side:
+  /// `page-break-before/after: always` or the CSS-3 fragmentation spelling
+  /// `break-before/after: page`. A trailing `!important` (common in exported
+  /// HTML) is accepted.
+  bool _breakValue(Map<String, String> style, {required bool before}) {
+    final side = before ? 'before' : 'after';
+    for (final k in ['page-break-$side', 'break-$side']) {
+      final v = (style[k] ?? '')
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'\s*!important\s*$'), '');
+      if (v == 'always' || v == 'page') return true;
+    }
+    return false;
+  }
+
+  /// The first standalone page-break directive in [raw], or null. Only bare
+  /// elements qualify (a content-carrying div never becomes a break), and only
+  /// at div-nesting depth 0 — a break div *inside* a wrapper div must not be
+  /// split out of it (that would tear the wrapper's markup apart and lose its
+  /// styling); it is left to the div renderer, which draws nothing for it.
+  Match? _findPageBreak(String raw) {
+    for (final m in _breakCandidate.allMatches(raw)) {
+      if (_divDepthAt(raw, m.start) > 0) continue;
+      final style = _breakStyleOf(m);
+      if (_breakValue(style, before: true) ||
+          _breakValue(style, before: false)) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  /// The `<div>` nesting depth at [pos]: opens minus closes among the tags
+  /// before it (self-closing `<div …/>` doesn't nest).
+  int _divDepthAt(String raw, int pos) {
+    var depth = 0;
+    for (final m in _divTag.allMatches(raw)) {
+      if (m.start >= pos) break;
+      if (m.group(1) == '/') {
+        if (depth > 0) depth--;
+      } else if (!m.group(0)!.endsWith('/>')) {
+        depth++;
+      }
+    }
+    return depth;
+  }
+
   pw.Widget? _block(md.Node node) {
     if (node is md.Text) {
       return _divBlock(node.text) ?? _paragraph([node]);
@@ -715,6 +839,11 @@ class MarkdownPdfBuilder {
 
   pw.Widget _heading(md.Element el, double size, {double spacingTop = 10}) {
     final center = profile.centerHeadings;
+    // Legal documents keep one continuous spacing rhythm: the preceding
+    // block's bottom gap already provides the space above a heading, and the
+    // heading's own bottom gap is the same spaced-line gap as body text.
+    final top = profile.legalMode ? 0.0 : spacingTop;
+    final bottom = profile.legalMode ? _blockGap : 6.0;
     final text = pw.RichText(
       textAlign: center ? pw.TextAlign.center : pw.TextAlign.left,
       text: pw.TextSpan(
@@ -730,7 +859,7 @@ class MarkdownPdfBuilder {
     // (h2/h3), but not the document title (h1) or minor sub-headings.
     if (profile.headingRule && size >= 15 && size <= 19) {
       return pw.Padding(
-        padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
+        padding: pw.EdgeInsets.only(top: top, bottom: bottom),
         child: pw.Column(
           crossAxisAlignment: center
               ? pw.CrossAxisAlignment.center
@@ -745,7 +874,7 @@ class MarkdownPdfBuilder {
       );
     }
     return pw.Padding(
-      padding: pw.EdgeInsets.only(top: spacingTop, bottom: 6),
+      padding: pw.EdgeInsets.only(top: top, bottom: bottom),
       child: headingWidget,
     );
   }
@@ -756,7 +885,7 @@ class MarkdownPdfBuilder {
     final hasImage = children.any((n) => n is md.Element && n.tag == 'img');
     if (!hasImage) {
       return pw.Padding(
-        padding: const pw.EdgeInsets.only(bottom: 8),
+        padding: pw.EdgeInsets.only(bottom: _blockGap),
         child: _bodyRich(children, indentFirstLine: true),
       );
     }
@@ -784,7 +913,7 @@ class MarkdownPdfBuilder {
     flushRun();
 
     return pw.Padding(
-      padding: const pw.EdgeInsets.only(bottom: 8),
+      padding: pw.EdgeInsets.only(bottom: _blockGap),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: widgets,
@@ -820,11 +949,46 @@ class MarkdownPdfBuilder {
         : rich;
   }
 
+  /// In legal mode a quote's inner blocks each end in [_blockGap], but the
+  /// quote container itself carries the gap to the next block — so the last
+  /// inner block's gap would double up (a blank band inside the grey quote box
+  /// plus the margin after it). Strip the trailing bottom padding, descending
+  /// through zero-gap wrappers (a list wrapper is a 0-bottom Padding around a
+  /// Column whose last item holds the gap). Non-legal children are untouched.
+  List<pw.Widget> _trimTrailingGap(List<pw.Widget> children) {
+    if (!profile.legalMode || children.isEmpty) return children;
+    children[children.length - 1] = _trimTail(children.last);
+    return children;
+  }
+
+  pw.Widget _trimTail(pw.Widget w) {
+    if (w is pw.Padding && w.child != null) {
+      final e = w.padding;
+      if (e is pw.EdgeInsets) {
+        if (e.bottom > 0) {
+          return pw.Padding(
+            padding:
+                pw.EdgeInsets.only(left: e.left, top: e.top, right: e.right),
+            child: w.child!,
+          );
+        }
+        return pw.Padding(padding: e, child: _trimTail(w.child!));
+      }
+    }
+    if (w is pw.Column && w.children.isNotEmpty) {
+      final kids = List.of(w.children);
+      kids[kids.length - 1] = _trimTail(kids.last);
+      return pw.Column(
+          crossAxisAlignment: w.crossAxisAlignment, children: kids);
+    }
+    return w;
+  }
+
   pw.Widget _blockquote(md.Element el) {
-    final children =
-        (el.children ?? []).map(_block).whereType<pw.Widget>().toList();
+    final children = _trimTrailingGap(
+        (el.children ?? []).map(_block).whereType<pw.Widget>().toList());
     return pw.Container(
-      margin: const pw.EdgeInsets.only(bottom: 8),
+      margin: pw.EdgeInsets.only(bottom: _blockGap),
       padding: const pw.EdgeInsets.fromLTRB(12, 4, 8, 4),
       decoration: pw.BoxDecoration(
         border: pw.Border(left: pw.BorderSide(color: _brandColor, width: 3)),
@@ -872,8 +1036,10 @@ class MarkdownPdfBuilder {
         index++;
       }
     }
+    // In legal mode each item already carries the full spaced gap, so the
+    // list wrapper adds none (item gap + wrapper gap would double up).
     return pw.Padding(
-      padding: const pw.EdgeInsets.only(bottom: 6),
+      padding: pw.EdgeInsets.only(bottom: profile.legalMode ? 0 : 6),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: items,
@@ -904,32 +1070,45 @@ class MarkdownPdfBuilder {
 
     final marker = checkbox ?? (ordered ? '$index.' : '•');
 
+    final row = pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(
+          width: 20,
+          child: pw.Text(
+            marker,
+            style: pw.TextStyle(
+              font: checkbox != null ? fonts.mono : fonts.base,
+              fontSize: 11,
+              color: _text,
+            ),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.RichText(
+            text: pw.TextSpan(children: _inline(inlineNodes)),
+          ),
+        ),
+      ],
+    );
+
+    // Legal rhythm with a nested list: the item's own text line needs the
+    // spaced gap before its children, and the nested list's last item already
+    // ends in the gap — so the item adds none of its own (it would double up
+    // before the next sibling). Non-legal keeps the historical flat 3pt.
+    final legalNested = profile.legalMode && nested.isNotEmpty;
     return pw.Padding(
-      padding: pw.EdgeInsets.only(left: depth * 14.0, bottom: 3),
+      padding: pw.EdgeInsets.only(
+          left: depth * 14.0,
+          bottom: legalNested ? 0 : (profile.legalMode ? _blockGap : 3)),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.SizedBox(
-                width: 20,
-                child: pw.Text(
-                  marker,
-                  style: pw.TextStyle(
-                    font: checkbox != null ? fonts.mono : fonts.base,
-                    fontSize: 11,
-                    color: _text,
-                  ),
-                ),
-              ),
-              pw.Expanded(
-                child: pw.RichText(
-                  text: pw.TextSpan(children: _inline(inlineNodes)),
-                ),
-              ),
-            ],
-          ),
+          if (legalNested)
+            pw.Padding(
+                padding: pw.EdgeInsets.only(bottom: _blockGap), child: row)
+          else
+            row,
           ...nested,
         ],
       ),
@@ -1203,13 +1382,19 @@ class MarkdownPdfBuilder {
     PdfColor? forceColor,
   }) {
     // Decode HTML entities in prose/span-adjacent text (but never in code, where
-    // `&amp;` is literal), matching the entity handling in _spanFragment. Text
-    // under an inherited transparent currentColor is hidden (redaction) — unless
-    // a forced colour overrides it (e.g. white table headers).
+    // `&amp;` is literal), matching the entity handling in _spanFragment. A
+    // literal `<br>` the author wrote is a line break — package:markdown leaves
+    // it as text, so without this it would print as the characters "<br>"
+    // (notably inside headings, e.g. a two-line court header). Text under an
+    // inherited transparent currentColor is hidden (redaction) — unless a
+    // forced colour overrides it (e.g. white table headers).
     pw.InlineSpan run(String s) => (transparentColor && forceColor == null)
         ? const pw.TextSpan(text: '')
         : pw.TextSpan(
-            text: _symbols(code ? s : _decodeEntities(s)),
+            text: _symbols(code
+                ? s
+                : _decodeEntities(s.replaceAll(
+                    RegExp(r'<br\s*/?>', caseSensitive: false), '\n'))),
             style: _textStyle(
               bold: bold,
               italic: italic,
@@ -1384,8 +1569,11 @@ class MarkdownPdfBuilder {
     // text colour.
     final spanColor = forceColor ?? _cssColor(style['color']) ?? color;
     final border = _resolveBorder(decls, currentColor: spanColor);
+    // A literal <br> inside a styled label is a line break (matching plain
+    // prose and headings); blank detection (_effectiveText) still treats it
+    // as whitespace so a fill-in blank containing one stays a blank.
     final inner = _decodeEntities(innerRaw
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]*>'), '')
         .replaceAll(
             RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' '));

@@ -34,6 +34,10 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
     yield* _allWidgets(w.child!);
   } else if (w is pw.SizedBox && w.child != null) {
     yield* _allWidgets(w.child!);
+  } else if (w is pw.Align && w.child != null) {
+    yield* _allWidgets(w.child!);
+  } else if (w is pw.Container && w.child != null) {
+    yield* _allWidgets(w.child!);
   } else if (w is pw.Column) {
     for (final c in w.children) {
       yield* _allWidgets(c);
@@ -43,6 +47,24 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
       yield* _allWidgets(c);
     }
   }
+}
+
+/// All literal text reachable from the given widgets' RichText spans.
+String _literalText(Iterable<pw.Widget> ws) {
+  final sb = StringBuffer();
+  void walkSpan(pw.InlineSpan s) {
+    if (s is pw.TextSpan) {
+      if (s.text != null) sb.write(s.text);
+      for (final c in s.children ?? const <pw.InlineSpan>[]) {
+        walkSpan(c);
+      }
+    }
+  }
+
+  for (final w in ws) {
+    if (w is pw.RichText) walkSpan(w.text);
+  }
+  return sb.toString();
 }
 
 Iterable<pw.Widget> _walk(List<pw.Widget> ws) => ws.expand(_allWidgets);
@@ -540,6 +562,186 @@ void main() {
         isFalse);
     final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
     expect(await doc.save(), isNotEmpty);
+  });
+
+  test('legalMode paragraphs carry the full spaced block gap', () async {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final ws = builder.build('First paragraph of the motion.\n\n'
+        'Second paragraph of the motion.\n\n'
+        '- first ground\n- second ground');
+    // Uniform rhythm: bottom gap == in-paragraph leading, so the
+    // baseline-to-baseline distance across a paragraph break equals the
+    // double-spaced line height (2.5 + 11 × (multiple − 1) = 13.5 at 2.0).
+    final expected = 2.5 + 11.0 * (court.lineSpacingMultiple - 1.0);
+    final bottoms = _walk(ws)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom)
+        .toList();
+    expect(bottoms.where((b) => b == expected).length, greaterThanOrEqualTo(4),
+        reason: 'paragraphs and list items share the spaced gap');
+    expect(bottoms.contains(8.0), isFalse,
+        reason: 'no legal block keeps the single-spaced 8pt gap');
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('Non-legal paragraphs keep the historical 8pt gap (regression)', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build('First paragraph.\n\nSecond paragraph.');
+    final bottoms = _walk(ws)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom);
+    expect(bottoms.where((b) => b == 8.0).length, 2);
+  });
+
+  test('Page-break divs and hrs emit a top-level pw.NewPage', () async {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+
+    final ws = builder.build('Body of the motion.\n\n'
+        '<div style="page-break-before:always"></div>\n\n'
+        '#### <u>CERTIFICATE OF SERVICE</u>\n\nI hereby certify…');
+    expect(ws.whereType<pw.NewPage>().length, 1,
+        reason: 'a bare page-break div becomes a NewPage');
+    // The break contributes no visible content of its own.
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+
+    // <hr> with the directive, and the CSS-3 fragmentation spelling.
+    expect(
+        builder
+            .build('A\n\n<hr style="page-break-after:always">\n\nB')
+            .whereType<pw.NewPage>()
+            .length,
+        1);
+    expect(
+        builder
+            .build('A\n\n<div style="break-before:page"></div>\n\nB')
+            .whereType<pw.NewPage>()
+            .length,
+        1);
+
+    // Adjacent HTML blocks with no blank line: package:markdown keeps them in
+    // one text node — the break must still be found and the caption rendered.
+    final adjacent = builder.build('<div style="page-break-before:always">'
+        '</div>\n<div style="text-align:center">CERTIFICATE OF SERVICE</div>');
+    expect(adjacent.whereType<pw.NewPage>().length, 1);
+    expect(
+        _walk(adjacent).whereType<pw.Text>().any((t) =>
+            ((t.text as pw.TextSpan).text ?? '').contains('CERTIFICATE')),
+        isTrue);
+
+    // A visible element carrying the directive breaks AND still renders: a
+    // signature line with page-break-before starts a page, then draws.
+    final withLine = builder.build('<div style="page-break-before:always; '
+        'border-bottom:1px solid; width:150px"></div>');
+    expect(withLine.whereType<pw.NewPage>().length, 1);
+    expect(_walk(withLine).whereType<pw.Container>().isNotEmpty, isTrue,
+        reason: 'the signature rule survives the break');
+    expect(withLine.first, isA<pw.NewPage>(),
+        reason: '…-before breaks before the element renders');
+
+    // A CSS priority suffix is accepted.
+    expect(
+        builder
+            .build('A\n\n<div style="page-break-before: always !important">'
+                '</div>\n\nB')
+            .whereType<pw.NewPage>()
+            .length,
+        1);
+
+    // A break div nested inside a wrapper is NOT split out of it: the wrapper
+    // renders intact (no leaked </div>), and no page break is emitted.
+    final nestedBreak = builder.build('<div style="text-align:center">'
+        '<div style="page-break-before:always"></div>CERTIFICATE</div>');
+    expect(nestedBreak.whereType<pw.NewPage>(), isEmpty);
+    final nestedText = _literalText(_walk(nestedBreak));
+    expect(nestedText.contains('</div'), isFalse);
+    expect(nestedText.contains('CERTIFICATE'), isTrue);
+
+    // A plain thematic break (---) still renders a divider, not a page break.
+    expect(builder.build('A\n\n---\n\nB').whereType<pw.NewPage>(), isEmpty);
+    // A bare div without the directive is unchanged too.
+    expect(
+        builder
+            .build('<div style="height:12px"></div>')
+            .whereType<pw.NewPage>(),
+        isEmpty);
+  });
+
+  test('A literal <br> in a heading renders as a line break, not text', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '# IN THE CIRCUIT COURT OF BENTON COUNTY, ARKANSAS<br>DOMESTIC RELATIONS DIVISION');
+
+    String literal(pw.InlineSpan s) {
+      final sb = StringBuffer();
+      void walk(pw.InlineSpan x) {
+        if (x is pw.TextSpan) {
+          if (x.text != null) sb.write(x.text);
+          for (final c in x.children ?? const <pw.InlineSpan>[]) {
+            walk(c);
+          }
+        }
+      }
+
+      walk(s);
+      return sb.toString();
+    }
+
+    final headingText =
+        _walk(ws).whereType<pw.RichText>().map((r) => literal(r.text)).join();
+    expect(headingText.contains('<br'), isFalse);
+    expect(headingText.contains('\n'), isTrue);
+
+    // Inside a styled span the <br> survives as a line break too (it used to
+    // be flattened to a space).
+    final label = builder
+        .renderInlineText(
+            '<span style="font-weight:bold">Line 1<br>Line 2</span>')
+        .map(literal)
+        .join();
+    expect(label.contains('<br'), isFalse);
+    expect(label.contains('Line 1\nLine 2'), isTrue);
+  });
+
+  test('legalMode keeps one gap for blockquotes and nested lists', () {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final gap = 2.5 + 11.0 * (court.lineSpacingMultiple - 1.0);
+
+    // The quote's container margin is the single gap to the next block; the
+    // paragraph inside must not add a second one (a blank band in the box).
+    final quote = builder.build('> quoted authority\n\nnext paragraph').first
+        as pw.Container;
+    final innerBottoms = _allWidgets(quote.child!)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom);
+    expect(innerBottoms.any((b) => b == gap), isFalse,
+        reason: 'no double gap inside the quote');
+    expect((quote.margin as pw.EdgeInsets?)?.bottom, gap);
+
+    // Nested list: parent row + child item + next item each carry exactly one
+    // gap; the parent item adds none of its own around the nested list.
+    final list = builder.build('- parent\n  - child\n- next');
+    final bottoms = _walk(list)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom)
+        .where((b) => b == gap);
+    expect(bottoms.length, 3);
+
+    // A quote that *ends in a list* sheds the last item's gap too (the trim
+    // descends through the list's zero-gap wrapper).
+    final listQuote = builder.build('> - cited point\n\nnext paragraph').first
+        as pw.Container;
+    final listQuoteBottoms = _allWidgets(listQuote.child!)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom);
+    expect(listQuoteBottoms.any((b) => b == gap), isFalse,
+        reason: 'no gap band inside a quote ending in a list');
   });
 
   test('Visiting Edit mode without editing preserves the exact source', () {
