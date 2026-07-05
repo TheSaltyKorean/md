@@ -139,13 +139,18 @@ the tag-triggered `release.yml` workflow on GitHub's runners.
 | --- | --- | --- |
 | **Windows** | `…windows-x64.zip` | Extract anywhere (e.g. `C:\Apps\MarkdownStudio`) and run `markdown_studio.exe` (keep `data/` next to it). SmartScreen may warn on the unsigned build: *More info → Run anyway*. |
 | **Linux** | `…linux-x64.tar.gz` | `mkdir -p ~/.local/opt/markdown-studio && tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio`, then run `…/markdown_studio`. Needs GTK 3 (`sudo apt install libgtk-3-0` if missing). |
-| **Android** | `…android.apk` | Open the APK on the device and allow "install unknown apps" when prompted. (The `.aab` is for Play Store submission only.) |
+| **Android** | `…android.apk` | Open the APK on the device and allow "install unknown apps" when prompted. Without signing secrets the APK is debug-signed (sideload/testing only); with them the release also includes the Play-Store `.aab`. |
 | **macOS** | `…macos.zip` | Unzip, drag to Applications. Unsigned: first launch via right-click → *Open* (or `xattr -dr com.apple.quarantine` on the app). |
 | **iOS** | `…ios-unsigned.ipa` | Unsigned — sideload with a tool that re-signs under your Apple ID (AltStore, Sideloadly) or install via Xcode with your own provisioning. |
 
 To cut a release: bump `version:` in `pubspec.yaml`, merge, then push a tag —
 `git tag v1.0.1 && git push origin v1.0.1`. The workflow builds all five
 platforms and publishes the release with these install notes attached.
+Linux binaries are built on Ubuntu 22.04 (glibc 2.35 baseline). For
+store-signed Android artifacts, add repo secrets `ANDROID_KEYSTORE_BASE64`
+(base64 of your `.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+and `ANDROID_KEY_PASSWORD` — the workflow then signs the APK properly and
+also attaches the Play-Store `.aab`.
 
 ## Getting started
 
