@@ -11,6 +11,14 @@ import '../models/print_profile.dart';
 
 /// Parses `<u>…</u>` inline HTML into a `u` element so the PDF renderer can
 /// underline it (package:markdown otherwise leaves the raw tags as text).
+/// The inter-block gap emitted after a flowed legal body block. A dedicated
+/// type so [MarkdownPdfBuilder.build] can recognise and trim orphaned gaps
+/// (document end / directly before a page break) without mistaking a user's
+/// own spacer for one.
+class _FlowGap extends pw.SizedBox {
+  _FlowGap(double gap) : super(height: gap);
+}
+
 class _UnderlineSyntax extends md.InlineSyntax {
   _UnderlineSyntax() : super(r'<u>([\s\S]*?)</u>');
 
@@ -108,7 +116,19 @@ class MarkdownPdfBuilder {
       inlineSyntaxes: [_UnderlineSyntax()],
     );
     final nodes = document.parseLines(const LineSplitter().convert(markdown));
-    return nodes.expand(_emit).toList();
+    final out = nodes.expand(_emit).toList();
+    // A flowed block's gap is pure *inter*-block spacing. At the document end
+    // or directly before a forced page break it serves no purpose — and when
+    // the preceding text exactly fills the page, MultiPage would move the
+    // orphaned gap to a fresh page (a trailing blank page with only
+    // header/footer). Trim those.
+    for (var i = out.length - 1; i >= 0; i--) {
+      if (out[i] is _FlowGap &&
+          (i == out.length - 1 || out[i + 1] is pw.NewPage)) {
+        out.removeAt(i);
+      }
+    }
+    return out;
   }
 
   /// Emit the widgets for one block-level node. Raw-HTML blocks are scanned
@@ -122,12 +142,22 @@ class MarkdownPdfBuilder {
   Iterable<pw.Widget> _emit(md.Node node) sync* {
     final raw = _rawHtmlText(node);
     if (raw != null && _findPageBreak(raw) != null) {
+      // A prose fragment sharing this block with the break directive flows
+      // like any legal body paragraph (a long certificate section straight
+      // after a break must still split across pages); div fragments render
+      // atomically as usual.
+      Iterable<pw.Widget> segment(String seg) sync* {
+        if (profile.legalMode && !_divOpen.hasMatch(seg)) {
+          yield* _flowParagraph([md.Text(seg)]);
+        } else {
+          yield _divBlock(seg) ?? _paragraph([md.Text(seg)]);
+        }
+      }
+
       var rest = raw;
       for (var m = _findPageBreak(rest); m != null; m = _findPageBreak(rest)) {
         final before = rest.substring(0, m.start).trim();
-        if (before.isNotEmpty) {
-          yield _divBlock(before) ?? _paragraph([md.Text(before)]);
-        }
+        if (before.isNotEmpty) yield* segment(before);
         // The element may be visible in its own right (a signature line that
         // also carries the directive): render it on the side of the break its
         // directive names, so `…-before` breaks first and then draws it.
@@ -140,13 +170,105 @@ class MarkdownPdfBuilder {
         rest = rest.substring(m.end);
       }
       final tail = rest.trim();
-      if (tail.isNotEmpty) {
-        yield _divBlock(tail) ?? _paragraph([md.Text(tail)]);
-      }
+      if (tail.isNotEmpty) yield* segment(tail);
       return;
+    }
+    if (profile.legalMode) {
+      final flowed = _legalFlow(node);
+      if (flowed != null) {
+        yield* flowed;
+        return;
+      }
     }
     final w = _block(node);
     if (w != null) yield w;
+  }
+
+  /// Legal-mode page flow. A court filing must fill each page top to bottom,
+  /// so body paragraphs and list items are emitted as **page-spanning** text
+  /// (`TextOverflow.span`) with the inter-block gap as a sibling SizedBox —
+  /// a bottom-padding wrapper would waste the gap's height at every page
+  /// split. Returns null for anything that must stay atomic (headings,
+  /// captions/signature `<div>`s, quotes, images, tables, code), which then
+  /// takes the unchanged [_block] path; non-legal documents never come here.
+  Iterable<pw.Widget>? _legalFlow(md.Node node) {
+    if (node is md.Text) {
+      // Raw-HTML blocks (caption rows, signature lines) stay atomic.
+      if (_divOpen.hasMatch(node.text)) return null;
+      return _flowParagraph([node]);
+    }
+    if (node is! md.Element) return null;
+    if (node.tag == 'p') {
+      final pc = node.children ?? const <md.Node>[];
+      if (pc.any((c) => c is md.Element && c.tag == 'img')) return null;
+      if (pc.isNotEmpty &&
+          pc.every((c) => c is md.Text) &&
+          _divOpen.hasMatch(node.textContent)) {
+        return null;
+      }
+      return _flowParagraph(pc);
+    }
+    if (node.tag == 'ul' || node.tag == 'ol') return _flowList(node);
+    return null;
+  }
+
+  Iterable<pw.Widget> _flowParagraph(List<md.Node> children) sync* {
+    yield _bodyRich(children, indentFirstLine: true, span: true);
+    yield _FlowGap(_blockGap);
+  }
+
+  /// One top-level widget per list item so each can flow across pages. Plain
+  /// items render as spanning paragraphs with the marker inline; items with a
+  /// nested list or a checkbox keep the atomic marker-column layout (emitted
+  /// as their own top-level widget, so the rest of the list still flows).
+  Iterable<pw.Widget> _flowList(md.Element el) sync* {
+    final ordered = el.tag == 'ol';
+    var index = ordered ? (int.tryParse(el.attributes['start'] ?? '') ?? 1) : 1;
+    for (final child in el.children ?? const <md.Node>[]) {
+      if (child is! md.Element || child.tag != 'li') continue;
+      final flowed = _flowListItem(child, ordered, index);
+      if (flowed != null) {
+        yield flowed;
+        yield _FlowGap(_blockGap);
+      } else {
+        // Atomic fallback carries its own bottom gap.
+        yield _listItem(child, ordered, index, 0);
+      }
+      index++;
+    }
+  }
+
+  /// A list item as a page-spanning paragraph with its marker inline
+  /// ("1.  Comes now…"), or null when the item needs the atomic layout
+  /// (nested list or checkbox — a Row cannot span pages).
+  pw.Widget? _flowListItem(md.Element li, bool ordered, int index) {
+    final inlineNodes = <md.Node>[];
+    for (final c in li.children ?? const <md.Node>[]) {
+      if (c is md.Element &&
+          (c.tag == 'ul' || c.tag == 'ol' || c.tag == 'input')) {
+        return null;
+      }
+      if (c is md.Element && c.tag == 'p') {
+        inlineNodes.addAll(c.children ?? const []);
+      } else {
+        inlineNodes.add(c);
+      }
+    }
+    final marker = ordered ? '$index.' : '•';
+    final spans = <pw.InlineSpan>[
+      if (_firstLineIndentPt > 0)
+        pw.WidgetSpan(child: pw.SizedBox(width: _firstLineIndentPt)),
+      pw.TextSpan(text: '$marker  ', style: _textStyle()),
+      ..._inline(inlineNodes),
+    ];
+    final rich = pw.RichText(
+      textAlign: profile.justifyBody ? pw.TextAlign.justify : pw.TextAlign.left,
+      overflow: pw.TextOverflow.span,
+      text: pw.TextSpan(children: spans),
+    );
+    return profile.justifyBody
+        ? pw.SizedBox(width: double.infinity, child: rich)
+        : rich;
   }
 
   /// The raw text of a block package:markdown left as HTML — a text node, or
@@ -936,7 +1058,15 @@ class MarkdownPdfBuilder {
   /// first-line indent. Justification only fills to the longest natural line
   /// unless the paragraph is stretched to the full content width, so a justified
   /// paragraph is wrapped in a full-width box.
-  pw.Widget _bodyRich(List<md.Node> nodes, {bool indentFirstLine = false}) {
+  ///
+  /// With [span], the text is allowed to split across page boundaries
+  /// (`TextOverflow.span`): MultiPage can then break the paragraph at a line
+  /// and continue it on the next page, because the Padding/SizedBox wrappers
+  /// delegate spanning to the RichText. Only set this for widgets that land
+  /// directly in the MultiPage build list — inside a bounded, non-spanning
+  /// context a span-overflow text would silently truncate instead.
+  pw.Widget _bodyRich(List<md.Node> nodes,
+      {bool indentFirstLine = false, bool span = false}) {
     final spans = <pw.InlineSpan>[];
     if (indentFirstLine && _firstLineIndentPt > 0) {
       // A zero-height spacer on the first line; it advances the pen like a word,
@@ -951,10 +1081,15 @@ class MarkdownPdfBuilder {
       spans.add(pw.WidgetSpan(child: pw.SizedBox(width: _firstLineIndentPt)));
     }
     spans.addAll(_inline(nodes));
-    final rich = pw.RichText(
-      textAlign: profile.justifyBody ? pw.TextAlign.justify : pw.TextAlign.left,
-      text: pw.TextSpan(children: spans),
-    );
+    final align =
+        profile.justifyBody ? pw.TextAlign.justify : pw.TextAlign.left;
+    final text = pw.TextSpan(children: spans);
+    // Passing overflow explicitly (even null) changes the theme fallback, so
+    // the non-spanning branch constructs the RichText exactly as before.
+    final rich = span
+        ? pw.RichText(
+            textAlign: align, overflow: pw.TextOverflow.span, text: text)
+        : pw.RichText(textAlign: align, text: text);
     return profile.justifyBody
         ? pw.SizedBox(width: double.infinity, child: rich)
         : rich;
