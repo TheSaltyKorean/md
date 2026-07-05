@@ -542,6 +542,102 @@ void main() {
     expect(await doc.save(), isNotEmpty);
   });
 
+  test('legalMode paragraphs carry the full spaced block gap', () async {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final ws = builder.build('First paragraph of the motion.\n\n'
+        'Second paragraph of the motion.\n\n'
+        '- first ground\n- second ground');
+    // Uniform rhythm: bottom gap == in-paragraph leading, so the
+    // baseline-to-baseline distance across a paragraph break equals the
+    // double-spaced line height (2.5 + 11 × (multiple − 1) = 13.5 at 2.0).
+    final expected = 2.5 + 11.0 * (court.lineSpacingMultiple - 1.0);
+    final bottoms = _walk(ws)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom)
+        .toList();
+    expect(bottoms.where((b) => b == expected).length, greaterThanOrEqualTo(4),
+        reason: 'paragraphs and list items share the spaced gap');
+    expect(bottoms.contains(8.0), isFalse,
+        reason: 'no legal block keeps the single-spaced 8pt gap');
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+  });
+
+  test('Non-legal paragraphs keep the historical 8pt gap (regression)', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build('First paragraph.\n\nSecond paragraph.');
+    final bottoms = _walk(ws)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom);
+    expect(bottoms.where((b) => b == 8.0).length, 2);
+  });
+
+  test('Page-break divs and hrs emit a top-level pw.NewPage', () async {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+
+    final ws = builder.build('Body of the motion.\n\n'
+        '<div style="page-break-before:always"></div>\n\n'
+        '#### <u>CERTIFICATE OF SERVICE</u>\n\nI hereby certify…');
+    expect(ws.whereType<pw.NewPage>().length, 1,
+        reason: 'a bare page-break div becomes a NewPage');
+    // The break contributes no visible content of its own.
+    final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+    expect(await doc.save(), isNotEmpty);
+
+    // <hr> with the directive, and the CSS-3 fragmentation spelling.
+    expect(
+        builder
+            .build('A\n\n<hr style="page-break-after:always">\n\nB')
+            .whereType<pw.NewPage>()
+            .length,
+        1);
+    expect(
+        builder
+            .build('A\n\n<div style="break-before:page"></div>\n\nB')
+            .whereType<pw.NewPage>()
+            .length,
+        1);
+
+    // A plain thematic break (---) still renders a divider, not a page break.
+    expect(builder.build('A\n\n---\n\nB').whereType<pw.NewPage>(), isEmpty);
+    // A bare div without the directive is unchanged too.
+    expect(
+        builder
+            .build('<div style="height:12px"></div>')
+            .whereType<pw.NewPage>(),
+        isEmpty);
+  });
+
+  test('A literal <br> in a heading renders as a line break, not text', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws = builder.build(
+        '# IN THE CIRCUIT COURT OF BENTON COUNTY, ARKANSAS<br>DOMESTIC RELATIONS DIVISION');
+
+    String literal(pw.InlineSpan s) {
+      final sb = StringBuffer();
+      void walk(pw.InlineSpan x) {
+        if (x is pw.TextSpan) {
+          if (x.text != null) sb.write(x.text);
+          for (final c in x.children ?? const <pw.InlineSpan>[]) {
+            walk(c);
+          }
+        }
+      }
+
+      walk(s);
+      return sb.toString();
+    }
+
+    final headingText =
+        _walk(ws).whereType<pw.RichText>().map((r) => literal(r.text)).join();
+    expect(headingText.contains('<br'), isFalse);
+    expect(headingText.contains('\n'), isTrue);
+  });
+
   test('Visiting Edit mode without editing preserves the exact source', () {
     // Regression: AppFlowy's Markdown round-trip drops blank lines and rewrites
     // markers, so a no-op Edit → back visit used to reformat untouched text.
