@@ -1,0 +1,175 @@
+name: Release
+
+# Pushing a tag like v1.0.0 builds installable binaries for every platform
+# and publishes them as a GitHub Release. Android/iOS build on GitHub's
+# runners exactly like CI; iOS ships unsigned (no Apple Developer signing in
+# CI) and is included for sideloaders — see the install notes attached to
+# each release.
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  FLUTTER_VERSION: "3.41.9"
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Android (APK + AAB)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - run: flutter build appbundle --release
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk \
+            "dist/markdown-studio-${GITHUB_REF_NAME}-android.apk"
+          cp build/app/outputs/bundle/release/app-release.aab \
+            "dist/markdown-studio-${GITHUB_REF_NAME}-android.aab"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: dist/
+
+  build-linux:
+    name: Linux (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev clang cmake pkg-config liblzma-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          tar -C build/linux/x64/release/bundle -czf \
+            "dist/markdown-studio-${GITHUB_REF_NAME}-linux-x64.tar.gz" .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: dist/
+
+  build-windows:
+    name: Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Stage artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* `
+            -DestinationPath "dist/markdown-studio-$env:GITHUB_REF_NAME-windows-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: dist/
+
+  build-apple:
+    name: macOS + iOS (unsigned)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: flutter build ios --release --no-codesign
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          # macOS: zip the .app bundle (ditto preserves bundle metadata).
+          APP="$(ls -d build/macos/Build/Products/Release/*.app | head -1)"
+          ditto -c -k --keepParent "$APP" \
+            "dist/markdown-studio-${GITHUB_REF_NAME}-macos.zip"
+          # iOS: package the unsigned Runner.app as an .ipa-style zip for
+          # sideloading tools (AltStore/Sideloadly re-sign it on install).
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry "dist/markdown-studio-${GITHUB_REF_NAME}-ios-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-apple
+          path: dist/
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-android, build-linux, build-windows, build-apple]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Create release with install notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md << 'EOF'
+          ## Install
+
+          **Windows** — download `…windows-x64.zip`, extract anywhere (e.g.
+          `C:\Apps\MarkdownStudio`), and run `markdown_studio.exe`. Keep the
+          `data/` folder next to the exe. SmartScreen may warn on first run
+          (unsigned build): *More info → Run anyway*.
+
+          **Linux** — download `…linux-x64.tar.gz`, then:
+          ```
+          mkdir -p ~/.local/opt/markdown-studio
+          tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio
+          ~/.local/opt/markdown-studio/markdown_studio
+          ```
+          Requires GTK 3 (preinstalled on most desktops; otherwise
+          `sudo apt install libgtk-3-0`).
+
+          **Android** — download the `.apk` on the device and open it (allow
+          "install unknown apps" for your browser/file manager when prompted).
+          The `.aab` is for Play Store submission, not direct install.
+
+          **macOS** — download `…macos.zip`, unzip, drag the app to
+          Applications. The build is unsigned: on first launch right-click →
+          *Open*, or clear quarantine with
+          `xattr -dr com.apple.quarantine "/Applications/markdown_studio.app"`.
+
+          **iOS** — `…ios-unsigned.ipa` is **unsigned** (no App Store yet):
+          install it with a sideloading tool that re-signs with your Apple ID
+          (AltStore, Sideloadly) or via Xcode with your own provisioning.
+          EOF
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Markdown Studio $GITHUB_REF_NAME" \
+            --notes-file notes.md
