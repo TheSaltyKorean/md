@@ -1038,6 +1038,16 @@ void main() {
     final ws = builder.build('before\n\n![tall](tall.png)\n\nafter');
     // Without the cap the 3000px image exceeds a page and MultiPage throws.
     expect(await _renderA4(ws), isNotEmpty);
+
+    // The cap must never UPSCALE: capped images render with scaleDown so a
+    // small inline image keeps its intrinsic size instead of filling the
+    // bounded box.
+    bool usesScaleDown(pw.Widget w) =>
+        w is pw.Padding &&
+        w.child is pw.ConstrainedBox &&
+        ((w.child as pw.ConstrainedBox).child as pw.Image).fit ==
+            pw.BoxFit.scaleDown;
+    expect(_walk(ws).any(usesScaleDown), isTrue);
   });
 
   test('legalMode keeps one gap for blockquotes and nested lists', () {

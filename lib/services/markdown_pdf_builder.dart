@@ -1355,7 +1355,13 @@ class MarkdownPdfBuilder {
             ? p.join(baseDir!, src)
             : src;
         final bytes = File(resolved).readAsBytesSync();
-        final image = pw.Image(pw.MemoryImage(bytes), fit: pw.BoxFit.contain);
+        // Inside the bounded box `contain` would UPSCALE a small image to
+        // fill the page constraints; `scaleDown` keeps intrinsic size and
+        // only shrinks oversized images.
+        final image = pw.Image(pw.MemoryImage(bytes),
+            fit: maxImageHeight == null
+                ? pw.BoxFit.contain
+                : pw.BoxFit.scaleDown);
         return pw.Padding(
           padding: const pw.EdgeInsets.symmetric(vertical: 6),
           // Cap the height so a tall image scales down to one page rather
