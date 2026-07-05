@@ -11,6 +11,14 @@ import '../models/print_profile.dart';
 
 /// Parses `<u>…</u>` inline HTML into a `u` element so the PDF renderer can
 /// underline it (package:markdown otherwise leaves the raw tags as text).
+/// The inter-block gap emitted after a flowed legal body block. A dedicated
+/// type so [MarkdownPdfBuilder.build] can recognise and trim orphaned gaps
+/// (document end / directly before a page break) without mistaking a user's
+/// own spacer for one.
+class _FlowGap extends pw.SizedBox {
+  _FlowGap(double gap) : super(height: gap);
+}
+
 class _UnderlineSyntax extends md.InlineSyntax {
   _UnderlineSyntax() : super(r'<u>([\s\S]*?)</u>');
 
@@ -108,7 +116,19 @@ class MarkdownPdfBuilder {
       inlineSyntaxes: [_UnderlineSyntax()],
     );
     final nodes = document.parseLines(const LineSplitter().convert(markdown));
-    return nodes.expand(_emit).toList();
+    final out = nodes.expand(_emit).toList();
+    // A flowed block's gap is pure *inter*-block spacing. At the document end
+    // or directly before a forced page break it serves no purpose — and when
+    // the preceding text exactly fills the page, MultiPage would move the
+    // orphaned gap to a fresh page (a trailing blank page with only
+    // header/footer). Trim those.
+    for (var i = out.length - 1; i >= 0; i--) {
+      if (out[i] is _FlowGap &&
+          (i == out.length - 1 || out[i + 1] is pw.NewPage)) {
+        out.removeAt(i);
+      }
+    }
+    return out;
   }
 
   /// Emit the widgets for one block-level node. Raw-HTML blocks are scanned
@@ -122,12 +142,22 @@ class MarkdownPdfBuilder {
   Iterable<pw.Widget> _emit(md.Node node) sync* {
     final raw = _rawHtmlText(node);
     if (raw != null && _findPageBreak(raw) != null) {
+      // A prose fragment sharing this block with the break directive flows
+      // like any legal body paragraph (a long certificate section straight
+      // after a break must still split across pages); div fragments render
+      // atomically as usual.
+      Iterable<pw.Widget> segment(String seg) sync* {
+        if (profile.legalMode && !_divOpen.hasMatch(seg)) {
+          yield* _flowParagraph([md.Text(seg)]);
+        } else {
+          yield _divBlock(seg) ?? _paragraph([md.Text(seg)]);
+        }
+      }
+
       var rest = raw;
       for (var m = _findPageBreak(rest); m != null; m = _findPageBreak(rest)) {
         final before = rest.substring(0, m.start).trim();
-        if (before.isNotEmpty) {
-          yield _divBlock(before) ?? _paragraph([md.Text(before)]);
-        }
+        if (before.isNotEmpty) yield* segment(before);
         // The element may be visible in its own right (a signature line that
         // also carries the directive): render it on the side of the break its
         // directive names, so `…-before` breaks first and then draws it.
@@ -140,9 +170,7 @@ class MarkdownPdfBuilder {
         rest = rest.substring(m.end);
       }
       final tail = rest.trim();
-      if (tail.isNotEmpty) {
-        yield _divBlock(tail) ?? _paragraph([md.Text(tail)]);
-      }
+      if (tail.isNotEmpty) yield* segment(tail);
       return;
     }
     if (profile.legalMode) {
@@ -186,7 +214,7 @@ class MarkdownPdfBuilder {
 
   Iterable<pw.Widget> _flowParagraph(List<md.Node> children) sync* {
     yield _bodyRich(children, indentFirstLine: true, span: true);
-    yield pw.SizedBox(height: _blockGap);
+    yield _FlowGap(_blockGap);
   }
 
   /// One top-level widget per list item so each can flow across pages. Plain
@@ -201,7 +229,7 @@ class MarkdownPdfBuilder {
       final flowed = _flowListItem(child, ordered, index);
       if (flowed != null) {
         yield flowed;
-        yield pw.SizedBox(height: _blockGap);
+        yield _FlowGap(_blockGap);
       } else {
         // Atomic fallback carries its own bottom gap.
         yield _listItem(child, ordered, index, 0);

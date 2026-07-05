@@ -567,9 +567,12 @@ void main() {
   test('legalMode paragraphs carry the full spaced block gap', () async {
     final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    // (The trailing block's own gap is trimmed at the document end, so this
+    // doc ends with a closing paragraph to keep four inter-block gaps.)
     final ws = builder.build('First paragraph of the motion.\n\n'
         'Second paragraph of the motion.\n\n'
-        '- first ground\n- second ground');
+        '- first ground\n- second ground\n\n'
+        'Respectfully submitted.');
     // Uniform rhythm: the inter-block gap == in-paragraph leading, so the
     // baseline-to-baseline distance across a paragraph break equals the
     // double-spaced line height (2.5 + 12 × (multiple − 1) = 14.5 at 2.0,
@@ -690,6 +693,30 @@ void main() {
     final filled = await pageCount(
         builder.build('Intro.\n\n$chunk\n\n$chunk\n\n$chunk\n\n$chunk'));
     expect(filled, lessThanOrEqualTo(3));
+
+    // The final block's gap is trimmed: the document never ends in a bare
+    // spacer that could spill onto a blank trailing page.
+    bool bareGap(pw.Widget w) =>
+        w is pw.SizedBox && w.width == null && w.child == null;
+    expect(bareGap(builder.build('Only paragraph.').last), isFalse);
+
+    // A gap is also trimmed directly before a forced page break…
+    final broken =
+        builder.build('A\n\n<div style="page-break-before:always"></div>\n\nB');
+    final breakAt = broken.indexWhere((w) => w is pw.NewPage);
+    expect(breakAt, greaterThan(0));
+    expect(bareGap(broken[breakAt - 1]), isFalse);
+
+    // …and prose sharing a raw block with the break directive still flows
+    // (it must be able to split across pages like any legal paragraph).
+    final sharedBlock = builder
+        .build('<div style="page-break-before:always"></div>\n${sentence * 3}');
+    expect(sharedBlock.whereType<pw.NewPage>().length, 1);
+    expect(
+        _walk(sharedBlock)
+            .whereType<pw.RichText>()
+            .any((r) => r.overflow == pw.TextOverflow.span),
+        isTrue);
   });
 
   test('Captions, signature divs and headings stay atomic in legal mode', () {
@@ -854,8 +881,9 @@ void main() {
 
     // Nested list: the item with children keeps the atomic layout (parent row
     // + child item carry one padding gap each); the plain 'next' item flows
-    // and carries its gap as a sibling SizedBox.
-    final list = builder.build('- parent\n  - child\n- next');
+    // and carries its gap as a sibling SizedBox. (A trailing paragraph keeps
+    // that gap from being trimmed as the document tail.)
+    final list = builder.build('- parent\n  - child\n- next\n\ntail');
     final bottoms = _walk(list)
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom)
