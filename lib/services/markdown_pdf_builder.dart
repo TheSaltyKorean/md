@@ -86,11 +86,18 @@ class MarkdownPdfBuilder {
   /// baseline-to-baseline distance across a paragraph break equals the spaced
   /// line height. Within a paragraph that distance is line-height +
   /// [_leadingFor]; across a break it is line-height + bottom padding — so the
-  /// padding must equal the leading itself (≈13.5pt for 11pt double-spaced;
+  /// padding must equal the leading itself (≈14.5pt for 12pt double-spaced;
   /// using the full `size × multiple` here would double-count the line box and
   /// open a visibly larger gap at every break). Non-legal documents keep the
   /// historical fixed 8pt so existing output is unchanged.
-  double get _blockGap => profile.legalMode ? _leadingFor(11.0) : 8.0;
+  double get _blockGap => profile.legalMode ? _leadingFor(_bodySize) : 8.0;
+
+  /// Body text size in points. Court pleadings are set uniformly at **12pt**,
+  /// so legal mode raises the body from the app's historical 11pt — and
+  /// everything that must match the body (list markers, fill-in blank
+  /// baselines, the block-gap rhythm) derives from this so the whole filing
+  /// stays one size. Non-legal documents keep 11pt unchanged.
+  double get _bodySize => profile.legalMode ? 12.0 : 11.0;
 
   List<pw.Widget> build(String markdown) {
     final document = md.Document(
@@ -337,7 +344,11 @@ class MarkdownPdfBuilder {
       );
     }
 
-    final size = _lengthPt(style['font-size']) ?? 10;
+    // A div with no explicit font-size matches the body in legal mode, so
+    // captions, court headers and signature blocks print at the pleading's
+    // 12pt; the historical 10pt default is kept for non-legal documents.
+    final size =
+        _lengthPt(style['font-size']) ?? (profile.legalMode ? _bodySize : 10);
     final color = _cssColor(style['color']) ?? _text;
     final align = _textAlign(style['text-align']);
     final textWidget = pw.Text(
@@ -1079,7 +1090,7 @@ class MarkdownPdfBuilder {
             marker,
             style: pw.TextStyle(
               font: checkbox != null ? fonts.mono : fonts.base,
-              fontSize: 11,
+              fontSize: _bodySize,
               color: _text,
             ),
           ),
@@ -1607,7 +1618,7 @@ class MarkdownPdfBuilder {
             108.0; // missing / min-width:0 / unresolved non-zero % → default
       }
       final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
-      final lineSize = size ?? 11.0;
+      final lineSize = size ?? _bodySize;
       // A zero-baseline WidgetSpan sits on the text baseline, so the container's
       // bottom border renders as an underline blank at the baseline.
       return pw.WidgetSpan(
@@ -1689,9 +1700,9 @@ class MarkdownPdfBuilder {
 
     return pw.TextStyle(
       font: font,
-      fontSize: size ?? 11,
+      fontSize: size ?? _bodySize,
       color: color ?? _text,
-      lineSpacing: _leadingFor(size ?? 11),
+      lineSpacing: _leadingFor(size ?? _bodySize),
       decoration:
           decorations.isEmpty ? null : pw.TextDecoration.combine(decorations),
     );

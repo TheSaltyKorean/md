@@ -572,8 +572,9 @@ void main() {
         '- first ground\n- second ground');
     // Uniform rhythm: bottom gap == in-paragraph leading, so the
     // baseline-to-baseline distance across a paragraph break equals the
-    // double-spaced line height (2.5 + 11 × (multiple − 1) = 13.5 at 2.0).
-    final expected = 2.5 + 11.0 * (court.lineSpacingMultiple - 1.0);
+    // double-spaced line height (2.5 + 12 × (multiple − 1) = 14.5 at 2.0,
+    // derived from the 12pt legal body).
+    final expected = 2.5 + 12.0 * (court.lineSpacingMultiple - 1.0);
     final bottoms = _walk(ws)
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom)
@@ -594,6 +595,53 @@ void main() {
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom);
     expect(bottoms.where((b) => b == 8.0).length, 2);
+  });
+
+  test('legalMode body text and plain <div>s render at 12pt', () {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final legal = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final plain = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+
+    // Every text-span font size reachable from the built widgets.
+    Iterable<double> spanSizes(List<pw.Widget> ws) sync* {
+      Iterable<double> walk(pw.InlineSpan s) sync* {
+        if (s is pw.TextSpan) {
+          final size = s.style?.fontSize;
+          if (size != null) yield size;
+          for (final c in s.children ?? const <pw.InlineSpan>[]) {
+            yield* walk(c);
+          }
+        }
+      }
+
+      for (final r in _walk(ws).whereType<pw.RichText>()) {
+        yield* walk(r.text);
+      }
+    }
+
+    // Body paragraphs: 12pt in legal mode, historical 11pt otherwise.
+    final legalBody =
+        spanSizes(legal.build('Comes now the Defendant.')).toList();
+    expect(legalBody, isNotEmpty);
+    expect(legalBody.every((s) => s == 12.0), isTrue);
+    final plainBody = spanSizes(plain.build('A plain paragraph.')).toList();
+    expect(plainBody, isNotEmpty);
+    expect(plainBody.every((s) => s == 11.0), isTrue);
+
+    // A <div> with no font-size matches the body in legal mode (12pt), keeps
+    // the historical 10pt otherwise; an explicit font-size still wins.
+    final legalDiv = spanSizes(legal.build('<div>MEGHAN MAIN</div>')).toList();
+    expect(legalDiv, isNotEmpty);
+    expect(legalDiv.every((s) => s == 12.0), isTrue);
+    final plainDiv = spanSizes(plain.build('<div>MEGHAN MAIN</div>')).toList();
+    expect(plainDiv, isNotEmpty);
+    expect(plainDiv.every((s) => s == 10.0), isTrue);
+    final explicit =
+        spanSizes(legal.build('<div style="font-size:14pt">Exhibit A</div>'))
+            .toList();
+    expect(explicit, isNotEmpty);
+    expect(explicit.every((s) => s == 14.0), isTrue);
   });
 
   test('Page-break divs and hrs emit a top-level pw.NewPage', () async {
@@ -711,7 +759,7 @@ void main() {
   test('legalMode keeps one gap for blockquotes and nested lists', () {
     final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
-    final gap = 2.5 + 11.0 * (court.lineSpacingMultiple - 1.0);
+    final gap = 2.5 + 12.0 * (court.lineSpacingMultiple - 1.0);
 
     // The quote's container margin is the single gap to the next block; the
     // paragraph inside must not add a second one (a blank band in the box).
