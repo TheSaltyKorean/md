@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
-import 'package:flutter/widgets.dart' show Size, TextSelection;
+import 'package:flutter/material.dart'
+    show DropdownButtonFormField, MaterialApp, Scaffold;
+import 'package:flutter/widgets.dart' show Size, TextSelection, Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -12,6 +14,7 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
+import 'package:markdown_studio/widgets/print_preview_view.dart';
 import 'package:pdf/pdf.dart' show PdfColors;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
@@ -100,6 +103,79 @@ void main() {
     expect(find.byTooltip('Split'), findsOneWidget);
     expect(find.byTooltip('Raw'), findsOneWidget);
     expect(find.byTooltip('Preview'), findsOneWidget);
+  });
+
+  testWidgets('Selecting a profile in the preview is saved with the document',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    Future<void> pump(String? docPath) => tester.pumpWidget(MultiProvider(
+          providers: [
+            ChangeNotifierProvider<PrintProfileService>.value(value: service),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: PrintPreviewView(
+                  markdown: '# Hello', title: 'a', docPath: docPath),
+            ),
+          ),
+        ));
+
+    await pump('/tmp/a.md');
+    await tester.pump(const Duration(seconds: 1));
+
+    // Choosing a profile in the dropdown IS the association — no pin needed.
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.text('Work').last);
+    await tester.pump(const Duration(seconds: 1));
+    expect(service.assignedId('/tmp/a.md'), 'work');
+
+    // It survives a restart (fresh service over the same prefs).
+    await service.pendingWrites;
+    expect(PrintProfileService(prefs).forDocument('/tmp/a.md').id, 'work');
+
+    // The pin now clears the association.
+    await tester.tap(find
+        .byTooltip('Always using this profile for this file — tap to stop'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(service.assignedId('/tmp/a.md'), isNull);
+  });
+
+  testWidgets('A profile chosen for an unsaved doc sticks after Save As',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    Widget app(String? docPath) => MultiProvider(
+          providers: [
+            ChangeNotifierProvider<PrintProfileService>.value(value: service),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: PrintPreviewView(
+                  markdown: '# Hello', title: 'a', docPath: docPath),
+            ),
+          ),
+        );
+
+    // Unsaved: selection is session-local (nothing durable to key on).
+    await tester.pumpWidget(app(null));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.tap(find.text('Work').last);
+    await tester.pump(const Duration(seconds: 1));
+    expect(prefs.getString('doc_print_profile_map'), isNull);
+
+    // Save As + print again: same preview, now with a path — the chosen
+    // profile is remembered for the file.
+    await tester.pumpWidget(app('/tmp/b.md'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(service.assignedId('/tmp/b.md'), 'work');
   });
 
   test('Print profiles seed with built-ins', () async {
