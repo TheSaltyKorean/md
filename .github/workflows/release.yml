@@ -5,10 +5,15 @@ name: Release
 # runners exactly like CI; iOS ships unsigned (no Apple Developer signing in
 # CI) and is included for sideloaders — see the install notes attached to
 # each release.
+#
+# workflow_dispatch runs the same builds as a DRY RUN (artifacts only, no
+# release is published) so packaging changes can be verified on real
+# runners before tagging.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 env:
   FLUTTER_VERSION: "3.41.9"
@@ -35,6 +40,17 @@ jobs:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Compute tag and version
+        # On dispatch dry-runs GITHUB_REF_NAME is a branch (may contain '/',
+        # and is no semver): sanitize the artifact tag and use 0.0.0.
+        run: |
+          TAG="${GITHUB_REF_NAME//\//-}"
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER="0.0.0"
+          fi
+          { echo "TAG=$TAG"; echo "VER=$VER"; } >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -71,9 +87,9 @@ jobs:
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-android.apk"
+            "dist/markdown-studio-${TAG}-android.apk"
           cp build/app/outputs/bundle/release/app-release.aab \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-android.aab"
+            "dist/markdown-studio-${TAG}-android.aab"
       - name: Android skipped (no keystore)
         if: env.HAS_KEYSTORE != 'true'
         run: >
@@ -95,6 +111,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Compute tag and version
+        run: |
+          TAG="${GITHUB_REF_NAME//\//-}"
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER="0.0.0"
+          fi
+          { echo "TAG=$TAG"; echo "VER=$VER"; } >> "$GITHUB_ENV"
       - name: Install Linux build deps
         run: |
           sudo apt-get update
@@ -110,10 +135,9 @@ jobs:
         run: |
           mkdir -p dist
           tar -C build/linux/x64/release/bundle -czf \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-linux-x64.tar.gz" .
+            "dist/markdown-studio-${TAG}-linux-x64.tar.gz" .
       - name: Build .deb package
         run: |
-          VER="${GITHUB_REF_NAME#v}"
           PKG="pkg/markdown-studio_${VER}_amd64"
           mkdir -p "$PKG/DEBIAN" "$PKG/opt/markdown-studio" "$PKG/usr/bin" \
             "$PKG/usr/share/applications" \
@@ -133,8 +157,8 @@ jobs:
           Categories=Office;TextEditor;
           MimeType=text/markdown;
           EOF
-          # The heredoc above is indented by the step's YAML indent; strip it
-          # so the .desktop file is valid.
+          # The heredoc above carries the step's YAML indent; strip it so
+          # the .desktop file is valid.
           sed -i 's/^          //' "$PKG/usr/share/applications/markdown-studio.desktop"
           cat > "$PKG/DEBIAN/control" << EOF
           Package: markdown-studio
@@ -152,7 +176,7 @@ jobs:
           EOF
           sed -i 's/^          //' "$PKG/DEBIAN/control"
           dpkg-deb --build --root-owner-group "$PKG" \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-linux-amd64.deb"
+            "dist/markdown-studio-${TAG}-linux-amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
@@ -163,6 +187,15 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Compute tag and version
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME -replace '/','-'
+          $ver = if ($env:GITHUB_REF_NAME -match '^v\d') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else { '0.0.0' }
+          "TAG=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "VER=$ver" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -175,19 +208,38 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path build/windows/x64/runner/Release/* `
-            -DestinationPath "dist/markdown-studio-$env:GITHUB_REF_NAME-windows-x64.zip"
+            -DestinationPath "dist/markdown-studio-$env:TAG-windows-x64.zip"
       - name: Build installer (Inno Setup)
         shell: pwsh
         # Inno Setup 6 is preinstalled on windows-latest runners.
         run: |
-          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
-            /DAppVersion=$ver `
+            /DAppVersion=$env:VER `
             /DSourceDir="$PWD\build\windows\x64\runner\Release" `
             /DOutputDir="$PWD\dist" `
             tool\windows_installer.iss
           Rename-Item "dist\markdown-studio-setup.exe" `
-            "markdown-studio-$env:GITHUB_REF_NAME-windows-x64-setup.exe"
+            "markdown-studio-$env:TAG-windows-x64-setup.exe"
+      - name: Build MSI (WiX)
+        shell: pwsh
+        # WiX is pinned to 5.0.2: v6+ gates the toolset behind the OSMF EULA.
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          # Render the PolyForm license to the RTF the MSI dialog requires.
+          $text = Get-Content LICENSE.md -Raw
+          $esc = $text -replace '\\','\\' -replace '\{','\{' -replace '\}','\}'
+          $esc = $esc -replace "`r`n","`n" -replace "`n",'\par '
+          Set-Content -Path license.rtf -Encoding Ascii -Value `
+            "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\fs18 $esc}"
+          wix build tool/windows_installer.wxs `
+            -ext WixToolset.UI.wixext `
+            -arch x64 `
+            -d Version=$env:VER `
+            -d SourceDir="$PWD\build\windows\x64\runner\Release" `
+            -d LicenseRtf="$PWD\license.rtf" `
+            -d IconPath="$PWD\windows\runner\resources\app_icon.ico" `
+            -o "dist/markdown-studio-$env:TAG-windows-x64.msi"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -198,6 +250,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Compute tag and version
+        run: |
+          TAG="${GITHUB_REF_NAME//\//-}"
+          { echo "TAG=$TAG"; } >> "$GITHUB_ENV"
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -212,12 +268,12 @@ jobs:
           # macOS: zip the .app bundle (ditto preserves bundle metadata).
           APP="$(ls -d build/macos/Build/Products/Release/*.app | head -1)"
           ditto -c -k --keepParent "$APP" \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-macos.zip"
+            "dist/markdown-studio-${TAG}-macos.zip"
           # iOS: package the unsigned Runner.app as an .ipa-style zip for
           # sideloading tools (AltStore/Sideloadly re-sign it on install).
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry "dist/markdown-studio-${GITHUB_REF_NAME}-ios-unsigned.ipa" Payload
+          zip -qry "dist/markdown-studio-${TAG}-ios-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
           name: release-apple
@@ -225,6 +281,9 @@ jobs:
 
   publish:
     name: Publish GitHub Release
+    # Dry runs (workflow_dispatch) stop here: artifacts are built and
+    # uploaded for inspection, but no release is created.
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-android, build-linux, build-windows, build-apple]
     runs-on: ubuntu-latest
     permissions:
@@ -243,11 +302,14 @@ jobs:
           cat > notes.md << 'EOF'
           ## Install
 
-          **Windows** — easiest: run `…windows-x64-setup.exe` (installs to
-          Program Files with a Start-Menu entry and uninstaller). Portable
-          alternative: extract `…windows-x64.zip` anywhere and run
-          `markdown_studio.exe` (keep `data/` next to it). SmartScreen may
-          warn on the unsigned build: *More info → Run anyway*.
+          **Windows** — pick one:
+          `…windows-x64.msi` (standard Windows Installer: Program Files,
+          Start Menu, Add/Remove Programs, upgrades in place across
+          versions; silent-deployable with `msiexec /i … /qn`), or
+          `…windows-x64-setup.exe` (same result via Inno Setup, plus an
+          optional desktop icon), or the portable `…windows-x64.zip`
+          (extract and run `markdown_studio.exe`). SmartScreen may warn on
+          unsigned builds: *More info → Run anyway*.
 
           **Linux** — easiest (Debian/Ubuntu):
           `sudo apt install ./markdown-studio-*-linux-amd64.deb` — desktop

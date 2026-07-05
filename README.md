@@ -143,7 +143,8 @@ the tag-triggered `release.yml` workflow on GitHub's runners.
 
 | Platform | File | Install |
 | --- | --- | --- |
-| **Windows (installer)** | `…windows-x64-setup.exe` | Run it — installs to Program Files with a Start-Menu entry and uninstaller. SmartScreen may warn on the unsigned build: *More info → Run anyway*. |
+| **Windows (MSI)** | `…windows-x64.msi` | Standard Windows Installer package — double-click to install (Program Files, Start-Menu entry, Add/Remove Programs, in-place upgrades across versions); also GPO/Intune-deployable (`msiexec /i … /qn`). |
+| **Windows (setup.exe)** | `…windows-x64-setup.exe` | Inno Setup installer with the same result, plus an optional desktop icon. SmartScreen may warn on unsigned builds: *More info → Run anyway*. |
 | **Windows (portable)** | `…windows-x64.zip` | Extract anywhere (e.g. `C:\Apps\MarkdownStudio`) and run `markdown_studio.exe` (keep `data/` next to it). |
 | **Linux (deb)** | `…linux-amd64.deb` | `sudo apt install ./markdown-studio-*-linux-amd64.deb` — installs to `/opt/markdown-studio` with a desktop entry, `markdown-studio` on PATH, and `.md` file association. |
 | **Linux (portable)** | `…linux-x64.tar.gz` | `mkdir -p ~/.local/opt/markdown-studio && tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio`, then run `…/markdown_studio`. Needs GTK 3. |
