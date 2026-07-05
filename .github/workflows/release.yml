@@ -44,27 +44,25 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
           cache: true
-      - name: Set up release signing
+      - name: Decode release keystore
         if: env.HAS_KEYSTORE == 'true'
-        # Secrets pass through env and are written with printf, so shell
-        # metacharacters in generated passwords ($, backticks, \) are never
-        # expanded or executed while writing key.properties.
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
-          {
-            printf 'storeFile=upload-keystore.jks\n'
-            printf 'storePassword=%s\n' "$STORE_PASSWORD"
-            printf 'keyAlias=%s\n' "$KEY_ALIAS"
-            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
-          } > android/key.properties
+          printf '%s' "$KEYSTORE_B64" | base64 -d \
+            > "$RUNNER_TEMP/upload-keystore.jks"
       - run: flutter pub get
       - name: Build APK + Play-Store bundle
         if: env.HAS_KEYSTORE == 'true'
+        # Signing values reach Gradle as environment variables (read by
+        # android/app/build.gradle.kts), never via a key.properties file —
+        # Java's Properties.load would reinterpret backslashes / leading
+        # whitespace in generated passwords, silently corrupting them.
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           flutter build apk --release
           flutter build appbundle --release

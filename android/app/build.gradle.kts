@@ -8,15 +8,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Release signing is supplied via android/key.properties (never committed):
-//   storeFile=…  storePassword=…  keyAlias=…  keyPassword=…
-// When absent (local dev, CI without keystore secrets) the release build
-// falls back to debug signing so `flutter run --release` still works —
-// but such artifacts are for testing only, not store upload.
+// Release signing comes from either source (never committed):
+//  - CI: ANDROID_KEYSTORE_PATH / ANDROID_KEYSTORE_PASSWORD /
+//    ANDROID_KEY_ALIAS / ANDROID_KEY_PASSWORD environment variables —
+//    passed verbatim, so passwords need no .properties escaping;
+//  - local: android/key.properties (storeFile/storePassword/keyAlias/
+//    keyPassword), the standard Flutter pattern.
+// When neither is present the release build falls back to debug signing so
+// `flutter run --release` still works — such builds are never published.
+val envKeystorePath: String? = System.getenv("ANDROID_KEYSTORE_PATH")
 val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
-val hasReleaseKeystore = keystorePropertiesFile.exists()
-if (hasReleaseKeystore) {
+val hasReleaseKeystore = envKeystorePath != null || keystorePropertiesFile.exists()
+if (envKeystorePath == null && keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
@@ -48,10 +52,17 @@ android {
     signingConfigs {
         if (hasReleaseKeystore) {
             create("release") {
-                keyAlias = keystoreProperties["keyAlias"] as String
-                keyPassword = keystoreProperties["keyPassword"] as String
-                storeFile = file(keystoreProperties["storeFile"] as String)
-                storePassword = keystoreProperties["storePassword"] as String
+                if (envKeystorePath != null) {
+                    storeFile = file(envKeystorePath)
+                    storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                    keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                } else {
+                    storeFile = file(keystoreProperties["storeFile"] as String)
+                    storePassword = keystoreProperties["storePassword"] as String
+                    keyAlias = keystoreProperties["keyAlias"] as String
+                    keyPassword = keystoreProperties["keyPassword"] as String
+                }
             }
         }
     }
