@@ -34,6 +34,10 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
     yield* _allWidgets(w.child!);
   } else if (w is pw.SizedBox && w.child != null) {
     yield* _allWidgets(w.child!);
+  } else if (w is pw.Align && w.child != null) {
+    yield* _allWidgets(w.child!);
+  } else if (w is pw.Container && w.child != null) {
+    yield* _allWidgets(w.child!);
   } else if (w is pw.Column) {
     for (final c in w.children) {
       yield* _allWidgets(c);
@@ -43,6 +47,24 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
       yield* _allWidgets(c);
     }
   }
+}
+
+/// All literal text reachable from the given widgets' RichText spans.
+String _literalText(Iterable<pw.Widget> ws) {
+  final sb = StringBuffer();
+  void walkSpan(pw.InlineSpan s) {
+    if (s is pw.TextSpan) {
+      if (s.text != null) sb.write(s.text);
+      for (final c in s.children ?? const <pw.InlineSpan>[]) {
+        walkSpan(c);
+      }
+    }
+  }
+
+  for (final w in ws) {
+    if (w is pw.RichText) walkSpan(w.text);
+  }
+  return sb.toString();
 }
 
 Iterable<pw.Widget> _walk(List<pw.Widget> ws) => ws.expand(_allWidgets);
@@ -611,6 +633,34 @@ void main() {
             ((t.text as pw.TextSpan).text ?? '').contains('CERTIFICATE')),
         isTrue);
 
+    // A visible element carrying the directive breaks AND still renders: a
+    // signature line with page-break-before starts a page, then draws.
+    final withLine = builder.build('<div style="page-break-before:always; '
+        'border-bottom:1px solid; width:150px"></div>');
+    expect(withLine.whereType<pw.NewPage>().length, 1);
+    expect(_walk(withLine).whereType<pw.Container>().isNotEmpty, isTrue,
+        reason: 'the signature rule survives the break');
+    expect(withLine.first, isA<pw.NewPage>(),
+        reason: '…-before breaks before the element renders');
+
+    // A CSS priority suffix is accepted.
+    expect(
+        builder
+            .build('A\n\n<div style="page-break-before: always !important">'
+                '</div>\n\nB')
+            .whereType<pw.NewPage>()
+            .length,
+        1);
+
+    // A break div nested inside a wrapper is NOT split out of it: the wrapper
+    // renders intact (no leaked </div>), and no page break is emitted.
+    final nestedBreak = builder.build('<div style="text-align:center">'
+        '<div style="page-break-before:always"></div>CERTIFICATE</div>');
+    expect(nestedBreak.whereType<pw.NewPage>(), isEmpty);
+    final nestedText = _literalText(_walk(nestedBreak));
+    expect(nestedText.contains('</div'), isFalse);
+    expect(nestedText.contains('CERTIFICATE'), isTrue);
+
     // A plain thematic break (---) still renders a divider, not a page break.
     expect(builder.build('A\n\n---\n\nB').whereType<pw.NewPage>(), isEmpty);
     // A bare div without the directive is unchanged too.
@@ -682,6 +732,16 @@ void main() {
         .map((p) => (p.padding as pw.EdgeInsets).bottom)
         .where((b) => b == gap);
     expect(bottoms.length, 3);
+
+    // A quote that *ends in a list* sheds the last item's gap too (the trim
+    // descends through the list's zero-gap wrapper).
+    final listQuote = builder.build('> - cited point\n\nnext paragraph').first
+        as pw.Container;
+    final listQuoteBottoms = _allWidgets(listQuote.child!)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom);
+    expect(listQuoteBottoms.any((b) => b == gap), isFalse,
+        reason: 'no gap band inside a quote ending in a list');
   });
 
   test('Visiting Edit mode without editing preserves the exact source', () {

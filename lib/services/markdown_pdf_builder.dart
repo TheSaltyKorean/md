@@ -121,7 +121,15 @@ class MarkdownPdfBuilder {
         if (before.isNotEmpty) {
           yield _divBlock(before) ?? _paragraph([md.Text(before)]);
         }
-        yield pw.NewPage();
+        // The element may be visible in its own right (a signature line that
+        // also carries the directive): render it on the side of the break its
+        // directive names, so `…-before` breaks first and then draws it.
+        final style = _breakStyleOf(m);
+        final rendered = _divBlock(m.group(0)!);
+        final visible = rendered != null && rendered is! pw.SizedBox;
+        if (_breakValue(style, before: true)) yield pw.NewPage();
+        if (visible) yield rendered;
+        if (_breakValue(style, before: false)) yield pw.NewPage();
         rest = rest.substring(m.end);
       }
       final tail = rest.trim();
@@ -726,26 +734,57 @@ class MarkdownPdfBuilder {
     caseSensitive: false,
   );
 
-  /// The first standalone page-break directive in [raw] —
-  /// `page-break-before/after:always` or the CSS-3 fragmentation spelling
-  /// `break-before/after:page` on a bare div/hr — or null. Only bare elements
-  /// qualify; a content-carrying div never becomes a break.
+  /// Style declarations of a [_breakCandidate] match (whichever alternative
+  /// captured the attributes).
+  Map<String, String> _breakStyleOf(Match m) =>
+      _parseStyle(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
+
+  /// Whether [style] carries a page-break directive on the requested side:
+  /// `page-break-before/after: always` or the CSS-3 fragmentation spelling
+  /// `break-before/after: page`. A trailing `!important` (common in exported
+  /// HTML) is accepted.
+  bool _breakValue(Map<String, String> style, {required bool before}) {
+    final side = before ? 'before' : 'after';
+    for (final k in ['page-break-$side', 'break-$side']) {
+      final v = (style[k] ?? '')
+          .trim()
+          .toLowerCase()
+          .replaceAll(RegExp(r'\s*!important\s*$'), '');
+      if (v == 'always' || v == 'page') return true;
+    }
+    return false;
+  }
+
+  /// The first standalone page-break directive in [raw], or null. Only bare
+  /// elements qualify (a content-carrying div never becomes a break), and only
+  /// at div-nesting depth 0 — a break div *inside* a wrapper div must not be
+  /// split out of it (that would tear the wrapper's markup apart and lose its
+  /// styling); it is left to the div renderer, which draws nothing for it.
   Match? _findPageBreak(String raw) {
-    const keys = [
-      'page-break-before',
-      'page-break-after',
-      'break-before',
-      'break-after',
-    ];
     for (final m in _breakCandidate.allMatches(raw)) {
-      final style = _parseStyle(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
-      final breaks = keys.any((k) {
-        final v = (style[k] ?? '').trim().toLowerCase();
-        return v == 'always' || v == 'page';
-      });
-      if (breaks) return m;
+      if (_divDepthAt(raw, m.start) > 0) continue;
+      final style = _breakStyleOf(m);
+      if (_breakValue(style, before: true) ||
+          _breakValue(style, before: false)) {
+        return m;
+      }
     }
     return null;
+  }
+
+  /// The `<div>` nesting depth at [pos]: opens minus closes among the tags
+  /// before it (self-closing `<div …/>` doesn't nest).
+  int _divDepthAt(String raw, int pos) {
+    var depth = 0;
+    for (final m in _divTag.allMatches(raw)) {
+      if (m.start >= pos) break;
+      if (m.group(1) == '/') {
+        if (depth > 0) depth--;
+      } else if (!m.group(0)!.endsWith('/>')) {
+        depth++;
+      }
+    }
+    return depth;
   }
 
   pw.Widget? _block(md.Node node) {
@@ -913,21 +952,36 @@ class MarkdownPdfBuilder {
   /// In legal mode a quote's inner blocks each end in [_blockGap], but the
   /// quote container itself carries the gap to the next block — so the last
   /// inner block's gap would double up (a blank band inside the grey quote box
-  /// plus the margin after it). Strip the last child's bottom padding.
-  /// Non-legal children are returned untouched.
+  /// plus the margin after it). Strip the trailing bottom padding, descending
+  /// through zero-gap wrappers (a list wrapper is a 0-bottom Padding around a
+  /// Column whose last item holds the gap). Non-legal children are untouched.
   List<pw.Widget> _trimTrailingGap(List<pw.Widget> children) {
     if (!profile.legalMode || children.isEmpty) return children;
-    final last = children.last;
-    if (last is pw.Padding && last.child != null) {
-      final e = last.padding;
-      if (e is pw.EdgeInsets && e.bottom > 0) {
-        children[children.length - 1] = pw.Padding(
-          padding: pw.EdgeInsets.only(left: e.left, top: e.top, right: e.right),
-          child: last.child!,
-        );
+    children[children.length - 1] = _trimTail(children.last);
+    return children;
+  }
+
+  pw.Widget _trimTail(pw.Widget w) {
+    if (w is pw.Padding && w.child != null) {
+      final e = w.padding;
+      if (e is pw.EdgeInsets) {
+        if (e.bottom > 0) {
+          return pw.Padding(
+            padding:
+                pw.EdgeInsets.only(left: e.left, top: e.top, right: e.right),
+            child: w.child!,
+          );
+        }
+        return pw.Padding(padding: e, child: _trimTail(w.child!));
       }
     }
-    return children;
+    if (w is pw.Column && w.children.isNotEmpty) {
+      final kids = List.of(w.children);
+      kids[kids.length - 1] = _trimTail(kids.last);
+      return pw.Column(
+          crossAxisAlignment: w.crossAxisAlignment, children: kids);
+    }
+    return w;
   }
 
   pw.Widget _blockquote(md.Element el) {
