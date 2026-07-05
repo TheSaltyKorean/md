@@ -129,6 +129,29 @@ lib/
 > `flutter_markdown` in 2025. This project uses the maintained successor,
 > **`flutter_markdown_plus`**.
 
+## Download & install
+
+Prebuilt binaries for every release are on the
+[**Releases page**](https://github.com/TheSaltyKorean/md/releases) — built by
+the tag-triggered `release.yml` workflow on GitHub's runners.
+
+| Platform | File | Install |
+| --- | --- | --- |
+| **Windows** | `…windows-x64.zip` | Extract anywhere (e.g. `C:\Apps\MarkdownStudio`) and run `markdown_studio.exe` (keep `data/` next to it). SmartScreen may warn on the unsigned build: *More info → Run anyway*. |
+| **Linux** | `…linux-x64.tar.gz` | `mkdir -p ~/.local/opt/markdown-studio && tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio`, then run `…/markdown_studio`. Needs GTK 3 (`sudo apt install libgtk-3-0` if missing). |
+| **Android** | `…android.apk` | Open the APK on the device and allow "install unknown apps" when prompted. Present only on **signed** releases (see the keystore secrets below); the `.aab` alongside it is for Play Store upload. |
+| **macOS** | `…macos.zip` | Unzip, drag to Applications. Unsigned: first launch via right-click → *Open* (or `xattr -dr com.apple.quarantine` on the app). |
+| **iOS** | `…ios-unsigned.ipa` | Unsigned — sideload with a tool that re-signs under your Apple ID (AltStore, Sideloadly) or install via Xcode with your own provisioning. |
+
+To cut a release: bump `version:` in `pubspec.yaml`, merge, then push a tag —
+`git tag v1.0.1 && git push origin v1.0.1`. The workflow builds all five
+platforms and publishes the release with these install notes attached.
+Linux binaries are built on Ubuntu 22.04 (glibc 2.35 baseline). Android
+artifacts require repo secrets `ANDROID_KEYSTORE_BASE64` (base64 of your
+`.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and
+`ANDROID_KEY_PASSWORD`; without them the release simply omits Android
+(an unsigned per-build certificate would break in-place updates).
+
 ## Getting started
 
 ### 1. Install Flutter
