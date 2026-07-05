@@ -601,6 +601,16 @@ void main() {
             .length,
         1);
 
+    // Adjacent HTML blocks with no blank line: package:markdown keeps them in
+    // one text node — the break must still be found and the caption rendered.
+    final adjacent = builder.build('<div style="page-break-before:always">'
+        '</div>\n<div style="text-align:center">CERTIFICATE OF SERVICE</div>');
+    expect(adjacent.whereType<pw.NewPage>().length, 1);
+    expect(
+        _walk(adjacent).whereType<pw.Text>().any((t) =>
+            ((t.text as pw.TextSpan).text ?? '').contains('CERTIFICATE')),
+        isTrue);
+
     // A plain thematic break (---) still renders a divider, not a page break.
     expect(builder.build('A\n\n---\n\nB').whereType<pw.NewPage>(), isEmpty);
     // A bare div without the directive is unchanged too.
@@ -636,6 +646,42 @@ void main() {
         _walk(ws).whereType<pw.RichText>().map((r) => literal(r.text)).join();
     expect(headingText.contains('<br'), isFalse);
     expect(headingText.contains('\n'), isTrue);
+
+    // Inside a styled span the <br> survives as a line break too (it used to
+    // be flattened to a space).
+    final label = builder
+        .renderInlineText(
+            '<span style="font-weight:bold">Line 1<br>Line 2</span>')
+        .map(literal)
+        .join();
+    expect(label.contains('<br'), isFalse);
+    expect(label.contains('Line 1\nLine 2'), isTrue);
+  });
+
+  test('legalMode keeps one gap for blockquotes and nested lists', () {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final gap = 2.5 + 11.0 * (court.lineSpacingMultiple - 1.0);
+
+    // The quote's container margin is the single gap to the next block; the
+    // paragraph inside must not add a second one (a blank band in the box).
+    final quote = builder.build('> quoted authority\n\nnext paragraph').first
+        as pw.Container;
+    final innerBottoms = _allWidgets(quote.child!)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom);
+    expect(innerBottoms.any((b) => b == gap), isFalse,
+        reason: 'no double gap inside the quote');
+    expect((quote.margin as pw.EdgeInsets?)?.bottom, gap);
+
+    // Nested list: parent row + child item + next item each carry exactly one
+    // gap; the parent item adds none of its own around the nested list.
+    final list = builder.build('- parent\n  - child\n- next');
+    final bottoms = _walk(list)
+        .whereType<pw.Padding>()
+        .map((p) => (p.padding as pw.EdgeInsets).bottom)
+        .where((b) => b == gap);
+    expect(bottoms.length, 3);
   });
 
   test('Visiting Edit mode without editing preserves the exact source', () {

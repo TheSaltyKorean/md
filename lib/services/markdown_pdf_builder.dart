@@ -101,7 +101,51 @@ class MarkdownPdfBuilder {
       inlineSyntaxes: [_UnderlineSyntax()],
     );
     final nodes = document.parseLines(const LineSplitter().convert(markdown));
-    return nodes.map(_block).whereType<pw.Widget>().toList();
+    return nodes.expand(_emit).toList();
+  }
+
+  /// Emit the widgets for one block-level node. Raw-HTML blocks are scanned
+  /// for standalone page-break directives and split around them, so every
+  /// [pw.NewPage] lands at the top level of the returned list —
+  /// [pw.MultiPage] ignores a NewPage nested inside a column. The scan
+  /// matters because package:markdown keeps *adjacent* HTML lines in a single
+  /// text node, so a break div may share its block with other divs (e.g. a
+  /// break directly above a caption). Blocks without a directive take the
+  /// unchanged [_block] path.
+  Iterable<pw.Widget> _emit(md.Node node) sync* {
+    final raw = _rawHtmlText(node);
+    if (raw != null && _findPageBreak(raw) != null) {
+      var rest = raw;
+      for (var m = _findPageBreak(rest); m != null; m = _findPageBreak(rest)) {
+        final before = rest.substring(0, m.start).trim();
+        if (before.isNotEmpty) {
+          yield _divBlock(before) ?? _paragraph([md.Text(before)]);
+        }
+        yield pw.NewPage();
+        rest = rest.substring(m.end);
+      }
+      final tail = rest.trim();
+      if (tail.isNotEmpty) {
+        yield _divBlock(tail) ?? _paragraph([md.Text(tail)]);
+      }
+      return;
+    }
+    final w = _block(node);
+    if (w != null) yield w;
+  }
+
+  /// The raw text of a block package:markdown left as HTML — a text node, or
+  /// a paragraph whose children are pure text (the same guard [_block] uses so
+  /// inline-code samples are never treated as markup). Null otherwise.
+  String? _rawHtmlText(md.Node node) {
+    if (node is md.Text) return node.text;
+    if (node is md.Element && node.tag == 'p') {
+      final pc = node.children ?? const <md.Node>[];
+      if (pc.isNotEmpty && pc.every((c) => c is md.Text)) {
+        return node.textContent;
+      }
+    }
+    return null;
   }
 
   // --- Inline-styled <div> blocks (signature lines & labels) ------------------
@@ -675,42 +719,38 @@ class MarkdownPdfBuilder {
 
   // --- Block-level rendering --------------------------------------------------
 
-  /// A bare block-level `<div …>[</div>]` or `<hr …>` element — the only
-  /// shapes that can carry a page-break directive with no visible content.
-  static final _bareBreakEl = RegExp(
-    r'^\s*<(?:div|hr)\b([^>]*?)/?>\s*(?:</div\s*>)?\s*$',
+  /// Bare elements able to carry a page-break directive with no visible
+  /// content: an empty `<div …></div>`, a self-closed `<div …/>`, or `<hr …>`.
+  static final _breakCandidate = RegExp(
+    r'<div\b([^>]*?)>\s*</div\s*>|<div\b([^>]*?)/>|<hr\b([^>]*?)/?>',
     caseSensitive: false,
   );
 
-  /// If [raw] is a standalone page-break directive —
-  /// `<div style="page-break-before:always"></div>`, an `<hr>` carrying
-  /// `page-break-before/after:always`, or the CSS-3 fragmentation spelling
-  /// `break-before/after:page` — return a [pw.NewPage]. It must be emitted at
-  /// the top level of [build]'s widget list (a NewPage nested inside a column
-  /// is ignored by MultiPage), which is why this is checked before the div
-  /// renderer. The element itself contributes no visible content.
-  pw.Widget? _pageBreak(String raw) {
-    final m = _bareBreakEl.firstMatch(raw);
-    if (m == null) return null;
-    final style = _parseStyle(m.group(1) ?? '');
+  /// The first standalone page-break directive in [raw] —
+  /// `page-break-before/after:always` or the CSS-3 fragmentation spelling
+  /// `break-before/after:page` on a bare div/hr — or null. Only bare elements
+  /// qualify; a content-carrying div never becomes a break.
+  Match? _findPageBreak(String raw) {
     const keys = [
       'page-break-before',
       'page-break-after',
       'break-before',
       'break-after',
     ];
-    final breaks = keys.any((k) {
-      final v = (style[k] ?? '').trim().toLowerCase();
-      return v == 'always' || v == 'page';
-    });
-    return breaks ? pw.NewPage() : null;
+    for (final m in _breakCandidate.allMatches(raw)) {
+      final style = _parseStyle(m.group(1) ?? m.group(2) ?? m.group(3) ?? '');
+      final breaks = keys.any((k) {
+        final v = (style[k] ?? '').trim().toLowerCase();
+        return v == 'always' || v == 'page';
+      });
+      if (breaks) return m;
+    }
+    return null;
   }
 
   pw.Widget? _block(md.Node node) {
     if (node is md.Text) {
-      return _pageBreak(node.text) ??
-          _divBlock(node.text) ??
-          _paragraph([node]);
+      return _divBlock(node.text) ?? _paragraph([node]);
     }
     if (node is! md.Element) return null;
 
@@ -733,8 +773,6 @@ class MarkdownPdfBuilder {
         // (no inline children). Otherwise an inline-code example like
         // `<div></div>` would be flattened by textContent and mis-rendered.
         if (pc.isNotEmpty && pc.every((c) => c is md.Text)) {
-          final brk = _pageBreak(node.textContent);
-          if (brk != null) return brk;
           final div = _divBlock(node.textContent);
           if (div != null) return div;
         }
@@ -872,9 +910,29 @@ class MarkdownPdfBuilder {
         : rich;
   }
 
+  /// In legal mode a quote's inner blocks each end in [_blockGap], but the
+  /// quote container itself carries the gap to the next block — so the last
+  /// inner block's gap would double up (a blank band inside the grey quote box
+  /// plus the margin after it). Strip the last child's bottom padding.
+  /// Non-legal children are returned untouched.
+  List<pw.Widget> _trimTrailingGap(List<pw.Widget> children) {
+    if (!profile.legalMode || children.isEmpty) return children;
+    final last = children.last;
+    if (last is pw.Padding && last.child != null) {
+      final e = last.padding;
+      if (e is pw.EdgeInsets && e.bottom > 0) {
+        children[children.length - 1] = pw.Padding(
+          padding: pw.EdgeInsets.only(left: e.left, top: e.top, right: e.right),
+          child: last.child!,
+        );
+      }
+    }
+    return children;
+  }
+
   pw.Widget _blockquote(md.Element el) {
-    final children =
-        (el.children ?? []).map(_block).whereType<pw.Widget>().toList();
+    final children = _trimTrailingGap(
+        (el.children ?? []).map(_block).whereType<pw.Widget>().toList());
     return pw.Container(
       margin: pw.EdgeInsets.only(bottom: _blockGap),
       padding: const pw.EdgeInsets.fromLTRB(12, 4, 8, 4),
@@ -958,33 +1016,45 @@ class MarkdownPdfBuilder {
 
     final marker = checkbox ?? (ordered ? '$index.' : '•');
 
+    final row = pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.SizedBox(
+          width: 20,
+          child: pw.Text(
+            marker,
+            style: pw.TextStyle(
+              font: checkbox != null ? fonts.mono : fonts.base,
+              fontSize: 11,
+              color: _text,
+            ),
+          ),
+        ),
+        pw.Expanded(
+          child: pw.RichText(
+            text: pw.TextSpan(children: _inline(inlineNodes)),
+          ),
+        ),
+      ],
+    );
+
+    // Legal rhythm with a nested list: the item's own text line needs the
+    // spaced gap before its children, and the nested list's last item already
+    // ends in the gap — so the item adds none of its own (it would double up
+    // before the next sibling). Non-legal keeps the historical flat 3pt.
+    final legalNested = profile.legalMode && nested.isNotEmpty;
     return pw.Padding(
       padding: pw.EdgeInsets.only(
-          left: depth * 14.0, bottom: profile.legalMode ? _blockGap : 3),
+          left: depth * 14.0,
+          bottom: legalNested ? 0 : (profile.legalMode ? _blockGap : 3)),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.SizedBox(
-                width: 20,
-                child: pw.Text(
-                  marker,
-                  style: pw.TextStyle(
-                    font: checkbox != null ? fonts.mono : fonts.base,
-                    fontSize: 11,
-                    color: _text,
-                  ),
-                ),
-              ),
-              pw.Expanded(
-                child: pw.RichText(
-                  text: pw.TextSpan(children: _inline(inlineNodes)),
-                ),
-              ),
-            ],
-          ),
+          if (legalNested)
+            pw.Padding(
+                padding: pw.EdgeInsets.only(bottom: _blockGap), child: row)
+          else
+            row,
           ...nested,
         ],
       ),
@@ -1445,8 +1515,11 @@ class MarkdownPdfBuilder {
     // text colour.
     final spanColor = forceColor ?? _cssColor(style['color']) ?? color;
     final border = _resolveBorder(decls, currentColor: spanColor);
+    // A literal <br> inside a styled label is a line break (matching plain
+    // prose and headings); blank detection (_effectiveText) still treats it
+    // as whitespace so a fill-in blank containing one stays a blank.
     final inner = _decodeEntities(innerRaw
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
         .replaceAll(RegExp(r'<[^>]*>'), '')
         .replaceAll(
             RegExp(r'&nbsp;|&#160;|&#xA0;', caseSensitive: false), ' '));
