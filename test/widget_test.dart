@@ -570,17 +570,22 @@ void main() {
     final ws = builder.build('First paragraph of the motion.\n\n'
         'Second paragraph of the motion.\n\n'
         '- first ground\n- second ground');
-    // Uniform rhythm: bottom gap == in-paragraph leading, so the
+    // Uniform rhythm: the inter-block gap == in-paragraph leading, so the
     // baseline-to-baseline distance across a paragraph break equals the
     // double-spaced line height (2.5 + 12 × (multiple − 1) = 14.5 at 2.0,
-    // derived from the 12pt legal body).
+    // derived from the 12pt legal body). Flowing blocks carry the gap as a
+    // sibling SizedBox (a padding wrapper would waste the gap's height at
+    // every page split).
     final expected = 2.5 + 12.0 * (court.lineSpacingMultiple - 1.0);
+    final gaps = ws
+        .whereType<pw.SizedBox>()
+        .where((s) => s.height == expected && s.width == null);
+    expect(gaps.length, 4,
+        reason: 'both paragraphs and both list items carry the spaced gap');
     final bottoms = _walk(ws)
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom)
         .toList();
-    expect(bottoms.where((b) => b == expected).length, greaterThanOrEqualTo(4),
-        reason: 'paragraphs and list items share the spaced gap');
     expect(bottoms.contains(8.0), isFalse,
         reason: 'no legal block keeps the single-spaced 8pt gap');
     final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
@@ -642,6 +647,81 @@ void main() {
             .toList();
     expect(explicit, isNotEmpty);
     expect(explicit.every((s) => s == 14.0), isTrue);
+  });
+
+  test('legalMode paragraphs and list items flow across page boundaries',
+      () async {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    const sentence =
+        'The hearing in this matter is currently set for a date on which the '
+        'Defendant is unavailable for reasons entirely beyond his control. ';
+
+    Future<int> pageCount(List<pw.Widget> ws) async {
+      final doc = pw.Document()..addPage(pw.MultiPage(build: (_) => ws));
+      final bytes = await doc.save();
+      return RegExp(r'/Type\s*/Page\b')
+          .allMatches(String.fromCharCodes(bytes))
+          .length;
+    }
+
+    // A single paragraph taller than a page must split across the boundary
+    // (as an atomic block this used to throw "Widget won't fit").
+    final long = builder.build(sentence * 60);
+    expect(
+        _walk(long)
+            .whereType<pw.RichText>()
+            .any((r) => r.overflow == pw.TextOverflow.span),
+        isTrue);
+    final longPages = await pageCount(long);
+    expect(longPages, greaterThanOrEqualTo(2));
+
+    // A single numbered item taller than a page flows the same way, with its
+    // marker inline.
+    final item = builder.build('1. ${sentence * 60}');
+    expect(_literalText(_walk(item)).contains('1.'), isTrue);
+    final itemPages = await pageCount(item);
+    expect(itemPages, greaterThanOrEqualTo(2));
+
+    // Filled pages: an intro plus four ~⅔-page paragraphs (~2.7 pages of
+    // text) fits in three flowing pages; placed atomically each paragraph
+    // would demand a fresh page (four total, each ending in a blank band).
+    final chunk = sentence * 10;
+    final filled = await pageCount(
+        builder.build('Intro.\n\n$chunk\n\n$chunk\n\n$chunk\n\n$chunk'));
+    expect(filled, lessThanOrEqualTo(3));
+  });
+
+  test('Captions, signature divs and headings stay atomic in legal mode', () {
+    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final ws = builder
+        .build('<div style="display:flex; justify-content:space-between">'
+            '<div>MEGHAN MAIN</div><div>PLAINTIFF</div></div>\n\n'
+            '<div style="width:40%; border-bottom:1px solid #000"></div>\n\n'
+            '#### <u>MOTION FOR CONTINUANCE</u>');
+    // Nothing in these blocks is page-spanning text, and the caption is
+    // still a Row.
+    expect(
+        _walk(ws)
+            .whereType<pw.RichText>()
+            .any((r) => r.overflow == pw.TextOverflow.span),
+        isFalse);
+    expect(_walk(ws).whereType<pw.Row>().isNotEmpty, isTrue);
+  });
+
+  test('Non-legal documents never emit page-spanning text (regression)', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final ws =
+        builder.build('A paragraph.\n\nAnother paragraph.\n\n1. one\n2. two');
+    expect(
+        _walk(ws)
+            .whereType<pw.RichText>()
+            .any((r) => r.overflow == pw.TextOverflow.span),
+        isFalse);
+    // Lists keep their single-widget Column structure.
+    expect(_walk(ws).whereType<pw.Column>().isNotEmpty, isTrue);
   });
 
   test('Page-break divs and hrs emit a top-level pw.NewPage', () async {
@@ -772,14 +852,21 @@ void main() {
         reason: 'no double gap inside the quote');
     expect((quote.margin as pw.EdgeInsets?)?.bottom, gap);
 
-    // Nested list: parent row + child item + next item each carry exactly one
-    // gap; the parent item adds none of its own around the nested list.
+    // Nested list: the item with children keeps the atomic layout (parent row
+    // + child item carry one padding gap each); the plain 'next' item flows
+    // and carries its gap as a sibling SizedBox.
     final list = builder.build('- parent\n  - child\n- next');
     final bottoms = _walk(list)
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom)
         .where((b) => b == gap);
-    expect(bottoms.length, 3);
+    expect(bottoms.length, 2);
+    expect(
+        list
+            .whereType<pw.SizedBox>()
+            .where((s) => s.height == gap && s.width == null)
+            .length,
+        1);
 
     // A quote that *ends in a list* sheds the last item's gap too (the trim
     // descends through the list's zero-gap wrapper).
