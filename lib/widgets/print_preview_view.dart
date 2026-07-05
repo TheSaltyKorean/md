@@ -85,9 +85,21 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
   }
 
   /// True once the user actively picked a profile in this preview (dropdown,
-  /// New/Edit, or Import) — as opposed to the preview merely showing the
+  /// New, or Import) — as opposed to the preview merely showing the
   /// default/inherited profile.
   bool _userChose = false;
+
+  /// Pin ON records the current profile for the file; pin OFF clears the
+  /// binding — and also drops the in-session choice, so a later Save As
+  /// cannot resurrect an association the user explicitly removed.
+  void _togglePin(bool assigned) {
+    final path = widget.docPath;
+    if (path == null) return;
+    _userChose = !assigned;
+    context
+        .read<PrintProfileService>()
+        .assignToDocument(path, assigned ? null : _selectedId);
+  }
 
   /// Select a profile for this preview — and remember it for the document.
   /// Choosing a profile *is* the association (no separate pin step; the pin
@@ -114,9 +126,15 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     if (result == null || !mounted) return;
     await context.read<PrintProfileService>().upsert(result);
     if (!mounted) return;
-    // Route through the selection path so a created/edited profile is also
-    // remembered for the document, exactly like a dropdown choice.
-    _select(result.id);
+    if (isNew || result.id != _selectedId) {
+      // A newly created profile is a choice like a dropdown pick — route it
+      // through the selection path so the document remembers it.
+      _select(result.id);
+    } else {
+      // Editing the already-shown profile is not a choice: an unassigned
+      // document merely displaying the default must not become pinned to it.
+      setState(() => _previewEpoch++);
+    }
   }
 
   String _newId() =>
@@ -346,12 +364,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                 : 'Always use this profile for this file'),
         icon: Icon(assigned ? Icons.push_pin_rounded : Icons.push_pin_outlined),
         color: assigned ? cs.primary : null,
-        onPressed: !hasPath
-            ? null
-            : () => profilesService.assignToDocument(
-                  widget.docPath!,
-                  assigned ? null : _selectedId,
-                ),
+        onPressed: !hasPath ? null : () => _togglePin(assigned),
       ),
       // Divider before the output actions.
       Padding(

@@ -143,6 +143,12 @@ void main() {
         .byTooltip('Always using this profile for this file — tap to stop'));
     await tester.pump(const Duration(seconds: 1));
     expect(service.assignedId('/tmp/a.md'), isNull);
+
+    // And an explicit clear is final: a later Save As must not resurrect
+    // the association the user just removed.
+    await pump('/tmp/a-renamed.md');
+    await tester.pump(const Duration(seconds: 1));
+    expect(service.assignedId('/tmp/a-renamed.md'), isNull);
   });
 
   testWidgets('A profile chosen for an unsaved doc sticks after Save As',
