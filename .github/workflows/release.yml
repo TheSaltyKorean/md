@@ -40,17 +40,6 @@ jobs:
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Compute tag and version
-        # On dispatch dry-runs GITHUB_REF_NAME is a branch (may contain '/',
-        # and is no semver): sanitize the artifact tag and use 0.0.0.
-        run: |
-          TAG="${GITHUB_REF_NAME//\//-}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            VER="0.0.0"
-          fi
-          { echo "TAG=$TAG"; echo "VER=$VER"; } >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -87,9 +76,9 @@ jobs:
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "dist/markdown-studio-${TAG}-android.apk"
+            "dist/markdown-studio-android.apk"
           cp build/app/outputs/bundle/release/app-release.aab \
-            "dist/markdown-studio-${TAG}-android.aab"
+            "dist/markdown-studio-android.aab"
       - name: Android skipped (no keystore)
         if: env.HAS_KEYSTORE != 'true'
         run: >
@@ -111,15 +100,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Compute tag and version
+      - name: Compute package version
+        # Dispatch dry-runs come from branches (no semver): package as 0.0.0.
         run: |
-          TAG="${GITHUB_REF_NAME//\//-}"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VER="${GITHUB_REF_NAME#v}"
           else
             VER="0.0.0"
           fi
-          { echo "TAG=$TAG"; echo "VER=$VER"; } >> "$GITHUB_ENV"
+          echo "VER=$VER" >> "$GITHUB_ENV"
       - name: Install Linux build deps
         run: |
           sudo apt-get update
@@ -135,7 +124,7 @@ jobs:
         run: |
           mkdir -p dist
           tar -C build/linux/x64/release/bundle -czf \
-            "dist/markdown-studio-${TAG}-linux-x64.tar.gz" .
+            "dist/markdown-studio-linux-x64-portable.tar.gz" .
       - name: Build .deb package
         run: |
           PKG="pkg/markdown-studio_${VER}_amd64"
@@ -176,7 +165,7 @@ jobs:
           EOF
           sed -i 's/^          //' "$PKG/DEBIAN/control"
           dpkg-deb --build --root-owner-group "$PKG" \
-            "dist/markdown-studio-${TAG}-linux-amd64.deb"
+            "dist/markdown-studio-linux-amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
@@ -187,14 +176,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compute tag and version
+      - name: Compute package version
         shell: pwsh
         run: |
-          $tag = $env:GITHUB_REF_NAME -replace '/','-'
           $ver = if ($env:GITHUB_REF -like 'refs/tags/v*') {
             $env:GITHUB_REF_NAME.TrimStart('v')
           } else { '0.0.0' }
-          "TAG=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "VER=$ver" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: subosito/flutter-action@v2
         with:
@@ -208,7 +195,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path build/windows/x64/runner/Release/* `
-            -DestinationPath "dist/markdown-studio-$env:TAG-windows-x64.zip"
+            -DestinationPath "dist/markdown-studio-windows-x64-portable.zip"
       - name: Build installer (Inno Setup)
         shell: pwsh
         # Inno Setup 6 is preinstalled on windows-latest runners.
@@ -219,7 +206,7 @@ jobs:
             /DOutputDir="$PWD\dist" `
             tool\windows_installer.iss
           Rename-Item "dist\markdown-studio-setup.exe" `
-            "markdown-studio-$env:TAG-windows-x64-setup.exe"
+            "markdown-studio-windows-x64-setup.exe"
       - name: Build MSI (WiX)
         shell: pwsh
         # WiX is pinned to 5.0.2: v6+ gates the toolset behind the OSMF EULA.
@@ -239,7 +226,7 @@ jobs:
             -d SourceDir="$PWD\build\windows\x64\runner\Release" `
             -d LicenseRtf="$PWD\license.rtf" `
             -d IconPath="$PWD\windows\runner\resources\app_icon.ico" `
-            -o "dist/markdown-studio-$env:TAG-windows-x64.msi"
+            -o "dist/markdown-studio-windows-x64.msi"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -250,10 +237,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compute tag and version
-        run: |
-          TAG="${GITHUB_REF_NAME//\//-}"
-          { echo "TAG=$TAG"; } >> "$GITHUB_ENV"
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -268,12 +251,12 @@ jobs:
           # macOS: zip the .app bundle (ditto preserves bundle metadata).
           APP="$(ls -d build/macos/Build/Products/Release/*.app | head -1)"
           ditto -c -k --keepParent "$APP" \
-            "dist/markdown-studio-${TAG}-macos.zip"
+            "dist/markdown-studio-macos.zip"
           # iOS: package the unsigned Runner.app as an .ipa-style zip for
           # sideloading tools (AltStore/Sideloadly re-sign it on install).
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry "dist/markdown-studio-${TAG}-ios-unsigned.ipa" Payload
+          zip -qry "dist/markdown-studio-ios-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
           name: release-apple
@@ -303,22 +286,22 @@ jobs:
           cat > notes.md << 'EOF'
           ## Install
 
-          **Windows** — pick one:
-          `…windows-x64.msi` (standard Windows Installer: Program Files,
-          Start Menu, Add/Remove Programs, upgrades in place across
-          versions; silent-deployable with `msiexec /i … /qn`), or
-          `…windows-x64-setup.exe` (same result via Inno Setup, plus an
-          optional desktop icon), or the portable `…windows-x64.zip`
-          (extract and run `markdown_studio.exe`). SmartScreen may warn on
-          unsigned builds: *More info → Run anyway*.
+          **Windows** — pick one: `markdown-studio-windows-x64.msi`
+          (standard Windows Installer: Program Files, Start Menu,
+          Add/Remove Programs, in-place upgrades; silent-deployable with
+          `msiexec /i … /qn`), or `markdown-studio-windows-x64-setup.exe`
+          (same result via Inno Setup, plus an optional desktop icon), or
+          the portable `markdown-studio-windows-x64-portable.zip` (extract
+          and run `markdown_studio.exe`). SmartScreen may warn on unsigned
+          builds: *More info → Run anyway*.
 
           **Linux** — easiest (Debian/Ubuntu):
-          `sudo apt install ./markdown-studio-*-linux-amd64.deb` — desktop
+          `sudo apt install ./markdown-studio-linux-amd64.deb` — desktop
           entry, `markdown-studio` on PATH, and `.md` file association
           included. Portable alternative for any distro:
           ```
           mkdir -p ~/.local/opt/markdown-studio
-          tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio
+          tar -xzf markdown-studio-linux-x64-portable.tar.gz -C ~/.local/opt/markdown-studio
           ~/.local/opt/markdown-studio/markdown_studio
           ```
           Requires GTK 3. Built on Ubuntu 22.04, so it runs on any distro
@@ -332,12 +315,12 @@ jobs:
           never published because their per-build certificate would break
           in-place updates between releases.
 
-          **macOS** — download `…macos.zip`, unzip, drag the app to
+          **macOS** — download `markdown-studio-macos.zip`, unzip, drag the app to
           Applications. The build is unsigned: on first launch right-click →
           *Open*, or clear quarantine with
           `xattr -dr com.apple.quarantine "/Applications/markdown_studio.app"`.
 
-          **iOS** — `…ios-unsigned.ipa` is **unsigned** (no App Store yet):
+          **iOS** — `markdown-studio-ios-unsigned.ipa` is **unsigned** (no App Store yet):
           install it with a sideloading tool that re-signs with your Apple ID
           (AltStore, Sideloadly) or via Xcode with your own provisioning.
           EOF
