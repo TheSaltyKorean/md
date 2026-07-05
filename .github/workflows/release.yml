@@ -26,9 +26,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Secrets can't be referenced in step `if:` directly; surface presence
-      # as an env flag. With no keystore configured the APK is debug-signed
-      # (sideload/testing only) and the Play-Store AAB is skipped entirely —
-      # a debug-signed AAB would just be rejected on upload.
+      # as an env flag. Without a keystore no Android artifact is published
+      # at all: a debug-signed AAB is rejected by Play, and a debug-signed
+      # APK is worse than nothing — fresh runners generate a new debug key
+      # per run, so every release would carry a different certificate and
+      # Android would refuse in-place updates (users would have to uninstall
+      # and lose data).
       HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -43,30 +46,44 @@ jobs:
           cache: true
       - name: Set up release signing
         if: env.HAS_KEYSTORE == 'true'
+        # Secrets pass through env and are written with printf, so shell
+        # metacharacters in generated passwords ($, backticks, \) are never
+        # expanded or executed while writing key.properties.
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d \
-            > android/app/upload-keystore.jks
-          cat > android/key.properties << EOF
-          storeFile=upload-keystore.jks
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
-          EOF
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
+          {
+            printf 'storeFile=upload-keystore.jks\n'
+            printf 'storePassword=%s\n' "$STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+          } > android/key.properties
       - run: flutter pub get
-      - run: flutter build apk --release
-      - name: Build Play-Store bundle (signed only)
+      - name: Build APK + Play-Store bundle
         if: env.HAS_KEYSTORE == 'true'
-        run: flutter build appbundle --release
+        run: |
+          flutter build apk --release
+          flutter build appbundle --release
       - name: Stage artifacts
+        if: env.HAS_KEYSTORE == 'true'
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk \
             "dist/markdown-studio-${GITHUB_REF_NAME}-android.apk"
-          if [ "$HAS_KEYSTORE" = "true" ]; then
-            cp build/app/outputs/bundle/release/app-release.aab \
-              "dist/markdown-studio-${GITHUB_REF_NAME}-android.aab"
-          fi
+          cp build/app/outputs/bundle/release/app-release.aab \
+            "dist/markdown-studio-${GITHUB_REF_NAME}-android.aab"
+      - name: Android skipped (no keystore)
+        if: env.HAS_KEYSTORE != 'true'
+        run: >
+          echo "::notice::ANDROID_KEYSTORE_* secrets not configured — Android
+          artifacts skipped (a per-run debug key would change the signing
+          certificate every release and break in-place updates)."
       - uses: actions/upload-artifact@v4
+        if: env.HAS_KEYSTORE == 'true'
         with:
           name: release-android
           path: dist/
@@ -191,10 +208,11 @@ jobs:
 
           **Android** — download the `.apk` on the device and open it (allow
           "install unknown apps" for your browser/file manager when prompted).
-          If the release includes an `.aab`, that is the Play-Store upload
-          artifact, not for direct install; if it doesn't, the APK is
-          debug-signed (fine for sideloading/testing — you'd need to
-          uninstall it before switching to a store-signed build later).
+          The `.aab` is the Play-Store upload artifact, not for direct
+          install. Android files appear only on **signed** releases (the
+          repo's keystore secrets configured); unsigned Android builds are
+          never published because their per-build certificate would break
+          in-place updates between releases.
 
           **macOS** — download `…macos.zip`, unzip, drag the app to
           Applications. The build is unsigned: on first launch right-click →
