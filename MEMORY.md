@@ -30,7 +30,7 @@ rationale. Update this whenever a new rule or significant decision is made.
 - **Flutter pinned to 3.41.9** (`.fvmrc`). 3.44+ breaks AppFlowy (`TextInputClient.onFocusReceived` not implemented by `appflowy_editor` 6.2.0). Revisit when AppFlowy supports 3.44+.
 - `intl` overridden to `0.20.2` (reconciles AppFlowy with `flutter_localizations`).
 - `path_provider_foundation` overridden to `>=2.4.1 <2.6.0` (2.6.0 native-assets breaks macOS App Store uploads / crashes iOS).
-- `file_picker` pinned to 10.3.x (Android CVE-22 accepted; fix needs v11, blocked on AppFlowy — issue #2).
+- `file_picker` pinned to 10.x (`^10.3.10`) (Android CVE-22 accepted; fix needs v11, blocked on AppFlowy — issue #2).
 - Org/bundle id base: `com.markdownstudio`.
 
 ## Status log
@@ -46,3 +46,7 @@ rationale. Update this whenever a new rule or significant decision is made.
 - 2026-07-02: PR #15 added inline **`<span>` rendering to the PDF builder** (fill-in blanks, styled labels, transparent redaction) — a 10-round Codex loop hardened the parser (balanced-scan nesting, entity decoding, stray-tag stripping; known "split-span" limit documented).
 - 2026-07-03: PR #16 added **`<div>` text-align and `display:flex` rows** to the PDF renderer (court captions, signature blocks). PR #17 (open): fix "widget won't fit" on tall blocks.
 - 2026-07-04: New user rules **R8** (prune branches after every merge) and **R9** (print preview is a workspace tab, not a modal dialog). Implemented R9: `WorkspaceTab` (sealed: `DocumentTab` | `PrintPreviewTab`) in `workspace_controller.dart`; `PrintDialog` → embeddable `PrintPreviewView`; printing again refreshes the existing preview tab in place. Docs refreshed repo-wide (+ new `docs/pdf-inline-html.md`). Pruned 5 stale merged remote branches.
+- 2026-07-05: PR #19 **legal print polish**: legalMode blocks share one spaced rhythm (block gap = in-paragraph leading), **page-break directives** (`page-break-before/after:always`, `break-*:page`, `!important` ok; bare top-level div/hr only; visible elements break *and* render), literal `<br>` renders as a line break in headings/prose/span labels (3-round Codex loop).
+- 2026-07-05: PR #20 **uniform 12pt legal body** via `_bodySize` (legal 12pt / non-legal 11pt): body text, div default (legal 12 / non-legal 10), list markers, blank baselines, and the block-gap rhythm all derive from it (clean first-round Codex).
+- 2026-07-05: PR #21 **legal-mode flowing pagination**: body paragraphs/list items page-span (`TextOverflow.span`; pdf 3.12 `SingleChildWidget` delegates spanning), lists flattened one-widget-per-item with inline markers, gap as sibling `_FlowGap` trimmed at doc end/before breaks. Codex round 2 raised a **false-positive P1** ("String has no operator *") — rebutted with the dart:core API doc; round 3 clean. Note: open PR #17 (tall code/image/quote blocks) overlaps and needs a rebase.
+- 2026-07-05: Linux desktop build verified on this machine (toolchain: clang/ninja/GTK installed; Flutter 3.41.9 SDK local). Removed unused `cupertino_icons` dependency (template bloat); docs synced with the three legal-print PRs.

@@ -24,6 +24,7 @@ AI assistant can read and edit.
 | `<div style="border-bottom:…"></div>` | A block signature line |
 | `<div style="text-align:center">…</div>` | Aligned block text |
 | `<div style="display:flex">…</div>` | Divs laid out side by side (a row) |
+| `<div style="page-break-before:always"></div>` | Forces a new page |
 
 ## Fill-in blanks (inline `<span>`)
 
@@ -101,6 +102,41 @@ A `<div>` on its own line(s) is a block-level element:
   Wrapper divs nest: a div containing more divs recurses into a column or
   row, and children inside a row shrink to fit rather than overflowing.
   Inner `<b>` tags and HTML entities are handled.
+
+## Page breaks
+
+A **bare** `<div>` (empty or self-closing) or `<hr>` carrying a page-break
+directive forces a new page — the classic use is starting the *Certificate
+of Service* on its own page:
+
+```markdown
+<div style="page-break-before:always"></div>
+
+#### <u>CERTIFICATE OF SERVICE</u>
+```
+
+Details:
+
+- Accepted directives: `page-break-before: always`, `page-break-after:
+  always`, and the CSS-3 fragmentation spellings `break-before: page` /
+  `break-after: page`. A trailing `!important` is tolerated.
+- The element itself prints nothing — unless it is *also* visible in its own
+  right (e.g. a signature line with a `border-bottom` plus the directive), in
+  which case it breaks on the side the directive names and still renders.
+- Only **bare, top-level** elements break. A content-carrying div never
+  becomes a page break, and a break div nested *inside* a wrapper div is
+  ignored (the wrapper renders normally).
+- A plain Markdown `---` divider is unaffected — it stays a horizontal rule.
+
+## Legal-mode pagination
+
+With a **legal-mode** profile (e.g. the built-in *Court Filing*), body
+paragraphs and list items **flow across page boundaries**: a paragraph that
+doesn't fit the remaining space splits at a line and continues on the next
+page, so every page fills top to bottom the way a court filing must. Legal
+mode also sets the whole document at a uniform **12pt** and keeps one
+continuous double-spaced rhythm across paragraph breaks. Headings, caption
+rows, signature lines, quotes, tables and images never split.
 
 ## Limitations
 

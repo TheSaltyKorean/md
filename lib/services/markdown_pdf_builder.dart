@@ -427,7 +427,9 @@ class MarkdownPdfBuilder {
         final gap = (_lengthPt(style['height']) ?? 0) + gapTop + gapBottom;
         return gap > 0 ? pw.SizedBox(height: gap) : null;
       }
-      final thickness = border.$1 < 0.4 ? 0.4 : border.$1;
+      // Same minimum as inline <span> blanks (0.6pt), so thin rules survive
+      // printing and both kinds of fill-in line render identically.
+      final thickness = border.$1 < 0.6 ? 0.6 : border.$1;
       final height = _lengthPt(style['height']) ?? 36;
       final line = pw.Container(height: thickness, color: border.$2);
       // Width may be a percentage (weighted flex) or a fixed length. An explicit

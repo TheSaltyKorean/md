@@ -89,8 +89,7 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     final max = _maxOffset;
     final left = _offset.dx.clamp(0.0, max.dx);
     final top = _offset.dy.clamp(0.0, max.dy);
-    final maxWidth =
-        (widget.area.width - 16).clamp(120.0, 640.0).toDouble();
+    final maxWidth = (widget.area.width - 16).clamp(120.0, 640.0).toDouble();
 
     return Positioned(
       left: left,
@@ -172,8 +171,7 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
       if (controller.mode == EditorMode.wysiwyg) ...[
         _divider(cs),
         _btn(Icons.format_align_left, 'Align left', () => _align('left')),
-        _btn(Icons.format_align_center, 'Align center',
-            () => _align('center')),
+        _btn(Icons.format_align_center, 'Align center', () => _align('center')),
         _btn(Icons.format_align_right, 'Align right', () => _align('right')),
         _divider(cs),
         _btn(Icons.format_color_text, 'Text colour',
@@ -439,7 +437,8 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
                   // AppFlowy stores colours as `rgba(r, g, b, a)` strings and
                   // parses them with tryFromRgbaString — a 0xAARRGGBB value
                   // wouldn't render. Color.toRgbaString() emits the right form.
-                  onTap: () => Navigator.pop(ctx, Color(e.value).toRgbaString()),
+                  onTap: () =>
+                      Navigator.pop(ctx, Color(e.value).toRgbaString()),
                   child: Container(
                     width: 32,
                     height: 32,
@@ -584,8 +583,7 @@ class _FloatingFormatToolbarState extends State<FloatingFormatToolbar> {
     // No leading blank line needed at the very start of the document.
     final before = pos == 0 ? '' : '\n' * (2 - nlBefore);
     // At end of document a single trailing newline is plenty.
-    final after =
-        pos >= text.length ? '\n' : '\n' * (2 - nlAfter);
+    final after = pos >= text.length ? '\n' : '\n' * (2 - nlAfter);
 
     final insert = '$before$block$after';
     final newText = text.replaceRange(pos, pos, insert);

@@ -53,7 +53,8 @@ OPTIONAL keys (omit any you don't need; these are the defaults):
 - "confidentialLabel": string|null = null   // e.g. "CONFIDENTIAL" badge in header
 - "watermarkText": string|null = null       // diagonal background watermark
 - "marginCm": number = 2.0                  // page margin, cm; RANGE 1.0–3.5; 2.54 = 1 inch
-- "legalMode": boolean = false              // monochrome: all headings/bold/links/chrome use textColor
+- "legalMode": boolean = false              // court output: monochrome chrome, uniform 12pt body,
+                                            // continuous spacing rhythm, text flows across pages
 - "justifyBody": boolean = false            // justify body paragraphs
 - "lineSpacingMultiple": number = 1.0       // 1.0 single, 1.5, 2.0 double; RANGE 1.0–2.0
 - "firstLineIndentIn": number = 0.0         // first-line indent in INCHES; RANGE 0.0–1.0

@@ -240,15 +240,16 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             value: _footerCentered,
             onChanged: (v) => setState(() => _footerCentered = v),
             title: const Text('Centred footer with page count'),
-            subtitle: const Text('“Footer — Title | Page N of M”, hairline above'),
+            subtitle:
+                const Text('“Footer — Title | Page N of M”, hairline above'),
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(
             value: _coverLogo,
             onChanged: (v) => setState(() => _coverLogo = v),
             title: const Text('Logo as cover (top of first page)'),
-            subtitle:
-                const Text('Logo once at the top; omitted from the running header'),
+            subtitle: const Text(
+                'Logo once at the top; omitted from the running header'),
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(
@@ -330,7 +331,8 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             value: _justifyBody,
             onChanged: (v) => setState(() => _justifyBody = v),
             title: const Text('Justify body paragraphs'),
-            subtitle: const Text('Flush left and right instead of ragged-right'),
+            subtitle:
+                const Text('Flush left and right instead of ragged-right'),
             contentPadding: EdgeInsets.zero,
           ),
           SwitchListTile(

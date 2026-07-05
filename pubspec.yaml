@@ -18,7 +18,6 @@ dependencies:
     sdk: flutter
 
   # Material Design icons + adaptive widgets are part of the Flutter SDK.
-  cupertino_icons: ^1.0.8
 
   # --- Block-style WYSIWYG editor (Notion-like) with Markdown round-tripping ---
   # Provides markdownToDocument() / documentToMarkdown() and the AppFlowyEditor widget.

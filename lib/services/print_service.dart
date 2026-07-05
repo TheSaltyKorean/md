@@ -107,8 +107,8 @@ class PrintService {
         // running header omits the logo and the (now-redundant) company name —
         // the cover logo already conveys the brand. The header is still kept so
         // any title, classification label and accent rule appear on every page.
-        header: (context) => _header(context, profile, title,
-            useCover ? null : logo,
+        header: (context) => _header(
+            context, profile, title, useCover ? null : logo,
             hideCompany: useCover),
         footer: (context) => _footer(context, profile, title),
         build: (context) => body,

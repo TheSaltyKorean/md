@@ -26,8 +26,8 @@ void main() {
     });
 
     test('regex mode matches patterns', () {
-      final m =
-          TextSearch.findAll('a1 b2 c3', r'\d', const SearchOptions(regex: true));
+      final m = TextSearch.findAll(
+          'a1 b2 c3', r'\d', const SearchOptions(regex: true));
       expect(m, hasLength(3));
     });
 
@@ -38,18 +38,21 @@ void main() {
     });
 
     test('skips zero-width matches so navigation makes progress', () {
-      final m = TextSearch.findAll('baa', 'a*', const SearchOptions(regex: true));
+      final m =
+          TextSearch.findAll('baa', 'a*', const SearchOptions(regex: true));
       expect(m, const [TextMatch(1, 3)]);
     });
 
     test('empty query yields no matches', () {
-      expect(TextSearch.findAll('anything', '', const SearchOptions()), isEmpty);
+      expect(
+          TextSearch.findAll('anything', '', const SearchOptions()), isEmpty);
     });
   });
 
   group('TextSearch.compile', () {
     test('reports an invalid regex without throwing', () {
-      final p = TextSearch.compile('(unterminated', const SearchOptions(regex: true));
+      final p =
+          TextSearch.compile('(unterminated', const SearchOptions(regex: true));
       expect(p.isValid, isFalse);
       expect(p.error, isNotNull);
     });
@@ -71,8 +74,7 @@ void main() {
     test('replaces a single targeted match', () {
       const text = 'foo bar foo';
       final matches = TextSearch.findAll(text, 'foo', const SearchOptions());
-      expect(
-          TextSearch.replaceMatches(text, [matches[1]], 'X'), 'foo bar X');
+      expect(TextSearch.replaceMatches(text, [matches[1]], 'X'), 'foo bar X');
     });
 
     test('does not perform \$ group substitution (literal replacement)', () {

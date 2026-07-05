@@ -53,8 +53,8 @@ class PrintProfile {
   final String? logoPath;
   final PrintAlign logoAlign;
 
-  /// Google Fonts family name used for body text (e.g. Roboto, Lato,
-  /// Merriweather, Montserrat, Open Sans, Source Sans 3, Noto Serif).
+  /// Google Fonts family name used for body text (one of the supported set:
+  /// Roboto, Inter, Lato, Open Sans, Montserrat, Merriweather, Noto Serif).
   final String fontFamily;
 
   /// ARGB colour for headings, header band & accent rules.
