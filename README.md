@@ -1,336 +1,69 @@
 # Markdown Studio
 
-A cross-platform **Markdown viewer and WYSIWYG editor** built with **Flutter** and
-**Material 3**. Runs on **Linux, Windows, Android, and iOS** from a single
-codebase, and is structured for submission to all the major app stores.
+[![Support this project on Venmo](https://img.shields.io/badge/%E2%9D%A4%20Support%20this%20project-Venmo-3D95CE?logo=venmo&logoColor=white)](https://venmo.com/u/thesaltykorean)
+[![Latest release](https://img.shields.io/github/v/release/TheSaltyKorean/md?label=Latest%20release)](https://github.com/TheSaltyKorean/md/releases/latest)
 
-## Features
+Write in Markdown, publish polished PDFs — including court-ready filings.
+A cross-platform viewer + Notion-style WYSIWYG editor for **Windows, Linux,
+Android, iOS and macOS**, built with Flutter.
 
-- **Four view modes** (switchable from the toggle in the toolbar):
-  - **Edit** — block-style, Notion-like WYSIWYG editor (AppFlowy Editor) with
-    slash-commands (`/`) and a selection toolbar.
-  - **Split** — raw Markdown source with a **live rendered preview**
-    (side-by-side on wide screens, stacked on mobile).
-  - **Raw** — full-width Markdown source editor, no preview.
-  - **Preview** — read-only rendered view.
-- **Floating format toolbar** — a movable, dockable formatting palette (bold,
-  italic, underline, strikethrough, inline code, headings, lists, checklist,
-  quote, indent/outdent, link, divider, table — plus alignment and text /
-  highlight colour in Edit mode). It drives the block editor in Edit mode and
-  inserts Markdown syntax in Split/Raw; it hides in Preview, and its position
-  is remembered.
-- **Find & replace** in the Markdown source (Split/Raw modes) — **Ctrl/Cmd+F**
-  to find, **Ctrl/Cmd+H** to replace, with match count, next/previous, match
-  highlighting, and case / whole-word / regex options. Opening it from Edit or
-  Preview switches to Raw first. **Esc** closes it.
-- **Material Design 3** with **light, dark, and system** themes (persisted).
-- **Multi-document tabs** — open many `.md` files at once; opening into a clean
-  Untitled tab reuses it. Close tabs (with an unsaved-changes guard), drag to
-  reorder them, or **drag a tab outside the window to tear it off** into its
-  own window (unsaved edits travel with it).
-- **Single-instance desktop app** — opening another `.md` file from the OS
-  focuses the running window and adds a tab instead of starting a second
-  instance (launch with `--new-window` to force one).
-- **`.md` file association** — on Windows/Linux the app offers (once) to register
-  itself as a Markdown handler; Android, iOS and macOS declare the association in
-  their manifests, so the app appears as a `.md` opener.
-- **File operations** — New, Open (multi-select), Save, Save As across all
-  platforms — plus **drag & drop**: drop Markdown files onto the window to open
-  them.
-- **Live reload of external changes** — the open file is watched on disk
-  (desktop). An **auto-reload toggle** in the toolbar controls behaviour:
-  - **On** (default): when the file changes (e.g. `git pull`, sync, another
-    editor) and you have no unsaved edits, it reloads automatically. If you *do*
-    have unsaved edits, a banner lets you **Reload** or **Keep mine**.
-  - **Off**: your buffer is left untouched; a banner notes the file changed and
-    you decide when to save (your version wins on save).
-- **Print & PDF export** with a per-document **branding / template profile**
-  system:
-  - The printer icon opens a **print-preview tab** (not a modal dialog) right
-    in the tab strip, so you can keep editing and flip back to the rendered
-    preview; printing the document again refreshes it.
-  - Named profiles (e.g. *Personal*, *Work*, *Court Filing*).
-  - Logo, font family, primary/text colours, header & footer text.
-  - Page numbers, date, document title in header.
-  - Classification label (e.g. `CONFIDENTIAL`) and a diagonal **watermark**.
-  - **Legal / manuscript layout:** monochrome ("legal") mode, justified body,
-    line spacing (single → double), first-line indent, centred headings — enough
-    to render a plain Markdown draft as a court-compliant filing. Legal mode
-    sets body text — captions, lists, plain `<div>`s included — at a uniform
-    **12pt** (headings keep their own sizes; `#####` gives a 12pt bold
-    title), keeps one continuous double-spaced rhythm across paragraph
-    breaks, and **flows paragraphs and list items across page boundaries**
-    so every page fills top to bottom.
-  - **Inline HTML for forms & filings:** fill-in blanks and styled labels with
-    `<span style="…">`, signature lines and aligned captions with `<div>`
-    (`text-align`, `display:flex` rows), **forced page breaks**
-    (`page-break-before/after:always` on a bare `<div>`/`<hr>`), plus `<u>`,
-    `<ins>`, `<del>` and `<br>` — all rendered in the printed PDF.
-  - **Import / export profiles as JSON**, so a template can be shared or
-    **generated by an AI** from a plain-English description.
-  - Each saved document **automatically remembers the profile you last picked
-    for it** in the preview (the pin icon shows the link and can clear it);
-    one profile is the app-wide default for new/unassigned documents.
-  - 📄 Full guides: **[Print & branding profiles](docs/print-profiles.md)** ·
-    **[AI profile authoring](docs/ai-profile-authoring.md)** ·
-    **[Fill-in lines & inline HTML in PDFs](docs/pdf-inline-html.md)**.
+## Download
 
-## Why Markdown Studio
+| Platform | Get it |
+| --- | --- |
+| **Windows** | [MSI installer](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64.msi) · [setup.exe](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-setup.exe) · [portable zip](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-portable.zip) |
+| **Linux** | [.deb package](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-amd64.deb) · [portable tar.gz](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-x64-portable.tar.gz) |
+| **Android** | [APK](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-android.apk) (signed) |
+| **macOS** | [app zip](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-macos.zip) (unsigned — right-click → Open) |
+| **iOS** | [unsigned IPA](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-ios-unsigned.ipa) (sideload via AltStore/Sideloadly) |
 
-Drafting documents with AI means living between **Markdown and PDF**: assistants
-work far more efficiently in Markdown, but deliverables need to be polished PDFs.
-Markdown Studio keeps the source in Markdown and renders a properly formatted PDF
-at the end — including the strict formatting a **pro se litigant** needs for
-**court filings** (double spacing, serif type, justified body, first-line
-indents, one-inch margins, no branding), and the everyday templates for
-**contracts, technical specs**, and branded reports. Write once in Markdown, pick
-a profile, print. See [Print & branding profiles](docs/print-profiles.md).
+Installers set everything up (Start Menu / desktop entry / file association);
+portable builds just extract and run. Step-by-step install notes ship with
+[every release](https://github.com/TheSaltyKorean/md/releases/latest).
 
-## Project layout
+## Highlights
 
-```
-lib/
-├── main.dart                     # Entry point, providers, launch args, handoff
-├── app.dart                      # MaterialApp, themes, localization delegates
-├── models/
-│   ├── editor_mode.dart          # Edit / Split / Raw / Preview enum
-│   └── print_profile.dart        # Branding profile model (+ seeded profiles)
-├── state/
-│   ├── theme_controller.dart     # Light/dark/system, persisted
-│   ├── document_controller.dart  # Per-tab doc: WYSIWYG <-> Markdown sync, dirty
-│   └── workspace_controller.dart # Tabs (documents + print previews), auto-reload
-├── services/
-│   ├── file_service.dart         # Open/save via file_picker + dart:io
-│   ├── file_association_service.dart # Register as .md handler (Windows/Linux)
-│   ├── open_file_channel.dart    # OS open-file intents/URLs (Android/iOS/macOS)
-│   ├── single_instance_service.dart  # One desktop instance; forwards open files
-│   ├── text_search.dart          # Find/replace match engine (case/word/regex)
-│   ├── print_profile_service.dart# Profile CRUD + per-document association
-│   ├── markdown_pdf_builder.dart # Markdown (+ inline HTML) -> themed PDF widgets
-│   └── print_service.dart        # Fonts, header/footer/watermark, print/share
-├── screens/
-│   └── editor_screen.dart        # Tab strip, toolbar, mode switching
-├── theme/
-│   └── app_theme.dart            # Material 3 light & dark ThemeData
-└── widgets/
-    ├── wysiwyg_view.dart         # AppFlowy editor host (Edit mode)
-    ├── split_view.dart           # Source + live preview (Split mode)
-    ├── raw_view.dart             # Full-width source editor (Raw mode)
-    ├── source_pane.dart          # Shared monospace source TextField
-    ├── preview_view.dart         # Rendered Markdown (flutter_markdown_plus)
-    ├── find_replace_bar.dart     # Find & replace overlay for source views
-    ├── find_controller.dart      # Opens/closes/focuses the find bar
-    ├── format_toolbar.dart       # Floating, dockable formatting palette
-    ├── print_preview_view.dart   # Print-preview tab: profiles + PDF preview
-    └── print_profile_editor.dart # Create/edit a branding profile
-```
-
-> **Note on `flutter_markdown`:** Google discontinued the original
-> `flutter_markdown` in 2025. This project uses the maintained successor,
-> **`flutter_markdown_plus`**.
-
-## Download & install
-
-Prebuilt binaries for every release are on the
-[**Releases page**](https://github.com/TheSaltyKorean/md/releases) — built by
-the tag-triggered `release.yml` workflow on GitHub's runners.
-
-| Platform | File | Install |
-| --- | --- | --- |
-| **Windows** | `…windows-x64.zip` | Extract anywhere (e.g. `C:\Apps\MarkdownStudio`) and run `markdown_studio.exe` (keep `data/` next to it). SmartScreen may warn on the unsigned build: *More info → Run anyway*. |
-| **Linux** | `…linux-x64.tar.gz` | `mkdir -p ~/.local/opt/markdown-studio && tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio`, then run `…/markdown_studio`. Needs GTK 3 (`sudo apt install libgtk-3-0` if missing). |
-| **Android** | `…android.apk` | Open the APK on the device and allow "install unknown apps" when prompted. Present only on **signed** releases (see the keystore secrets below); the `.aab` alongside it is for Play Store upload. |
-| **macOS** | `…macos.zip` | Unzip, drag to Applications. Unsigned: first launch via right-click → *Open* (or `xattr -dr com.apple.quarantine` on the app). |
-| **iOS** | `…ios-unsigned.ipa` | Unsigned — sideload with a tool that re-signs under your Apple ID (AltStore, Sideloadly) or install via Xcode with your own provisioning. |
-
-To cut a release: bump `version:` in `pubspec.yaml`, merge, then push a tag —
-`git tag v1.0.1 && git push origin v1.0.1`. The workflow builds all five
-platforms and publishes the release with these install notes attached.
-Linux binaries are built on Ubuntu 22.04 (glibc 2.35 baseline). Android
-artifacts require repo secrets `ANDROID_KEYSTORE_BASE64` (base64 of your
-`.jks`), `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and
-`ANDROID_KEY_PASSWORD`; without them the release simply omits Android
-(an unsigned per-build certificate would break in-place updates).
-
-## Getting started
-
-### 1. Install Flutter
-
-Follow <https://docs.flutter.dev/get-started/install> for your OS and make sure
-`flutter` is on your `PATH`. Verify with:
-
-```bash
-flutter --version
-flutter doctor
-```
-
-> #### ⚠️ Flutter version: use 3.41.x (stable)
->
-> This project is pinned to **Flutter 3.41.9** (see `.fvmrc`). Flutter **3.44+**
-> added `onFocusReceived` to `TextInputClient`, which the current
-> `appflowy_editor` (6.2.0) does not yet implement — building against 3.44 fails
-> to compile the editor. `flutter analyze` passes but `flutter run`/`flutter
-> build` will not, until AppFlowy ships a fix.
->
-> The easiest way to pin is [FVM](https://fvm.app):
->
-> ```bash
-> dart pub global activate fvm
-> fvm install 3.41.9
-> fvm use 3.41.9
-> fvm flutter run -d windows   # prefix flutter commands with `fvm`
-> ```
->
-> If you don't use FVM, simply switch your global Flutter to a 3.41.x stable
-> (`flutter downgrade`, or `git checkout 3.41.9` in your Flutter SDK). Bump the
-> pin once AppFlowy supports 3.44+. Verified working on **3.41.9 / Dart 3.11.5**
-> (`flutter analyze` clean, `flutter test` green).
-
-### 2. Native platform projects
-
-The `android/`, `ios/`, `linux/`, `windows/`, and `macos/` folders are **already
-included** in this repo (org `com.markdownstudio`). Just fetch packages:
-
-```bash
-flutter pub get
-```
-
-If you ever need to regenerate them or add a platform, use the helper scripts
-(`./tool/setup.sh` or `pwsh ./tool/setup.ps1`), or run directly:
-
-```bash
-flutter create --org com.markdownstudio --project-name markdown_studio \
-  --platforms=android,ios,linux,windows,macos .
-```
-
-### 3. Run it
-
-```bash
-flutter run -d windows      # or: linux, macos
-flutter run -d <device-id>  # Android / iOS; list with: flutter devices
-```
-
-## Building release artifacts
-
-| Platform | Command | Output |
-| --- | --- | --- |
-| Android (Play Store) | `flutter build appbundle --release` | `build/app/outputs/bundle/release/app-release.aab` |
-| Android (sideload)   | `flutter build apk --release` | `build/app/outputs/flutter-apk/app-release.apk` |
-| iOS (App Store)      | `flutter build ipa --release` | `build/ios/ipa/*.ipa` |
-| Windows              | `flutter build windows --release` | `build/windows/x64/runner/Release/` |
-| Linux                | `flutter build linux --release` | `build/linux/x64/release/bundle/` |
-| macOS                | `flutter build macos --release` | `build/macos/Build/Products/Release/` |
-
-## Continuous integration
-
-`.github/workflows/ci.yml` runs on every push/PR: it analyzes + tests, then
-builds **Android (APK + AAB)**, **Linux**, **Windows**, **iOS** (no-codesign)
-and **macOS** on their respective runners; the Android, Linux and Windows
-jobs upload their build artifacts. Per project
-policy, a PR also runs a **Codex review loop and must get the all-clear before
-it is merged** (see `CLAUDE.md`).
-
-## App store submission notes
-
-Set the version in `pubspec.yaml` (`version: <semver>+<buildNumber>`). The build
-number must increase with every store upload.
-
-### Google Play (Android)
-1. Create a signing keystore and configure `android/key.properties` +
-   `android/app/build.gradle` signing config (see Flutter's
-   [Android deployment guide](https://docs.flutter.dev/deployment/android)).
-2. `flutter build appbundle --release`.
-3. Upload the `.aab` in the Play Console, complete the store listing, data-safety
-   form, and content rating, then roll out to a track.
-
-### Apple App Store (iOS)
-1. Requires a Mac with Xcode and an Apple Developer account.
-2. Set the bundle id and signing team in Xcode (`ios/Runner.xcworkspace`).
-3. `flutter build ipa --release`, then upload with **Transporter** or
-   `xcrun altool`/Xcode Organizer. Submit for review in App Store Connect.
-   See [iOS deployment](https://docs.flutter.dev/deployment/ios).
-
-### Microsoft Store (Windows)
-- Package as MSIX. Add the [`msix`](https://pub.dev/packages/msix) dev dependency,
-  configure it in `pubspec.yaml`, then `dart run msix:create` (or
-  `:publish` to push to Partner Center). Alternatively distribute the raw
-  `Release/` bundle or an installer.
-
-### Linux app stores
-- **Snap:** add a `snap/snapcraft.yaml` and run `snapcraft`; publish to the
-  Snap Store.
-- **Flatpak:** create a Flatpak manifest packaging the `bundle/` output for
-  Flathub.
-- See [Linux deployment](https://docs.flutter.dev/deployment/linux).
-
-## Security & known limitations
-
-- **`file_picker` Android CVE-22 (tracked, accepted):** the path-traversal fix
-  is only in `file_picker` 11.x, which is incompatible with `appflowy_editor`
-  6.2.0 (it still calls the v10 API). We're pinned to 10.x (`^10.3.10`) and will upgrade
-  once AppFlowy supports v11. Impact is Android-only and requires selecting a
-  file from a malicious content provider; mobile opens read bytes and don't
-  trust the resolved path. Tracked in
-  [#2](https://github.com/TheSaltyKorean/md/issues/2).
-
-## License
-
-Source-available under the **PolyForm Noncommercial License 1.0.0** (see
-[`LICENSE.md`](LICENSE.md)). In short:
-
-- ✅ **Free** for any **non-commercial** purpose (personal use, research,
-  education, noncommercial organizations), including making changes and new
-  works for those purposes.
-- 💼 **Commercial / business use is not granted** by this license — contact the
-  copyright holder for commercial terms.
-
-This is a source-available license, **not** an OSI open-source license. Not
-legal advice.
-
-## Tests
-
-```bash
-flutter test
-```
-
-## Branding & template profiles (print)
-
-Open **Print / Export PDF** (printer icon) — the preview opens in its own tab
-in the tab strip, so you can switch back to the source and print again to
-refresh it. **Picking a profile for a saved document remembers it for that
-file automatically**, so a company document always prints with company
-branding while personal notes use yours. You can also:
-- **+** to create a new profile (name, company, logo, font, colours, header/
-  footer, page numbers, classification label, watermark, margin, and the
-  legal / manuscript layout options).
-- **edit** to modify the selected profile.
-- **import / export** to move a profile in or out as a `.json` file.
-- **Set as default** to use it for new/unassociated documents.
-- tap the **pin** to stop always using the current profile for this file
-  (the document falls back to the default).
-
-Three profiles ship by default: **Personal**, **Work** (a `CONFIDENTIAL`
-watermark + footer), and **Court Filing** (12pt, double-spaced, justified, indented,
-monochrome). Edit or delete them freely.
-
-Fonts are fetched from Google Fonts at print time and fall back to the built-in
-PDF standard fonts when offline, so printing never fails for a missing typeface.
-
-**Creating templates:** every profile is plain JSON, so you can hand a
-description to an AI assistant and import the result. See the detailed guides:
-
-- **[Print & branding profiles](docs/print-profiles.md)** — concepts, the full
-  field reference, colour/font tables, worked examples, and troubleshooting.
-- **[AI profile authoring](docs/ai-profile-authoring.md)** — a copy-paste prompt
-  and machine-readable schema so an AI can generate an importable template.
+- **Four view modes** — Notion-style WYSIWYG **Edit**, **Split**
+  source + live preview, **Raw** source, read-only **Preview**.
+- **Editor comforts** — multi-document tabs (drag to reorder or tear off),
+  find & replace (Ctrl/Cmd+F/H), floating format toolbar, drag & drop,
+  auto-reload of external changes, light/dark/system themes.
+- **Print & PDF studio** — per-document **branding profiles** (fonts,
+  colours, logo, headers/footers, watermarks) in a print-preview tab;
+  profiles are plain JSON an AI assistant can generate.
+- **Court-filing mode** — uniform 12pt, double-spaced, justified,
+  first-line indents, monochrome; text flows continuously across pages.
+- **Forms & filings in Markdown** — fill-in blanks, signature lines,
+  two-column captions, and forced page breaks via a small inline-HTML
+  subset.
 
 ## Documentation
 
-- [Print & branding profiles](docs/print-profiles.md) — build and manage print /
-  template profiles.
-- [AI profile authoring](docs/ai-profile-authoring.md) — generate a profile from
-  a plain-English description with any AI assistant.
-- [Fill-in lines & inline HTML in PDFs](docs/pdf-inline-html.md) — signature
-  lines, fill-in blanks, redactions, and aligned captions for printed forms
-  and filings.
-- [CLAUDE.md](CLAUDE.md) — contributor guide and project working rules.
+- [Print & branding profiles](docs/print-profiles.md) — templates, fields,
+  worked examples.
+- [AI profile authoring](docs/ai-profile-authoring.md) — have an assistant
+  generate a template.
+- [Fill-in lines & inline HTML in PDFs](docs/pdf-inline-html.md) — blanks,
+  signatures, page breaks.
+- [Development guide](docs/DEVELOPMENT.md) — toolchain, project layout,
+  building from source.
+- [Releasing](docs/RELEASING.md) — cutting releases, signing, store
+  submission.
+- [CLAUDE.md](CLAUDE.md) — contributor working rules.
+
+## Building from source
+
+```bash
+# Flutter is pinned to 3.41.9 (see .fvmrc) — 3.44+ does not compile yet.
+fvm install && fvm flutter pub get
+fvm flutter run -d linux        # or windows / macos / a device
+```
+
+Details, platform prerequisites and the full project layout:
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md) — free for personal,
+research and other non-commercial use; commercial use requires separate
+terms.

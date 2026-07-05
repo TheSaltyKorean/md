@@ -5,10 +5,15 @@ name: Release
 # runners exactly like CI; iOS ships unsigned (no Apple Developer signing in
 # CI) and is included for sideloaders — see the install notes attached to
 # each release.
+#
+# workflow_dispatch runs the same builds as a DRY RUN (artifacts only, no
+# release is published) so packaging changes can be verified on real
+# runners before tagging.
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 env:
   FLUTTER_VERSION: "3.41.9"
@@ -71,9 +76,9 @@ jobs:
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-android.apk"
+            "dist/markdown-studio-android.apk"
           cp build/app/outputs/bundle/release/app-release.aab \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-android.aab"
+            "dist/markdown-studio-android.aab"
       - name: Android skipped (no keystore)
         if: env.HAS_KEYSTORE != 'true'
         run: >
@@ -95,6 +100,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Compute package version
+        # Dispatch dry-runs come from branches (no semver): package as 0.0.0.
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER="0.0.0"
+          fi
+          echo "VER=$VER" >> "$GITHUB_ENV"
       - name: Install Linux build deps
         run: |
           sudo apt-get update
@@ -106,11 +120,52 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build linux --release
-      - name: Stage artifacts
+      - name: Stage portable tarball
         run: |
           mkdir -p dist
           tar -C build/linux/x64/release/bundle -czf \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-linux-x64.tar.gz" .
+            "dist/markdown-studio-linux-x64-portable.tar.gz" .
+      - name: Build .deb package
+        run: |
+          PKG="pkg/markdown-studio_${VER}_amd64"
+          mkdir -p "$PKG/DEBIAN" "$PKG/opt/markdown-studio" "$PKG/usr/bin" \
+            "$PKG/usr/share/applications" \
+            "$PKG/usr/share/icons/hicolor/192x192/apps"
+          cp -r build/linux/x64/release/bundle/. "$PKG/opt/markdown-studio/"
+          ln -s /opt/markdown-studio/markdown_studio "$PKG/usr/bin/markdown-studio"
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png \
+            "$PKG/usr/share/icons/hicolor/192x192/apps/markdown-studio.png"
+          cat > "$PKG/usr/share/applications/markdown-studio.desktop" << EOF
+          [Desktop Entry]
+          Name=Markdown Studio
+          Comment=Markdown viewer, WYSIWYG editor and PDF/print studio
+          Exec=/opt/markdown-studio/markdown_studio %F
+          Icon=markdown-studio
+          Terminal=false
+          Type=Application
+          Categories=Office;TextEditor;
+          MimeType=text/markdown;text/x-markdown;
+          EOF
+          # The heredoc above carries the step's YAML indent; strip it so
+          # the .desktop file is valid.
+          sed -i 's/^          //' "$PKG/usr/share/applications/markdown-studio.desktop"
+          cat > "$PKG/DEBIAN/control" << EOF
+          Package: markdown-studio
+          Version: ${VER}
+          Section: editors
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0, libc6 (>= 2.35), libstdc++6 (>= 12)
+          Maintainer: Markdown Studio <noreply@github.com>
+          Homepage: https://github.com/TheSaltyKorean/md
+          Description: Markdown viewer, WYSIWYG editor and PDF/print studio
+           Cross-platform Markdown editor with a Notion-style WYSIWYG mode,
+           split source/preview, and themeable print/PDF export including
+           court-filing (legal) formatting.
+          EOF
+          sed -i 's/^          //' "$PKG/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "$PKG" \
+            "dist/markdown-studio-linux-amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
@@ -121,6 +176,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Compute package version
+        shell: pwsh
+        run: |
+          $ver = if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $env:GITHUB_REF_NAME.TrimStart('v')
+          } else { '0.0.0' }
+          "VER=$ver" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -128,12 +190,43 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build windows --release
-      - name: Stage artifacts
+      - name: Stage portable zip
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path build/windows/x64/runner/Release/* `
-            -DestinationPath "dist/markdown-studio-$env:GITHUB_REF_NAME-windows-x64.zip"
+            -DestinationPath "dist/markdown-studio-windows-x64-portable.zip"
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        # Inno Setup 6 is preinstalled on windows-latest runners.
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=$env:VER `
+            /DSourceDir="$PWD\build\windows\x64\runner\Release" `
+            /DOutputDir="$PWD\dist" `
+            tool\windows_installer.iss
+          Rename-Item "dist\markdown-studio-setup.exe" `
+            "markdown-studio-windows-x64-setup.exe"
+      - name: Build MSI (WiX)
+        shell: pwsh
+        # WiX is pinned to 5.0.2: v6+ gates the toolset behind the OSMF EULA.
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          # Render the PolyForm license to the RTF the MSI dialog requires.
+          $text = Get-Content LICENSE.md -Raw
+          $esc = $text -replace '\\','\\' -replace '\{','\{' -replace '\}','\}'
+          $esc = $esc -replace "`r`n","`n" -replace "`n",'\par '
+          Set-Content -Path license.rtf -Encoding Ascii -Value `
+            "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\fs18 $esc}"
+          wix build tool/windows_installer.wxs `
+            -ext WixToolset.UI.wixext `
+            -arch x64 `
+            -d Version=$env:VER `
+            -d SourceDir="$PWD\build\windows\x64\runner\Release" `
+            -d LicenseRtf="$PWD\license.rtf" `
+            -d IconPath="$PWD\windows\runner\resources\app_icon.ico" `
+            -o "dist/markdown-studio-windows-x64.msi"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -158,12 +251,12 @@ jobs:
           # macOS: zip the .app bundle (ditto preserves bundle metadata).
           APP="$(ls -d build/macos/Build/Products/Release/*.app | head -1)"
           ditto -c -k --keepParent "$APP" \
-            "dist/markdown-studio-${GITHUB_REF_NAME}-macos.zip"
+            "dist/markdown-studio-macos.zip"
           # iOS: package the unsigned Runner.app as an .ipa-style zip for
           # sideloading tools (AltStore/Sideloadly re-sign it on install).
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry "dist/markdown-studio-${GITHUB_REF_NAME}-ios-unsigned.ipa" Payload
+          zip -qry "dist/markdown-studio-ios-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
           name: release-apple
@@ -171,6 +264,10 @@ jobs:
 
   publish:
     name: Publish GitHub Release
+    # Dry runs (workflow_dispatch) stop here: artifacts are built and
+    # uploaded for inspection, but no release is created — including a
+    # dispatch aimed at a tag ref, hence the event check.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build-android, build-linux, build-windows, build-apple]
     runs-on: ubuntu-latest
     permissions:
@@ -189,20 +286,26 @@ jobs:
           cat > notes.md << 'EOF'
           ## Install
 
-          **Windows** — download `…windows-x64.zip`, extract anywhere (e.g.
-          `C:\Apps\MarkdownStudio`), and run `markdown_studio.exe`. Keep the
-          `data/` folder next to the exe. SmartScreen may warn on first run
-          (unsigned build): *More info → Run anyway*.
+          **Windows** — pick one: `markdown-studio-windows-x64.msi`
+          (standard Windows Installer: Program Files, Start Menu,
+          Add/Remove Programs, in-place upgrades; silent-deployable with
+          `msiexec /i … /qn`), or `markdown-studio-windows-x64-setup.exe`
+          (same result via Inno Setup, plus an optional desktop icon), or
+          the portable `markdown-studio-windows-x64-portable.zip` (extract
+          and run `markdown_studio.exe`). SmartScreen may warn on unsigned
+          builds: *More info → Run anyway*.
 
-          **Linux** — download `…linux-x64.tar.gz`, then:
+          **Linux** — easiest (Debian/Ubuntu):
+          `sudo apt install ./markdown-studio-linux-amd64.deb` — desktop
+          entry, `markdown-studio` on PATH, and `.md` file association
+          included. Portable alternative for any distro:
           ```
           mkdir -p ~/.local/opt/markdown-studio
-          tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio
+          tar -xzf markdown-studio-linux-x64-portable.tar.gz -C ~/.local/opt/markdown-studio
           ~/.local/opt/markdown-studio/markdown_studio
           ```
-          Requires GTK 3 (preinstalled on most desktops; otherwise
-          `sudo apt install libgtk-3-0`). Built on Ubuntu 22.04, so it runs
-          on any distro with glibc 2.35+ (2022 or newer).
+          Requires GTK 3. Built on Ubuntu 22.04, so it runs on any distro
+          with glibc 2.35+ (2022 or newer).
 
           **Android** — download the `.apk` on the device and open it (allow
           "install unknown apps" for your browser/file manager when prompted).
@@ -212,12 +315,12 @@ jobs:
           never published because their per-build certificate would break
           in-place updates between releases.
 
-          **macOS** — download `…macos.zip`, unzip, drag the app to
+          **macOS** — download `markdown-studio-macos.zip`, unzip, drag the app to
           Applications. The build is unsigned: on first launch right-click →
           *Open*, or clear quarantine with
           `xattr -dr com.apple.quarantine "/Applications/markdown_studio.app"`.
 
-          **iOS** — `…ios-unsigned.ipa` is **unsigned** (no App Store yet):
+          **iOS** — `markdown-studio-ios-unsigned.ipa` is **unsigned** (no App Store yet):
           install it with a sideloading tool that re-signs with your Apple ID
           (AltStore, Sideloadly) or via Xcode with your own provisioning.
           EOF
