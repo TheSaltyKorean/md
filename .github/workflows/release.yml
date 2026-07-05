@@ -155,7 +155,7 @@ jobs:
           Terminal=false
           Type=Application
           Categories=Office;TextEditor;
-          MimeType=text/markdown;
+          MimeType=text/markdown;text/x-markdown;
           EOF
           # The heredoc above carries the step's YAML indent; strip it so
           # the .desktop file is valid.
@@ -166,7 +166,7 @@ jobs:
           Section: editors
           Priority: optional
           Architecture: amd64
-          Depends: libgtk-3-0
+          Depends: libgtk-3-0, libc6 (>= 2.35), libstdc++6 (>= 12)
           Maintainer: Markdown Studio <noreply@github.com>
           Homepage: https://github.com/TheSaltyKorean/md
           Description: Markdown viewer, WYSIWYG editor and PDF/print studio
