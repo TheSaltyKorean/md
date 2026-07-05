@@ -45,7 +45,7 @@ jobs:
         # and is no semver): sanitize the artifact tag and use 0.0.0.
         run: |
           TAG="${GITHUB_REF_NAME//\//-}"
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VER="${GITHUB_REF_NAME#v}"
           else
             VER="0.0.0"
@@ -114,7 +114,7 @@ jobs:
       - name: Compute tag and version
         run: |
           TAG="${GITHUB_REF_NAME//\//-}"
-          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9] ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VER="${GITHUB_REF_NAME#v}"
           else
             VER="0.0.0"
@@ -191,7 +191,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = $env:GITHUB_REF_NAME -replace '/','-'
-          $ver = if ($env:GITHUB_REF_NAME -match '^v\d') {
+          $ver = if ($env:GITHUB_REF -like 'refs/tags/v*') {
             $env:GITHUB_REF_NAME.TrimStart('v')
           } else { '0.0.0' }
           "TAG=$tag" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
@@ -282,8 +282,9 @@ jobs:
   publish:
     name: Publish GitHub Release
     # Dry runs (workflow_dispatch) stop here: artifacts are built and
-    # uploaded for inspection, but no release is created.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # uploaded for inspection, but no release is created — including a
+    # dispatch aimed at a tag ref, hence the event check.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build-android, build-linux, build-windows, build-apple]
     runs-on: ubuntu-latest
     permissions:
