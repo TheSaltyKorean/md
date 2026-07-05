@@ -106,11 +106,53 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build linux --release
-      - name: Stage artifacts
+      - name: Stage portable tarball
         run: |
           mkdir -p dist
           tar -C build/linux/x64/release/bundle -czf \
             "dist/markdown-studio-${GITHUB_REF_NAME}-linux-x64.tar.gz" .
+      - name: Build .deb package
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          PKG="pkg/markdown-studio_${VER}_amd64"
+          mkdir -p "$PKG/DEBIAN" "$PKG/opt/markdown-studio" "$PKG/usr/bin" \
+            "$PKG/usr/share/applications" \
+            "$PKG/usr/share/icons/hicolor/192x192/apps"
+          cp -r build/linux/x64/release/bundle/. "$PKG/opt/markdown-studio/"
+          ln -s /opt/markdown-studio/markdown_studio "$PKG/usr/bin/markdown-studio"
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png \
+            "$PKG/usr/share/icons/hicolor/192x192/apps/markdown-studio.png"
+          cat > "$PKG/usr/share/applications/markdown-studio.desktop" << EOF
+          [Desktop Entry]
+          Name=Markdown Studio
+          Comment=Markdown viewer, WYSIWYG editor and PDF/print studio
+          Exec=/opt/markdown-studio/markdown_studio %F
+          Icon=markdown-studio
+          Terminal=false
+          Type=Application
+          Categories=Office;TextEditor;
+          MimeType=text/markdown;
+          EOF
+          # The heredoc above is indented by the step's YAML indent; strip it
+          # so the .desktop file is valid.
+          sed -i 's/^          //' "$PKG/usr/share/applications/markdown-studio.desktop"
+          cat > "$PKG/DEBIAN/control" << EOF
+          Package: markdown-studio
+          Version: ${VER}
+          Section: editors
+          Priority: optional
+          Architecture: amd64
+          Depends: libgtk-3-0
+          Maintainer: Markdown Studio <noreply@github.com>
+          Homepage: https://github.com/TheSaltyKorean/md
+          Description: Markdown viewer, WYSIWYG editor and PDF/print studio
+           Cross-platform Markdown editor with a Notion-style WYSIWYG mode,
+           split source/preview, and themeable print/PDF export including
+           court-filing (legal) formatting.
+          EOF
+          sed -i 's/^          //' "$PKG/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "$PKG" \
+            "dist/markdown-studio-${GITHUB_REF_NAME}-linux-amd64.deb"
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux
@@ -128,12 +170,24 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build windows --release
-      - name: Stage artifacts
+      - name: Stage portable zip
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Compress-Archive -Path build/windows/x64/runner/Release/* `
             -DestinationPath "dist/markdown-studio-$env:GITHUB_REF_NAME-windows-x64.zip"
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        # Inno Setup 6 is preinstalled on windows-latest runners.
+        run: |
+          $ver = $env:GITHUB_REF_NAME.TrimStart('v')
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            /DAppVersion=$ver `
+            /DSourceDir="$PWD\build\windows\x64\runner\Release" `
+            /DOutputDir="$PWD\dist" `
+            tool\windows_installer.iss
+          Rename-Item "dist\markdown-studio-setup.exe" `
+            "markdown-studio-$env:GITHUB_REF_NAME-windows-x64-setup.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -189,20 +243,23 @@ jobs:
           cat > notes.md << 'EOF'
           ## Install
 
-          **Windows** — download `…windows-x64.zip`, extract anywhere (e.g.
-          `C:\Apps\MarkdownStudio`), and run `markdown_studio.exe`. Keep the
-          `data/` folder next to the exe. SmartScreen may warn on first run
-          (unsigned build): *More info → Run anyway*.
+          **Windows** — easiest: run `…windows-x64-setup.exe` (installs to
+          Program Files with a Start-Menu entry and uninstaller). Portable
+          alternative: extract `…windows-x64.zip` anywhere and run
+          `markdown_studio.exe` (keep `data/` next to it). SmartScreen may
+          warn on the unsigned build: *More info → Run anyway*.
 
-          **Linux** — download `…linux-x64.tar.gz`, then:
+          **Linux** — easiest (Debian/Ubuntu):
+          `sudo apt install ./markdown-studio-*-linux-amd64.deb` — desktop
+          entry, `markdown-studio` on PATH, and `.md` file association
+          included. Portable alternative for any distro:
           ```
           mkdir -p ~/.local/opt/markdown-studio
           tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio
           ~/.local/opt/markdown-studio/markdown_studio
           ```
-          Requires GTK 3 (preinstalled on most desktops; otherwise
-          `sudo apt install libgtk-3-0`). Built on Ubuntu 22.04, so it runs
-          on any distro with glibc 2.35+ (2022 or newer).
+          Requires GTK 3. Built on Ubuntu 22.04, so it runs on any distro
+          with glibc 2.35+ (2022 or newer).
 
           **Android** — download the `.apk` on the device and open it (allow
           "install unknown apps" for your browser/file manager when prompted).

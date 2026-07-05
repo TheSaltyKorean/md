@@ -1,8 +1,14 @@
 # Markdown Studio
 
+[![Support this project on Venmo](https://img.shields.io/badge/%E2%9D%A4%20Support%20this%20project-Venmo-3D95CE?logo=venmo&logoColor=white)](https://venmo.com/u/thesaltykorean)
+[![Latest release](https://img.shields.io/github/v/release/TheSaltyKorean/md?label=Download)](https://github.com/TheSaltyKorean/md/releases/latest)
+
 A cross-platform **Markdown viewer and WYSIWYG editor** built with **Flutter** and
 **Material 3**. Runs on **Linux, Windows, Android, and iOS** from a single
 codebase, and is structured for submission to all the major app stores.
+
+> ❤️ **Find Markdown Studio useful?** You can support development on Venmo:
+> [**@thesaltykorean**](https://venmo.com/u/thesaltykorean).
 
 ## Features
 
@@ -137,8 +143,10 @@ the tag-triggered `release.yml` workflow on GitHub's runners.
 
 | Platform | File | Install |
 | --- | --- | --- |
-| **Windows** | `…windows-x64.zip` | Extract anywhere (e.g. `C:\Apps\MarkdownStudio`) and run `markdown_studio.exe` (keep `data/` next to it). SmartScreen may warn on the unsigned build: *More info → Run anyway*. |
-| **Linux** | `…linux-x64.tar.gz` | `mkdir -p ~/.local/opt/markdown-studio && tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio`, then run `…/markdown_studio`. Needs GTK 3 (`sudo apt install libgtk-3-0` if missing). |
+| **Windows (installer)** | `…windows-x64-setup.exe` | Run it — installs to Program Files with a Start-Menu entry and uninstaller. SmartScreen may warn on the unsigned build: *More info → Run anyway*. |
+| **Windows (portable)** | `…windows-x64.zip` | Extract anywhere (e.g. `C:\Apps\MarkdownStudio`) and run `markdown_studio.exe` (keep `data/` next to it). |
+| **Linux (deb)** | `…linux-amd64.deb` | `sudo apt install ./markdown-studio-*-linux-amd64.deb` — installs to `/opt/markdown-studio` with a desktop entry, `markdown-studio` on PATH, and `.md` file association. |
+| **Linux (portable)** | `…linux-x64.tar.gz` | `mkdir -p ~/.local/opt/markdown-studio && tar -xzf markdown-studio-*-linux-x64.tar.gz -C ~/.local/opt/markdown-studio`, then run `…/markdown_studio`. Needs GTK 3. |
 | **Android** | `…android.apk` | Open the APK on the device and allow "install unknown apps" when prompted. Present only on **signed** releases (see the keystore secrets below); the `.aab` alongside it is for Play Store upload. |
 | **macOS** | `…macos.zip` | Unzip, drag to Applications. Unsigned: first launch via right-click → *Open* (or `xattr -dr com.apple.quarantine` on the app). |
 | **iOS** | `…ios-unsigned.ipa` | Unsigned — sideload with a tool that re-signs under your Apple ID (AltStore, Sideloadly) or install via Xcode with your own provisioning. |
