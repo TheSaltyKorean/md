@@ -85,3 +85,4 @@ app.*.map.json
 
 # Coverage
 coverage/
+.claude/scheduled_tasks.lock

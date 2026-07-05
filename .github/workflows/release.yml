@@ -226,6 +226,7 @@ jobs:
             -d SourceDir="$PWD\build\windows\x64\runner\Release" `
             -d LicenseRtf="$PWD\license.rtf" `
             -d IconPath="$PWD\windows\runner\resources\app_icon.ico" `
+            -pdbtype none `
             -o "dist/markdown-studio-windows-x64.msi"
       - uses: actions/upload-artifact@v4
         with:
