@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart'
     show DropdownButtonFormField, MaterialApp, Scaffold;
-import 'package:flutter/widgets.dart' show Size, TextSelection, Widget;
+import 'package:flutter/widgets.dart'
+    show Size, SizedBox, TextSelection, Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -176,6 +177,45 @@ void main() {
     await tester.pumpWidget(app('/tmp/b.md'));
     await tester.pump(const Duration(seconds: 1));
     expect(service.assignedId('/tmp/b.md'), 'work');
+  });
+
+  testWidgets('Save As never pins a default the user did not choose',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+
+    Widget app(String? docPath) => MultiProvider(
+          providers: [
+            ChangeNotifierProvider<PrintProfileService>.value(value: service),
+          ],
+          child: MaterialApp(
+            home: Scaffold(
+              body: PrintPreviewView(
+                  markdown: '# Hello', title: 'a', docPath: docPath),
+            ),
+          ),
+        );
+
+    // Preview an unsaved doc without ever touching the dropdown, then
+    // Save As: the (default) profile must NOT become a file binding — the
+    // document keeps following future default changes.
+    await tester.pumpWidget(app(null));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(app('/tmp/c.md'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(service.assignedId('/tmp/c.md'), isNull);
+
+    // But an existing binding follows the document through Save As to a new
+    // path, even with no in-session selection. (Fresh preview, as the app
+    // would create for the already-bound document.)
+    await tester.pumpWidget(const SizedBox());
+    await service.assignToDocument('/tmp/d.md', 'work');
+    await tester.pumpWidget(app('/tmp/d.md'));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpWidget(app('/tmp/e.md'));
+    await tester.pump(const Duration(seconds: 1));
+    expect(service.assignedId('/tmp/e.md'), 'work');
   });
 
   test('Print profiles seed with built-ins', () async {

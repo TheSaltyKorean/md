@@ -68,23 +68,35 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     if (oldWidget.refreshEpoch != widget.refreshEpoch) {
       setState(() => _previewEpoch++);
     }
-    // The document gained a path (unsaved → Save As → printed again): the
-    // profile the user is previewing with becomes the document's remembered
-    // profile, as it would have on selection had the path existed then.
-    if (oldWidget.docPath == null && widget.docPath != null) {
-      context
-          .read<PrintProfileService>()
-          .assignToDocument(widget.docPath!, _selectedId);
+    // The document's path changed (unsaved → Save As, or Save As from an
+    // existing file): carry the remembered profile to the new path — but only
+    // when there is a real choice to carry (the user picked one in this
+    // preview, or the old path already had a binding). An untouched preview
+    // that merely shows the default must NOT pin that default to the file,
+    // or the document would stop following future default changes.
+    if (oldWidget.docPath != widget.docPath && widget.docPath != null) {
+      final service = context.read<PrintProfileService>();
+      final hadOldBinding = oldWidget.docPath != null &&
+          service.assignedId(oldWidget.docPath) != null;
+      if (_userChose || hadOldBinding) {
+        service.assignToDocument(widget.docPath!, _selectedId);
+      }
     }
   }
+
+  /// True once the user actively picked a profile in this preview (dropdown,
+  /// New/Edit, or Import) — as opposed to the preview merely showing the
+  /// default/inherited profile.
+  bool _userChose = false;
 
   /// Select a profile for this preview — and remember it for the document.
   /// Choosing a profile *is* the association (no separate pin step; the pin
   /// icon shows the link and taps clear it), so a work document keeps its
   /// work branding the next time it is printed. Pathless (unsaved) documents
-  /// have nothing durable to key on, so the selection stays session-local
-  /// until the file is saved.
+  /// have nothing durable to key on, so the selection sticks once the file
+  /// is saved and printed again (see [didUpdateWidget]).
   void _select(String id) {
+    _userChose = true;
     setState(() {
       _selectedId = id;
       _previewEpoch++;
@@ -101,10 +113,10 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     );
     if (result == null || !mounted) return;
     await context.read<PrintProfileService>().upsert(result);
-    setState(() {
-      _selectedId = result.id;
-      _previewEpoch++;
-    });
+    if (!mounted) return;
+    // Route through the selection path so a created/edited profile is also
+    // remembered for the document, exactly like a dropdown choice.
+    _select(result.id);
   }
 
   String _newId() =>
@@ -171,10 +183,9 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
 
     await service.upsert(profile);
     if (!mounted) return;
-    setState(() {
-      _selectedId = profile.id;
-      _previewEpoch++;
-    });
+    // Route through the selection path so an imported profile is also
+    // remembered for the document, exactly like a dropdown choice.
+    _select(profile.id);
     messenger.showSnackBar(SnackBar(
         content: Text(logoCleared
             ? 'Imported "${profile.name}" (logo not found here — cleared)'

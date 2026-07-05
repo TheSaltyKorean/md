@@ -56,9 +56,11 @@ codebase, and is structured for submission to all the major app stores.
   - **Legal / manuscript layout:** monochrome ("legal") mode, justified body,
     line spacing (single → double), first-line indent, centred headings — enough
     to render a plain Markdown draft as a court-compliant filing. Legal mode
-    sets the whole document at a uniform **12pt**, keeps one continuous
-    double-spaced rhythm across paragraph breaks, and **flows paragraphs and
-    list items across page boundaries** so every page fills top to bottom.
+    sets body text — captions, lists, plain `<div>`s included — at a uniform
+    **12pt** (headings keep their own sizes; `#####` gives a 12pt bold
+    title), keeps one continuous double-spaced rhythm across paragraph
+    breaks, and **flows paragraphs and list items across page boundaries**
+    so every page fills top to bottom.
   - **Inline HTML for forms & filings:** fill-in blanks and styled labels with
     `<span style="…">`, signature lines and aligned captions with `<div>`
     (`text-align`, `display:flex` rows), **forced page breaks**

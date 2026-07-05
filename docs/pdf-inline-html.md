@@ -134,7 +134,9 @@ With a **legal-mode** profile (e.g. the built-in *Court Filing*), body
 paragraphs and list items **flow across page boundaries**: a paragraph that
 doesn't fit the remaining space splits at a line and continues on the next
 page, so every page fills top to bottom the way a court filing must. Legal
-mode also sets the whole document at a uniform **12pt** and keeps one
+mode also sets body text — captions, list markers and plain `<div>`s
+included — at a uniform **12pt** (Markdown headings keep their own sizes;
+`#####` renders a 12pt bold title) and keeps one
 continuous double-spaced rhythm across paragraph breaks. Headings, caption
 rows, signature lines, quotes, tables and images never split.
 

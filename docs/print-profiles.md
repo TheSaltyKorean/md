@@ -18,7 +18,7 @@ Each document remembers which profile it uses, and one profile is the app-wide
 with company branding while your personal notes use a plain profile.
 
 Two profiles ship built in — **Personal** and **Work** — plus a **Court Filing**
-profile that demonstrates the legal-formatting options (uniform 12pt, double
+profile that demonstrates the legal-formatting options (12pt body, double
 spacing, justified body, 0.5″ first-line indent, centred captions, monochrome
 output, text flowing continuously across pages).
 
@@ -147,7 +147,7 @@ Every key below is optional **except `id` and `name`**. Types are JSON types.
 
 | JSON key | Type | Default | Clamp | Meaning |
 | --- | --- | --- | --- | --- |
-| `legalMode` | bool | `false` | — | Court-filing output. Monochrome: headings, bold emphasis, links **and** the header/footer chrome (company name, badge, accent rules, footer) all print in the **body text colour** instead of the brand colour. Also sets the whole document at a uniform **12pt** (body, captions, list markers, plain `<div>`s), keeps one continuous spaced rhythm across paragraph breaks, and lets body paragraphs / list items **flow across page boundaries** so pages fill top to bottom. |
+| `legalMode` | bool | `false` | — | Court-filing output. Monochrome: headings, bold emphasis, links **and** the header/footer chrome (company name, badge, accent rules, footer) all print in the **body text colour** instead of the brand colour. Also sets body text at a uniform **12pt** — captions, list markers and plain `<div>`s included; Markdown headings keep their own sizes (`#####`/h5 renders a 12pt bold title) — keeps one continuous spaced rhythm across paragraph breaks, and lets body paragraphs / list items **flow across page boundaries** so pages fill top to bottom. |
 | `justifyBody` | bool | `false` | — | Justify body paragraphs (flush left *and* right) instead of ragged-right. |
 | `lineSpacingMultiple` | double | `1.0` | `1.0`–`2.0` | Line-height multiple for body text. `1.0` = single (the classic look), `1.5` = one-and-a-half, `2.0` = double. |
 | `firstLineIndentIn` | double | `0.0` | `0.0`–`1.0` | First-line indent for body paragraphs, in **inches** (e.g. `0.5`). `0` = none. |
