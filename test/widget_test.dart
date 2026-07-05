@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart'
-    show DropdownButtonFormField, MaterialApp, Scaffold;
+    show DropdownButtonFormField, MaterialApp, PopupMenuButton, Scaffold;
 import 'package:flutter/widgets.dart'
     show Size, SizedBox, TextSelection, Widget;
 import 'package:flutter_test/flutter_test.dart';
@@ -19,6 +19,7 @@ import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/widgets/print_preview_view.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:pdf/pdf.dart' show PdfColors, PdfPageFormat;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
@@ -123,6 +124,44 @@ void main() {
     expect(find.byTooltip('Split'), findsOneWidget);
     expect(find.byTooltip('Raw'), findsOneWidget);
     expect(find.byTooltip('Preview'), findsOneWidget);
+  });
+
+  testWidgets('About shows the real build version, not a hardcoded one',
+      (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({'assoc_prompt_done': true});
+    final prefs = await SharedPreferences.getInstance();
+    // The version the platform reports — deliberately unlike any release.
+    PackageInfo.setMockInitialValues(
+      appName: 'Markdown Studio',
+      packageName: 'com.markdownstudio.markdown_studio',
+      version: '9.9.9',
+      buildNumber: '42',
+      buildSignature: '',
+      installerStore: null,
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+          ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
+          ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
+          Provider(create: (_) => FileAssociationService(prefs)),
+        ],
+        child: const MarkdownStudioApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(PopupMenuButton<String>).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('About'));
+    await tester.pumpAndSettle();
+    expect(find.text('9.9.9'), findsOneWidget);
   });
 
   testWidgets('Selecting a profile in the preview is saved with the document',

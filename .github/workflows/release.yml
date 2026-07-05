@@ -174,6 +174,10 @@ jobs:
   build-windows:
     name: Windows (x64)
     runs-on: windows-latest
+    env:
+      # Store packaging runs only when the Partner Center identity secrets
+      # exist; secrets can't be used in step `if:` directly.
+      HAS_STORE_IDENTITY: ${{ secrets.MSIX_IDENTITY_NAME != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Compute package version
@@ -228,6 +232,21 @@ jobs:
             -d IconPath="$PWD\windows\runner\resources\app_icon.ico" `
             -pdbtype none `
             -o "dist/markdown-studio-windows-x64.msi"
+      - name: Build Microsoft Store package (MSIX)
+        if: env.HAS_STORE_IDENTITY == 'true'
+        # Identity values come from Partner Center (see docs/RELEASING.md);
+        # the Store signs the package on publication, so no certificate is
+        # needed here.
+        env:
+          MSIX_IDENTITY_NAME: ${{ secrets.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ secrets.MSIX_PUBLISHER_DISPLAY_NAME }}
+        shell: pwsh
+        run: |
+          dart run msix:create --store `
+            --identity-name $env:MSIX_IDENTITY_NAME `
+            --publisher-display-name $env:MSIX_PUBLISHER_DISPLAY_NAME
+          Copy-Item build/windows/x64/runner/Release/markdown_studio.msix `
+            dist/markdown-studio-windows-store.msix
       - uses: actions/upload-artifact@v4
         with:
           name: release-windows
@@ -328,3 +347,22 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "Markdown Studio $GITHUB_REF_NAME" \
             --notes-file notes.md
+
+  winget:
+    name: Publish to winget
+    needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    env:
+      # Requires a classic PAT with public_repo scope (secret WINGET_TOKEN):
+      # the releaser forks microsoft/winget-pkgs under the token's account
+      # and opens the manifest-update PR. Skipped when absent.
+      HAS_WINGET_TOKEN: ${{ secrets.WINGET_TOKEN != '' }}
+    steps:
+      - name: Submit winget manifest update
+        if: env.HAS_WINGET_TOKEN == 'true'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: TheSaltyKorean.MarkdownStudio
+          installers-regex: windows-x64\.msi$
+          token: ${{ secrets.WINGET_TOKEN }}
