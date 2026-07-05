@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart'
     show DropdownButtonFormField, MaterialApp, Scaffold;
 import 'package:flutter/widgets.dart'
@@ -16,7 +19,7 @@ import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/widgets/print_preview_view.dart';
-import 'package:pdf/pdf.dart' show PdfColors;
+import 'package:pdf/pdf.dart' show PdfColors, PdfPageFormat;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -72,6 +75,22 @@ String _literalText(Iterable<pw.Widget> ws) {
 }
 
 Iterable<pw.Widget> _walk(List<pw.Widget> ws) => ws.expand(_allWidgets);
+
+/// Lay [widgets] into an A4 MultiPage with 2cm margins and return the bytes —
+/// throws if any single widget can't fit/paginate (the bug these tests guard).
+Future<Uint8List> _renderA4(List<pw.Widget> widgets) async {
+  final doc = pw.Document();
+  doc.addPage(pw.MultiPage(
+    pageFormat: PdfPageFormat.a4.copyWith(
+      marginLeft: 2 * PdfPageFormat.cm,
+      marginRight: 2 * PdfPageFormat.cm,
+      marginTop: 2 * PdfPageFormat.cm,
+      marginBottom: 2 * PdfPageFormat.cm,
+    ),
+    build: (_) => widgets,
+  ));
+  return doc.save();
+}
 
 void main() {
   testWidgets('App boots and shows the mode selector', (tester) async {
@@ -985,21 +1004,59 @@ void main() {
     expect(label.contains('Line 1\nLine 2'), isTrue);
   });
 
+  test('A long code block paginates instead of overflowing the page', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final code =
+        '```\n${List.generate(90, (i) => 'line $i of code').join('\n')}\n```';
+    // Before the fix this threw "Widget won't fit into the page…".
+    expect(await _renderA4(builder.build(code)), isNotEmpty);
+  });
+
+  test('A long multi-paragraph blockquote paginates', () async {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final quote =
+        List.generate(60, (i) => '> Paragraph $i of the quoted passage.')
+            .join('\n>\n');
+    expect(await _renderA4(builder.build(quote)), isNotEmpty);
+  });
+
+  test('A tall image is capped to one page (no overflow)', () async {
+    final tmp = Directory.systemTemp.createTempSync('mdimg');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final tall = img.Image(width: 400, height: 3000);
+    img.fill(tall, color: img.ColorRgb8(120, 120, 200));
+    File('${tmp.path}/tall.png')
+        .writeAsBytesSync(Uint8List.fromList(img.encodePng(tall)));
+
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal,
+        fonts: _standardFonts(),
+        baseDir: tmp.path,
+        maxImageHeight: 600);
+    final ws = builder.build('before\n\n![tall](tall.png)\n\nafter');
+    // Without the cap the 3000px image exceeds a page and MultiPage throws.
+    expect(await _renderA4(ws), isNotEmpty);
+  });
+
   test('legalMode keeps one gap for blockquotes and nested lists', () {
     final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     final gap = 2.5 + 12.0 * (court.lineSpacingMultiple - 1.0);
 
-    // The quote's container margin is the single gap to the next block; the
-    // paragraph inside must not add a second one (a blank band in the box).
+    // The quote's outer bottom padding is the single gap to the next block;
+    // the paragraph inside must not add a second one (a blank band in the
+    // box). (The quote is a Padding around a Column of per-child decorated
+    // containers so tall quotes can paginate.)
     final quote = builder.build('> quoted authority\n\nnext paragraph').first
-        as pw.Container;
+        as pw.Padding;
     final innerBottoms = _allWidgets(quote.child!)
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom);
     expect(innerBottoms.any((b) => b == gap), isFalse,
         reason: 'no double gap inside the quote');
-    expect((quote.margin as pw.EdgeInsets?)?.bottom, gap);
+    expect((quote.padding as pw.EdgeInsets).bottom, gap);
 
     // Nested list: the item with children keeps the atomic layout (parent row
     // + child item carry one padding gap each); the plain 'next' item flows
@@ -1020,8 +1077,8 @@ void main() {
 
     // A quote that *ends in a list* sheds the last item's gap too (the trim
     // descends through the list's zero-gap wrapper).
-    final listQuote = builder.build('> - cited point\n\nnext paragraph').first
-        as pw.Container;
+    final listQuote =
+        builder.build('> - cited point\n\nnext paragraph').first as pw.Padding;
     final listQuoteBottoms = _allWidgets(listQuote.child!)
         .whereType<pw.Padding>()
         .map((p) => (p.padding as pw.EdgeInsets).bottom);
