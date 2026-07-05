@@ -83,7 +83,7 @@ See `README.md` for full feature/build/store docs. High level:
 
 ## Known security limitation — re-check before related edits
 
-`file_picker` is pinned to **10.3.x** with a **known Android CVE-22** (path
+`file_picker` is pinned to **10.x** (`^10.3.10`) with a **known Android CVE-22** (path
 traversal), because `appflowy_editor` 6.2.0 still calls the file_picker v10 API
 and the fix is only in v11. **Tracked in issue #2.**
 

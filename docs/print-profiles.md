@@ -18,8 +18,9 @@ Each document remembers which profile it uses, and one profile is the app-wide
 with company branding while your personal notes use a plain profile.
 
 Two profiles ship built in — **Personal** and **Work** — plus a **Court Filing**
-profile that demonstrates the legal-formatting options (double spacing, justified
-body, 0.5″ first-line indent, centred captions, monochrome output).
+profile that demonstrates the legal-formatting options (12pt body, double
+spacing, justified body, 0.5″ first-line indent, centred captions, monochrome
+output, text flowing continuously across pages).
 
 ## Why this exists
 
@@ -57,7 +58,12 @@ there you can:
 | **⭱ Import** | Load a profile from a `.json` file (see below). |
 | **⭳ Export** | Save the selected profile as `<name>.print-profile.json`. |
 | **Set as default** | Use this profile for new / unassigned documents. |
-| **Use for this document** | Bind the current file to this profile. |
+| **Pin** | Shows that the selected profile is bound to this file; tap to clear the binding (the document falls back to the default). |
+
+**Selecting a profile for a saved document binds it automatically** — the next
+time you print that file, the same profile is preselected. Unsaved documents
+have no durable identity yet, so their selection sticks once you save the file
+and print again.
 
 The visual editor groups the options into **Identity**, **Branding**, **Branded
 styling**, **Header & footer**, **Confidentiality**, **Legal / manuscript**, and
@@ -141,7 +147,7 @@ Every key below is optional **except `id` and `name`**. Types are JSON types.
 
 | JSON key | Type | Default | Clamp | Meaning |
 | --- | --- | --- | --- | --- |
-| `legalMode` | bool | `false` | — | Monochrome output: headings, bold emphasis, links **and** the header/footer chrome (company name, badge, accent rules, footer) all print in the **body text colour** instead of the brand colour. Turn this on for court/black-and-white output. |
+| `legalMode` | bool | `false` | — | Court-filing output. Monochrome: headings, bold emphasis, links **and** the header/footer chrome (company name, badge, accent rules, footer) all print in the **body text colour** instead of the brand colour. Also sets body text at a uniform **12pt** — captions, list markers and plain `<div>`s included; Markdown headings keep their own sizes (`#####`/h5 renders a 12pt bold title) — keeps one continuous spaced rhythm across paragraph breaks, and lets body paragraphs / list items **flow across page boundaries** so pages fill top to bottom. |
 | `justifyBody` | bool | `false` | — | Justify body paragraphs (flush left *and* right) instead of ragged-right. |
 | `lineSpacingMultiple` | double | `1.0` | `1.0`–`2.0` | Line-height multiple for body text. `1.0` = single (the classic look), `1.5` = one-and-a-half, `2.0` = double. |
 | `firstLineIndentIn` | double | `0.0` | `0.0`–`1.0` | First-line indent for body paragraphs, in **inches** (e.g. `0.5`). `0` = none. |
