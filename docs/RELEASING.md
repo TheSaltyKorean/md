@@ -93,6 +93,14 @@ goes through winget-pkgs moderation before `winget upgrade` sees it.
 
 ### Microsoft Store (Windows) — setup
 
+> **⚠️ ON HOLD (2026-07-06): do not perform these steps yet — don't reserve
+> the name or publish.** The owner is deciding between publishing personally
+> and transferring the app to their business (ISV Success program), pending
+> an answer from their Microsoft rep on whether the consumer Store satisfies
+> the program's publish milestone. See CLAUDE.md → "Distribution & publishing
+> state". If the business route is chosen, an IP assignment/license from the
+> owner comes first.
+
 One-time (only the account owner can do these):
 
 1. Register a [Partner Center](https://partner.microsoft.com/dashboard)
@@ -135,12 +143,6 @@ Requires a Mac + Apple Developer account. Set the bundle id and signing team
 in Xcode (`ios/Runner.xcworkspace`), then `flutter build ipa --release` and
 upload with Transporter or the Xcode Organizer. See
 [iOS deployment](https://docs.flutter.dev/deployment/ios).
-
-### Microsoft Store (Windows)
-Package as MSIX: add the [`msix`](https://pub.dev/packages/msix) dev
-dependency, configure it in `pubspec.yaml`, then `dart run msix:create`
-(or `:publish`). The direct-download MSI/setup.exe above are unsigned and
-separate from the store path.
 
 ### Linux stores
 - **Snap:** add `snap/snapcraft.yaml`, run `snapcraft`, publish to the

@@ -23,10 +23,18 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
 - **Print + PDF export** in a **print-preview tab** (never a modal dialog —
   user rule), with a per-document **branding-profile** system (logo, fonts,
   colors, header/footer, page numbers, classification label + `CONFIDENTIAL`
-  watermark, legal/manuscript layout). Seeded profiles: **Personal**, **Work**,
-  and **Court Filing**. The PDF renderer also supports a small inline-HTML
-  subset (span fill-in blanks/labels, div alignment + flex rows) — see
+  watermark, legal/manuscript layout). Selecting a profile for a saved
+  document **binds it automatically** (edits/defaults never bind; unpin is
+  final; bindings follow Save As). Seeded profiles: **Personal**, **Work**,
+  and **Court Filing**. Legal mode: uniform 12pt body, continuous
+  double-spaced rhythm, paragraphs/list items **flow across pages**; tall
+  code blocks/quotes paginate and images cap to a page. The PDF renderer
+  also supports a small inline-HTML subset (span fill-in blanks/labels, div
+  alignment + flex rows, page-break directives) — see
   `docs/pdf-inline-html.md`.
+- About reads the app version from build metadata (`package_info_plus`) —
+  never hardcode a version string in UI. A "Support the project ❤" menu item
+  opens https://venmo.com/u/thesaltykorean (also badged in the README).
 
 ## Standing rules (from the user — always follow)
 
@@ -68,6 +76,14 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
      explicit user approval, and never re-review only part of a change — re-run
      Codex on the **final** head before merge so nothing slips through
      unreviewed (this exact gap shipped a P1 once; don't repeat it).
+   - **Resolve the review threads** (GitHub "resolve conversation") for every
+     finding in the same round its fix is pushed — don't leave addressed
+     comments dangling (user rule, 2026-07-05). Note the bot's clean verdict
+     arrives as an *issue comment*, and old inline comments get re-anchored
+     to new heads — check timestamps before treating one as a new finding.
+     If Codex raises a **false positive**, rebut it on the PR with evidence
+     instead of changing correct code (precedent: PR #21's "String has no
+     operator *").
 2. **Prune branches after every merge.** As soon as a PR is merged, delete its
    remote branch (`git push origin --delete <branch>`, or `gh pr merge`'s
    `--delete-branch` flag) and run `git remote prune origin` (plus delete any
@@ -82,6 +98,42 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
 6. **Printing must stay functional**, including the themeable header/footer and
    the per-document branding-profile system. The print preview opens in a
    **workspace tab**, not a modal dialog — keep it that way.
+7. **Keep the README short** (badges, direct download links, highlights).
+   Details belong in `docs/DEVELOPMENT.md` / `docs/RELEASING.md`.
+8. **Never regenerate or lose the Android upload keystore.** It exists only
+   in the owner's password manager (base64 text + password; GitHub secrets
+   are write-only, not a backup). A new keystore changes the signing
+   certificate and breaks in-place updates for every installed user.
+   Cert SHA-256 ends in `…AE:CA:61:3F`.
+
+## Distribution & publishing state (as of 2026-07-06)
+
+- **Releases**: pushing a `v*` tag builds and publishes everything
+  (`release.yml`); `workflow_dispatch` = dry run (no publish). Assets use
+  stable versionless names so the README deep-links
+  `releases/latest/download/…`. Latest: **v1.0.2**.
+- **Windows**: MSI (WiX 5, permanent UpgradeCode — never change it),
+  Inno setup.exe, portable zip. All unsigned; Store/winget are the trusted
+  channels. WiX is pinned to 5.x (v6+ gates behind the OSMF EULA).
+- **winget**: initial submission for 1.0.1 is
+  [microsoft/winget-pkgs#398219](https://github.com/microsoft/winget-pkgs/pull/398219)
+  (CLA signed by the owner **as an individual**). Future releases
+  auto-update via the `winget` job once the `WINGET_TOKEN` secret (classic
+  PAT, `public_repo`) is set; the job skips until the package exists
+  upstream.
+- **Microsoft Store**: pipeline-ready (MSIX step gated on
+  `MSIX_IDENTITY_NAME` / `MSIX_PUBLISHER` / `MSIX_PUBLISHER_DISPLAY_NAME`
+  secrets; `PRIVACY.md` for the listing). **ON HOLD — do not publish or
+  reserve the name**: the owner is deciding whether to publish personally
+  ($19 individual account) or transfer the app to their business, whose
+  **ISV Success** enrollment needs a published app. Waiting on the owner's
+  Microsoft rep to confirm whether the consumer Store satisfies that
+  milestone (the commercial marketplace doesn't take desktop apps). If the
+  business route is chosen: paper an IP assignment/license from the owner
+  first, and revisit the personal Venmo support link in that build.
+- **Android**: releases carry a signed APK + AAB (keystore secrets set).
+  Signing values reach Gradle via env vars, never a CI key.properties.
+  Play listing not created yet; enroll in **Play App Signing** when it is.
 
 ## Known security limitation — re-check before related edits
 
