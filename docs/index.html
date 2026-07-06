@@ -3,8 +3,51 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Markdown Studio — draft with AI, file with confidence</title>
-<meta name="description" content="Free cross-platform Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings. Windows, Linux, Android, iOS, macOS.">
+<title>Markdown Studio — free Markdown editor with court-ready PDF export</title>
+<meta name="description" content="Free cross-platform Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings for pro se litigants. WYSIWYG editing, print profiles, AI-friendly. Windows, Linux, Android, iOS, macOS.">
+<link rel="canonical" href="https://thesaltykorean.github.io/md/">
+<meta name="google-site-verification" content="75LFaX1i0HDM1nsPLfFTvQyXdKizXjRzZi7SdhTRUMs">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Markdown Studio — draft with AI, file with confidence">
+<meta property="og:description" content="Free Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings. Windows, Linux, Android, iOS, macOS.">
+<meta property="og:url" content="https://thesaltykorean.github.io/md/">
+<meta property="og:image" content="https://thesaltykorean.github.io/md/assets/print-preview-court.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Markdown Studio — draft with AI, file with confidence">
+<meta name="twitter:description" content="Free Markdown editor with court-ready PDF export. Windows, Linux, Android, iOS, macOS.">
+<meta name="twitter:image" content="https://thesaltykorean.github.io/md/assets/print-preview-court.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Markdown Studio",
+  "operatingSystem": "Windows, Linux, Android, iOS, macOS",
+  "applicationCategory": "BusinessApplication",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
+  "url": "https://thesaltykorean.github.io/md/",
+  "downloadUrl": "https://github.com/TheSaltyKorean/md/releases/latest",
+  "screenshot": "https://thesaltykorean.github.io/md/assets/print-preview-court.png",
+  "softwareVersion": "1.0.2",
+  "license": "https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md",
+  "description": "Free cross-platform Markdown viewer and WYSIWYG editor that turns plain-text drafts into polished PDFs, including court-compliant filings: 12pt double-spaced justified body, case captions, certificates of service."
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "Is Markdown Studio free?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes — free for personal, research, and other non-commercial use under the PolyForm Noncommercial license, with the full source available on GitHub."}},
+    {"@type": "Question", "name": "Can it really format court filings?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Yes. The built-in Court Filing profile prints 12pt double-spaced justified text with first-line indents, centered court headers, two-column case captions, signature lines, and page breaks (e.g. a certificate of service on its own page). Always check your local court rules — formatting requirements vary."}},
+    {"@type": "Question", "name": "Does it work with AI assistants?",
+     "acceptedAnswer": {"@type": "Answer", "text": "That's the core workflow: assistants draft in Markdown, Markdown Studio prints it. Print templates are plain JSON that an AI can generate from a plain-English description using the prompt included in the docs."}},
+    {"@type": "Question", "name": "Which platforms are supported?",
+     "acceptedAnswer": {"@type": "Answer", "text": "Windows (MSI, setup.exe, or portable zip), Linux (.deb or tar.gz), Android (APK), macOS, and iOS, all built from a single Flutter codebase."}}
+  ]
+}
+</script>
 <style>
   :root{--bg:#ffffff;--fg:#1a1a1a;--muted:#555;--card:#f5f5f7;--accent:#1a237e;--btn:#1a237e;--btnfg:#fff;--border:#e3e3e8}
   @media (prefers-color-scheme: dark){
@@ -83,6 +126,16 @@
   <img class="shot" src="assets/split-view.png"
        alt="Split view showing Markdown source with a floating format toolbar next to the live preview">
   <p class="cap">Split view — raw Markdown with the floating format toolbar, live preview beside it.</p>
+
+  <section>
+    <h2>Common questions</h2>
+    <div class="grid">
+      <div class="card"><h3>Is it free?</h3><p>Yes — free for personal, research and other non-commercial use (PolyForm Noncommercial), source on GitHub.</p></div>
+      <div class="card"><h3>Can it really format court filings?</h3><p>Yes — 12pt double-spaced justified body, captions, signature lines, page breaks. Always check your local court's rules.</p></div>
+      <div class="card"><h3>Does it work with AI assistants?</h3><p>That's the point: assistants draft the Markdown, Studio prints it. Templates are JSON an AI can generate for you.</p></div>
+      <div class="card"><h3>Which platforms?</h3><p>Windows, Linux, Android, macOS and iOS — one codebase, native builds on every release.</p></div>
+    </div>
+  </section>
 
   <section>
     <h2>Get it</h2>

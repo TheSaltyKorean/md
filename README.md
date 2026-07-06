@@ -2,6 +2,7 @@
 
 [![Support this project on Venmo](https://img.shields.io/badge/%E2%9D%A4%20Support%20this%20project-Venmo-3D95CE?logo=venmo&logoColor=white)](https://venmo.com/u/thesaltykorean)
 [![Latest release](https://img.shields.io/github/v/release/TheSaltyKorean/md?label=Latest%20release)](https://github.com/TheSaltyKorean/md/releases/latest)
+[![Website](https://img.shields.io/badge/Website-thesaltykorean.github.io%2Fmd-2ea44f)](https://thesaltykorean.github.io/md/)
 
 Write in Markdown, publish polished PDFs — including court-ready filings.
 A cross-platform viewer + Notion-style WYSIWYG editor for **Windows, Linux,
