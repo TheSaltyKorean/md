@@ -72,7 +72,54 @@ class FileAssociationService {
     return false;
   }
 
-  Future<bool> _associateWindows() async {
+  /// Windows self-heal: if our ProgID's open command points at a *different*
+  /// executable than the one running — classic case: a locally built copy
+  /// registered the association, then the user installed the app, so
+  /// double-clicking `.md` files keeps launching the stale build — re-point
+  /// the registration to this executable. Only an **installed** copy (under
+  /// Program Files) asserts ownership; ad-hoc dev builds never silently
+  /// steal the association back. Runs quietly (no Settings pane).
+  Future<void> repairRegistrationIfNeeded() async {
+    if (kIsWeb || !Platform.isWindows) return;
+    try {
+      final res = await Process.run('reg', [
+        'query',
+        'HKCU\\Software\\Classes\\$progId\\shell\\open\\command',
+        '/ve',
+      ]);
+      if (res.exitCode != 0) return; // never registered — nothing to repair
+      if (needsRepair(
+        exe: Platform.resolvedExecutable,
+        programDirs: [
+          Platform.environment['ProgramFiles'],
+          Platform.environment['ProgramFiles(x86)'],
+        ],
+        registeredCommand: res.stdout.toString(),
+      )) {
+        await _associateWindows(openSettings: false);
+      }
+    } catch (_) {/* best effort */}
+  }
+
+  /// Pure decision for [repairRegistrationIfNeeded]: repair only when this
+  /// executable lives under a Program Files directory (an installed copy)
+  /// and the registered open command doesn't already point at it.
+  @visibleForTesting
+  static bool needsRepair({
+    required String exe,
+    required List<String?> programDirs,
+    required String? registeredCommand,
+  }) {
+    if (registeredCommand == null) return false;
+    final e = exe.toLowerCase();
+    final installed = programDirs
+        .whereType<String>()
+        .any((p) => p.isNotEmpty && e.startsWith('${p.toLowerCase()}\\'));
+    if (!installed) return false;
+    return !registeredCommand.toLowerCase().contains(e);
+  }
+
+  Future<bool> _associateWindows({bool openSettings = true}) async {
     final exe = Platform.resolvedExecutable.replaceAll(r'\', r'\\');
     final reg = StringBuffer()
       ..writeln('Windows Registry Editor Version 5.00')
@@ -93,8 +140,10 @@ class FileAssociationService {
     final file = File('${Directory.systemTemp.path}\\md_assoc.reg');
     await file.writeAsString(reg.toString());
     final res = await Process.run('reg', ['import', file.path]);
-    // Surface Default Apps so the user can set us as the default for .md.
-    await Process.run('cmd', ['/c', 'start', '', 'ms-settings:defaultapps']);
+    if (openSettings) {
+      // Surface Default Apps so the user can set us as the default for .md.
+      await Process.run('cmd', ['/c', 'start', '', 'ms-settings:defaultapps']);
+    }
     return res.exitCode == 0;
   }
 

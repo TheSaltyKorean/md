@@ -282,6 +282,53 @@ void main() {
     expect(service.assignedId('/tmp/e.md'), 'work');
   });
 
+  test('Association repair: installed copies reclaim, dev builds never', () {
+    const pf = r'C:\Program Files';
+    const pf86 = r'C:\Program Files (x86)';
+    const installedExe =
+        r'C:\Program Files\Markdown Studio\markdown_studio.exe';
+    const devExe = r'C:\git\md\build\windows\x64\runner\Release'
+        r'\markdown_studio.exe';
+
+    // Installed copy + registration pointing at a dev build → repair.
+    expect(
+        FileAssociationService.needsRepair(
+          exe: installedExe,
+          programDirs: const [pf, pf86],
+          registeredCommand: '(Default)    REG_SZ    "$devExe" "%1"',
+        ),
+        isTrue);
+
+    // Registration already points at this installed copy → leave alone
+    // (case-insensitive, as the registry is).
+    expect(
+        FileAssociationService.needsRepair(
+          exe: installedExe,
+          programDirs: const [pf, pf86],
+          registeredCommand:
+              '(Default)    REG_SZ    "${installedExe.toUpperCase()}" "%1"',
+        ),
+        isFalse);
+
+    // A dev build must never steal the association back.
+    expect(
+        FileAssociationService.needsRepair(
+          exe: devExe,
+          programDirs: const [pf, pf86],
+          registeredCommand: '(Default)    REG_SZ    "$installedExe" "%1"',
+        ),
+        isFalse);
+
+    // Never registered → nothing to repair.
+    expect(
+        FileAssociationService.needsRepair(
+          exe: installedExe,
+          programDirs: const [pf, pf86],
+          registeredCommand: null,
+        ),
+        isFalse);
+  });
+
   test('Print profiles seed with built-ins', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
