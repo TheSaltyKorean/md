@@ -93,6 +93,14 @@ goes through winget-pkgs moderation before `winget upgrade` sees it.
 
 ### Microsoft Store (Windows) — setup
 
+> **⚠️ ON HOLD (2026-07-06): do not perform these steps yet — don't reserve
+> the name or publish.** The owner is deciding between publishing personally
+> and transferring the app to their business (ISV Success program), pending
+> an answer from their Microsoft rep on whether the consumer Store satisfies
+> the program's publish milestone. See CLAUDE.md → "Distribution & publishing
+> state". If the business route is chosen, an IP assignment/license from the
+> owner comes first.
+
 One-time (only the account owner can do these):
 
 1. Register a [Partner Center](https://partner.microsoft.com/dashboard)
