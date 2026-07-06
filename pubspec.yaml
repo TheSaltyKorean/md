@@ -4,7 +4,7 @@ publish_to: "none"
 
 # App version. Format: <semver>+<buildNumber>.
 # The build number must be incremented for every store submission.
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
@@ -56,6 +56,9 @@ dependencies:
   # Open links from rendered Markdown in the system browser.
   url_launcher: ^6.3.1
 
+  # App + build metadata at runtime (About dialog shows the real version).
+  package_info_plus: ^8.3.0
+
   # Watch the open file for external changes (git pull, sync, other editors).
   watcher: ^1.1.0
 
@@ -81,6 +84,20 @@ dev_dependencies:
   flutter_lints: ^4.0.0
   # Test-only: synthesize a tall image to exercise the PDF image height cap.
   image: ^4.0.0
+  # Microsoft Store packaging (dart run msix:create --store); identity values
+  # are overridden in CI from the MSIX_* secrets — see docs/RELEASING.md.
+  msix: ^3.16.9
 
 flutter:
   uses-material-design: true
+
+# Microsoft Store MSIX packaging (dart run msix:create --store). The identity
+# placeholders below are overridden in the release workflow with the real
+# Partner Center values (MSIX_IDENTITY_NAME / MSIX_PUBLISHER_DISPLAY_NAME
+# secrets) — see docs/RELEASING.md for the one-time Partner Center setup.
+msix_config:
+  display_name: Markdown Studio
+  identity_name: com.markdownstudio.markdownstudio
+  publisher_display_name: Markdown Studio
+  logo_path: android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+  store: true

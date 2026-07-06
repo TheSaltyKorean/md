@@ -67,7 +67,63 @@ manager (as base64 text) — GitHub secrets are write-only and are *not* a
 backup. When creating the Play listing, enroll in **Play App Signing** so
 this becomes a resettable upload key.
 
+## winget
+
+Markdown Studio is published to the Windows Package Manager
+(`winget install markdown-studio`, identifier
+`TheSaltyKorean.MarkdownStudio`; first submission:
+[winget-pkgs#398219](https://github.com/microsoft/winget-pkgs/pull/398219)).
+
+Each tagged release updates it automatically: the `winget` job runs
+[winget-releaser](https://github.com/vedantmgoyal9/winget-releaser) after the
+GitHub Release is published, regenerating the manifests from the release's
+MSI and opening the PR to `microsoft/winget-pkgs`. It requires the
+**`WINGET_TOKEN`** repo secret — a classic PAT with `public_repo` scope
+(the fork + PR are created under that account). Without the secret the job
+is skipped and the manifest can be submitted manually (komac/wingetcreate).
+The job also checks that the package already exists in `winget-pkgs` and
+skips quietly until the initial submission has merged — winget-releaser
+fails hard on unknown identifiers.
+
+Note winget's limits: it verifies installer *integrity* (SHA-256), not
+publisher identity — the MSI itself is still unsigned — and each version PR
+goes through winget-pkgs moderation before `winget upgrade` sees it.
+
 ## Store submission
+
+### Microsoft Store (Windows) — setup
+
+One-time (only the account owner can do these):
+
+1. Register a [Partner Center](https://partner.microsoft.com/dashboard)
+   **individual** developer account ($19 one-time).
+2. **Reserve the app name** "Markdown Studio" (Apps and games → New product).
+3. From *Product management → Product identity*, copy three values into repo
+   secrets: **`MSIX_IDENTITY_NAME`** (`Package/Identity/Name`, e.g.
+   `12345TheSaltyKorean.MarkdownStudio`), **`MSIX_PUBLISHER`**
+   (`Package/Identity/Publisher` — the `CN={GUID}` string), and
+   **`MSIX_PUBLISHER_DISPLAY_NAME`** (the publisher display name). All three
+   are required; the Store packaging step is skipped until they exist.
+
+The MSIX package version carries the pubspec build number as its fourth
+part (`1.0.2+3` → `1.0.2.3`), so bumping only the build number still
+produces a "newer" package for Partner Center resubmissions.
+
+With those secrets set, every tagged release also produces
+`markdown-studio-windows-store.msix` (built with `dart run msix:create
+--store`; the Store signs it on publication — no certificate needed). Then
+per release: upload that `.msix` in a Partner Center submission, fill the
+listing (screenshots, description), point the privacy-policy field at
+[`PRIVACY.md`](../PRIVACY.md) (the app makes one network request type:
+Google Fonts at print time), complete the age-rating questionnaire, and
+submit for certification.
+
+**Pricing/monetization:** the app ships free with an in-app
+“Support the project ❤” link (menu → opens the Venmo page in the browser),
+which is Store-policy-safe. A paid listing or Store in-app purchases can be
+adopted later without code changes to the free path — as the copyright
+holder you can sell the app commercially yourself; the PolyForm Noncommercial
+license only restricts *others'* commercial use.
 
 ### Google Play (Android)
 Upload the release `.aab` in the Play Console; complete the listing,

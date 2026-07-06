@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemNavigator;
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../models/editor_mode.dart';
@@ -442,6 +444,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 value: 'print',
                 enabled: active != null,
                 child: const Text('Print / Export PDF')),
+            const PopupMenuItem(
+                value: 'support', child: Text('Support the project ❤')),
             const PopupMenuItem(value: 'about', child: Text('About')),
           ],
         ),
@@ -488,6 +492,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               value: 'saveAs',
               enabled: active != null,
               child: const Text('Save As…')),
+          const PopupMenuItem(
+              value: 'support', child: Text('Support the project ❤')),
           const PopupMenuItem(value: 'about', child: Text('About')),
         ],
       ),
@@ -718,16 +724,40 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       case 'print':
         if (active != null) _print(context, active);
         break;
+      case 'support':
+        _support(context);
+        break;
       case 'about':
-        showAboutDialog(
-          context: context,
-          applicationName: 'Markdown Studio',
-          applicationVersion: '1.0.0',
-          applicationLegalese:
-              'A cross-platform Markdown viewer & WYSIWYG editor.',
-        );
+        _about(context);
         break;
     }
+  }
+
+  /// Open the project's support (donation) page in the external browser.
+  Future<void> _support(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await launchUrl(
+      Uri.parse('https://venmo.com/u/thesaltykorean'),
+      mode: LaunchMode.externalApplication,
+    );
+    if (!ok) {
+      messenger.showSnackBar(const SnackBar(
+          content:
+              Text('Could not open the browser — venmo.com/u/thesaltykorean')));
+    }
+  }
+
+  /// Show About with the app's real version (read from the build metadata —
+  /// a hardcoded string here once shipped stale).
+  Future<void> _about(BuildContext context) async {
+    final info = await PackageInfo.fromPlatform();
+    if (!context.mounted) return;
+    showAboutDialog(
+      context: context,
+      applicationName: 'Markdown Studio',
+      applicationVersion: info.version,
+      applicationLegalese: 'A cross-platform Markdown viewer & WYSIWYG editor.',
+    );
   }
 }
 
