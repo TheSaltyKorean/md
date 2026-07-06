@@ -175,9 +175,9 @@ jobs:
     name: Windows (x64)
     runs-on: windows-latest
     env:
-      # Store packaging runs only when the Partner Center identity secrets
+      # Store packaging runs only when all Partner Center identity secrets
       # exist; secrets can't be used in step `if:` directly.
-      HAS_STORE_IDENTITY: ${{ secrets.MSIX_IDENTITY_NAME != '' }}
+      HAS_STORE_IDENTITY: ${{ secrets.MSIX_IDENTITY_NAME != '' && secrets.MSIX_PUBLISHER != '' && secrets.MSIX_PUBLISHER_DISPLAY_NAME != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Compute package version
@@ -236,14 +236,25 @@ jobs:
         if: env.HAS_STORE_IDENTITY == 'true'
         # Identity values come from Partner Center (see docs/RELEASING.md);
         # the Store signs the package on publication, so no certificate is
-        # needed here.
+        # needed here. --store additionally requires the Package/Identity/
+        # Publisher value (the CN=… GUID string) — MSIX_PUBLISHER.
         env:
           MSIX_IDENTITY_NAME: ${{ secrets.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ secrets.MSIX_PUBLISHER }}
           MSIX_PUBLISHER_DISPLAY_NAME: ${{ secrets.MSIX_PUBLISHER_DISPLAY_NAME }}
         shell: pwsh
         run: |
+          # MSIX versions are four-part; carry the pubspec build number as the
+          # revision (1.0.2+3 -> 1.0.2.3) so every store upload is "newer"
+          # even when the semver hasn't changed.
+          $pubver = (Select-String '^version:\s*(.+)$' pubspec.yaml).Matches[0].Groups[1].Value.Trim()
+          $parts = $pubver -split '\+'
+          $build = if ($parts.Length -gt 1) { $parts[1] } else { '0' }
+          $msixVersion = "$($parts[0]).$build"
           dart run msix:create --store `
+            --version $msixVersion `
             --identity-name $env:MSIX_IDENTITY_NAME `
+            --publisher $env:MSIX_PUBLISHER `
             --publisher-display-name $env:MSIX_PUBLISHER_DISPLAY_NAME
           Copy-Item build/windows/x64/runner/Release/markdown_studio.msix `
             dist/markdown-studio-windows-store.msix
@@ -359,8 +370,22 @@ jobs:
       # and opens the manifest-update PR. Skipped when absent.
       HAS_WINGET_TOKEN: ${{ secrets.WINGET_TOKEN != '' }}
     steps:
+      - name: Check the package exists in winget-pkgs
+        id: winget_pkg
+        # winget-releaser fails hard when the identifier isn't in
+        # microsoft/winget-pkgs yet (the initial submission is a manually
+        # opened PR); skip quietly until that first manifest has merged.
+        shell: pwsh
+        run: |
+          $resp = Invoke-WebRequest -Method Head -SkipHttpErrorCheck -Uri `
+            "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/t/TheSaltyKorean/MarkdownStudio"
+          $exists = ($resp.StatusCode -eq 200).ToString().ToLower()
+          "exists=$exists" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          if ($exists -eq 'false') {
+            Write-Host "::notice::TheSaltyKorean.MarkdownStudio not in winget-pkgs yet - skipping manifest update."
+          }
       - name: Submit winget manifest update
-        if: env.HAS_WINGET_TOKEN == 'true'
+        if: env.HAS_WINGET_TOKEN == 'true' && steps.winget_pkg.outputs.exists == 'true'
         uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: TheSaltyKorean.MarkdownStudio
