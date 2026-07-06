@@ -2,11 +2,22 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://thesaltykorean.github.io/md/</loc>
-    <changefreq>weekly</changefreq>
-    <priority>1.0</priority>
+    <lastmod>2026-07-06</lastmod>
+  </url>
+  <url>
+    <loc>https://thesaltykorean.github.io/md/print-profiles.html</loc>
+    <lastmod>2026-07-06</lastmod>
+  </url>
+  <url>
+    <loc>https://thesaltykorean.github.io/md/pdf-inline-html.html</loc>
+    <lastmod>2026-07-06</lastmod>
+  </url>
+  <url>
+    <loc>https://thesaltykorean.github.io/md/ai-profile-authoring.html</loc>
+    <lastmod>2026-07-06</lastmod>
   </url>
   <url>
     <loc>https://thesaltykorean.github.io/md/samples/motion-for-continuance.pdf</loc>
-    <changefreq>monthly</changefreq>
+    <lastmod>2026-07-06</lastmod>
   </url>
 </urlset>
