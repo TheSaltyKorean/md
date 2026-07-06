@@ -7,6 +7,32 @@ Write in Markdown, publish polished PDFs — including court-ready filings.
 A cross-platform viewer + Notion-style WYSIWYG editor for **Windows, Linux,
 Android, iOS and macOS**, built with Flutter.
 
+**Draft with AI, file with confidence.** AI assistants read and write
+Markdown fluently; Markdown Studio is the polish-and-print step — pick a
+profile and the same plain-text draft comes out as a branded report or a
+court-compliant pleading (12pt, double-spaced, justified, captions,
+certificate of service).
+
+<p align="center">
+  <img src="docs/assets/print-preview-court.png"
+       alt="A Markdown motion rendered as a court-compliant PDF in the print-preview tab"
+       width="850">
+</p>
+<p align="center"><em>A plain-Markdown motion rendered with the built-in
+Court Filing profile — centered court header, margin-to-margin caption,
+double-spaced justified body. Source + result:
+<a href="docs/samples/motion-for-continuance.md">motion-for-continuance.md</a>
+→ <a href="docs/samples/motion-for-continuance.pdf">PDF</a>.</em></p>
+
+<p align="center">
+  <img src="docs/assets/split-view.png"
+       alt="Split view: Markdown source with the floating format toolbar beside the live preview"
+       width="850">
+</p>
+<p align="center"><em>Split view — raw Markdown (with the floating format
+toolbar) beside the live preview. Printing opens in its own tab, so you can
+keep editing.</em></p>
+
 ## Download
 
 | Platform | Get it |
