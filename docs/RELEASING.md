@@ -144,12 +144,6 @@ in Xcode (`ios/Runner.xcworkspace`), then `flutter build ipa --release` and
 upload with Transporter or the Xcode Organizer. See
 [iOS deployment](https://docs.flutter.dev/deployment/ios).
 
-### Microsoft Store (Windows)
-Package as MSIX: add the [`msix`](https://pub.dev/packages/msix) dev
-dependency, configure it in `pubspec.yaml`, then `dart run msix:create`
-(or `:publish`). The direct-download MSI/setup.exe above are unsigned and
-separate from the store path.
-
 ### Linux stores
 - **Snap:** add `snap/snapcraft.yaml`, run `snapcraft`, publish to the
   Snap Store.
