@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Markdown Studio — draft with AI, file with confidence</title>
+<meta name="description" content="Free cross-platform Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings. Windows, Linux, Android, iOS, macOS.">
+<style>
+  :root{--bg:#ffffff;--fg:#1a1a1a;--muted:#555;--card:#f5f5f7;--accent:#1a237e;--btn:#1a237e;--btnfg:#fff;--border:#e3e3e8}
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#121216;--fg:#ececf1;--muted:#a0a0ab;--card:#1d1d24;--accent:#8c9eff;--btn:#3d5afe;--btnfg:#fff;--border:#2a2a33}
+  }
+  *{box-sizing:border-box;margin:0}
+  body{font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:960px;margin:0 auto;padding:0 20px}
+  header{padding:64px 0 32px;text-align:center}
+  h1{font-size:2.4rem;line-height:1.15;margin-bottom:12px}
+  .tag{font-size:1.2rem;color:var(--muted);max-width:44em;margin:0 auto}
+  .cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:28px 0 8px}
+  .btn{display:inline-block;padding:12px 22px;border-radius:10px;background:var(--btn);color:var(--btnfg);text-decoration:none;font-weight:600}
+  .btn.alt{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
+  .note{font-size:.85rem;color:var(--muted);text-align:center}
+  .shot{width:100%;border-radius:12px;border:1px solid var(--border);margin:28px 0 6px;display:block}
+  .cap{font-size:.9rem;color:var(--muted);text-align:center;margin-bottom:24px}
+  section{padding:36px 0}
+  h2{font-size:1.5rem;margin-bottom:16px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px}
+  .card h3{font-size:1.05rem;margin-bottom:6px}
+  .card p{font-size:.95rem;color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:.95rem}
+  td,th{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left}
+  a{color:var(--accent)}
+  footer{padding:40px 0 56px;color:var(--muted);font-size:.9rem;text-align:center}
+  code{background:var(--card);padding:2px 6px;border-radius:6px;font-size:.9em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Markdown Studio</h1>
+    <p class="tag"><strong>Draft with AI, file with confidence.</strong>
+    A free Markdown viewer and Notion-style WYSIWYG editor that turns
+    plain-text drafts into polished PDFs — branded reports, technical specs,
+    and court-compliant filings.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/TheSaltyKorean/md/releases/latest">⬇ Download</a>
+      <a class="btn alt" href="https://github.com/TheSaltyKorean/md">View on GitHub</a>
+      <a class="btn alt" href="https://venmo.com/u/thesaltykorean">❤ Support</a>
+    </div>
+    <p class="note">Windows (MSI / setup.exe / portable) · Linux (.deb / tar.gz) · Android APK · macOS · iOS — free for non-commercial use</p>
+  </header>
+
+  <img class="shot" src="assets/print-preview-court.png"
+       alt="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
+  <p class="cap">A plain-Markdown motion, printed with the built-in <strong>Court Filing</strong>
+  profile: centered court header, margin-to-margin caption, 12pt double-spaced justified body,
+  certificate of service on its own page.
+  (<a href="samples/motion-for-continuance.md">source</a> →
+  <a href="samples/motion-for-continuance.pdf">PDF</a>)</p>
+
+  <section>
+    <h2>Why it exists</h2>
+    <p>AI assistants read and write Markdown far better than any other format —
+    but the world wants finished PDFs. Markdown Studio is the missing last step:
+    keep the source in Markdown, let the AI do the drafting, pick a profile, print.
+    Born from a real pro se litigant's workflow, where filings must follow strict
+    formatting rules that no Markdown tool could produce.</p>
+  </section>
+
+  <section>
+    <h2>Highlights</h2>
+    <div class="grid">
+      <div class="card"><h3>Four view modes</h3><p>Notion-style WYSIWYG editing, split source + live preview, raw source, and read-only preview.</p></div>
+      <div class="card"><h3>Print &amp; PDF studio</h3><p>Per-document branding profiles — fonts, colors, logos, headers/footers, watermarks — in a print-preview tab. Profiles are plain JSON an AI can generate.</p></div>
+      <div class="card"><h3>Court-filing mode</h3><p>Uniform 12pt, double-spaced, justified, first-line indents, monochrome; text flows continuously across pages like a real pleading.</p></div>
+      <div class="card"><h3>Forms in Markdown</h3><p>Fill-in blanks, signature lines, two-column captions, and forced page breaks via a small inline-HTML subset.</p></div>
+      <div class="card"><h3>Editor comforts</h3><p>Multi-document tabs, find &amp; replace, drag &amp; drop, auto-reload of external changes, light/dark themes.</p></div>
+      <div class="card"><h3>Free &amp; source-available</h3><p>PolyForm Noncommercial license — free for personal, research, and other non-commercial use, with the full source on GitHub.</p></div>
+    </div>
+  </section>
+
+  <img class="shot" src="assets/split-view.png"
+       alt="Split view showing Markdown source with a floating format toolbar next to the live preview">
+  <p class="cap">Split view — raw Markdown with the floating format toolbar, live preview beside it.</p>
+
+  <section>
+    <h2>Get it</h2>
+    <table>
+      <tr><th>Windows</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64.msi">MSI installer</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-setup.exe">setup.exe</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-portable.zip">portable zip</a></td></tr>
+      <tr><th>Linux</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-amd64.deb">.deb package</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-x64-portable.tar.gz">portable tar.gz</a></td></tr>
+      <tr><th>Android</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-android.apk">APK</a> (signed)</td></tr>
+      <tr><th>macOS</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-macos.zip">app zip</a> (unsigned — right-click → Open)</td></tr>
+      <tr><th>iOS</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-ios-unsigned.ipa">unsigned IPA</a> (sideload)</td></tr>
+    </table>
+    <p class="note" style="margin-top:10px">Install notes ship with every
+    <a href="https://github.com/TheSaltyKorean/md/releases/latest">release</a>.</p>
+  </section>
+
+  <footer>
+    <p>Markdown Studio · <a href="https://github.com/TheSaltyKorean/md">GitHub</a> ·
+    <a href="https://github.com/TheSaltyKorean/md/blob/main/PRIVACY.md">Privacy</a> ·
+    <a href="https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md">License</a> ·
+    <a href="https://venmo.com/u/thesaltykorean">Support the project ❤</a></p>
+    <p style="margin-top:6px">Not legal advice; formatting requirements vary by court — always check your local rules.</p>
+  </footer>
+</div>
+</body>
+</html>
