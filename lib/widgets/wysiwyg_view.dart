@@ -22,6 +22,11 @@ class WysiwygView extends StatelessWidget {
     final editorStyle = EditorStyle.desktop(
       cursorColor: theme.colorScheme.primary,
       selectionColor: theme.colorScheme.primary.withValues(alpha: 0.25),
+      // AppFlowy ignores the ambient MediaQuery text scaler and applies its
+      // own factor. Re-derive it from the ambient scaler (accessibility text
+      // size × document zoom, composed by EditorScreen) against this
+      // editor's 16pt base, so all view modes scale identically.
+      textScaleFactor: MediaQuery.textScalerOf(context).scale(16) / 16,
       textStyleConfiguration: TextStyleConfiguration(
         text: theme.textTheme.bodyLarge!.copyWith(
           fontSize: 16,

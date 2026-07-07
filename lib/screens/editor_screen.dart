@@ -6,7 +6,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/gestures.dart'
     show PointerScrollEvent, PointerSignalEvent;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey, SystemNavigator;
+import 'package:flutter/services.dart'
+    show HardwareKeyboard, LogicalKeyboardKey, SystemNavigator;
 import 'package:path/path.dart' as p;
 import 'package:provider/provider.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -21,6 +22,7 @@ import '../services/single_instance_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
 import '../state/workspace_controller.dart';
+import '../state/zoom_controller.dart';
 import '../widgets/find_controller.dart';
 import '../widgets/format_toolbar.dart';
 import '../widgets/preview_view.dart';
@@ -94,6 +96,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final single = context.read<SingleInstanceService>();
     final theme = context.read<ThemeController>();
     final profiles = context.read<PrintProfileService>();
+    final zoom = context.read<ZoomController>();
     final anyDirty = ws.documents.any((d) => d.isDirty);
     if (anyDirty && mounted) {
       final ok = await _confirmDiscard(context, 'One or more open documents');
@@ -107,6 +110,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         ws.pendingWrites,
         theme.pendingWrites,
         profiles.pendingWrites,
+        zoom.pendingWrites,
       ]).timeout(const Duration(seconds: 2));
     } catch (_) {}
     // Release the long-lived event sources (single-instance ServerSocket + file
@@ -239,6 +243,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   Widget build(BuildContext context) {
     final ws = context.watch<WorkspaceController>();
     final theme = context.watch<ThemeController>();
+    final zoom = context.watch<ZoomController>();
     final activeTab = ws.activeTab;
     // Null when the active tab is a print preview rather than a document.
     final active = ws.activeDocument;
@@ -304,6 +309,51 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           const SingleActivator(LogicalKeyboardKey.escape): () {
             if (_find.visible) _find.hide();
           },
+          // Browser-style zoom. "+" is Shift+= on most layouts, so both the
+          // plain and shifted "=" activate zoom-in; numpad keys included.
+          // Zoom only applies to document tabs — on a print-preview tab the
+          // inputs are inert so PdfPreview's own zoom/scroll isn't shadowed
+          // by silently changing (and persisting) the document zoom.
+          for (final key in [
+            LogicalKeyboardKey.equal,
+            LogicalKeyboardKey.add, // layouts with a dedicated "+" key
+            LogicalKeyboardKey.numpadAdd,
+          ]) ...{
+            SingleActivator(key, control: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+            SingleActivator(key, control: true, shift: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+            SingleActivator(key, meta: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+            SingleActivator(key, meta: true, shift: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+          },
+          for (final key in [
+            LogicalKeyboardKey.minus,
+            LogicalKeyboardKey.numpadSubtract,
+          ]) ...{
+            SingleActivator(key, control: true): () {
+              if (active != null) zoom.zoomOut();
+            },
+            SingleActivator(key, meta: true): () {
+              if (active != null) zoom.zoomOut();
+            },
+          },
+          for (final key in [
+            LogicalKeyboardKey.digit0,
+            LogicalKeyboardKey.numpad0,
+          ]) ...{
+            SingleActivator(key, control: true): () {
+              if (active != null) zoom.reset();
+            },
+            SingleActivator(key, meta: true): () {
+              if (active != null) zoom.reset();
+            },
+          },
         },
         child: Focus(
           autofocus: true,
@@ -331,23 +381,37 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               onDragEntered: (_) => setState(() => _dragging = true),
               onDragExited: (_) => setState(() => _dragging = false),
               onDragDone: (detail) => _onFilesDropped(detail, ws),
-              child: LayoutBuilder(
-                builder: (context, constraints) => Stack(
-                  children: [
-                    Positioned.fill(child: _body(activeTab)),
-                    // The floating, draggable format palette — hidden in Preview
-                    // and print-preview tabs (nothing to edit there) and, in a
-                    // source mode, while find is open so it can't cover the find
-                    // card on narrow windows.
-                    if (active != null &&
-                        active.mode != EditorMode.preview &&
-                        !(_find.visible && active.mode.isSource))
-                      FloatingFormatToolbar(
-                        controller: active,
-                        area: constraints.biggest,
-                      ),
-                    if (_dragging) _dropHint(context),
-                  ],
+              // Ctrl/Cmd + mouse wheel zooms, like a browser. A raw Listener
+              // observes without consuming, so the view may also scroll a
+              // little on layouts where the wheel reaches a scrollable — an
+              // accepted trade-off for not swallowing normal scrolling.
+              child: Listener(
+                onPointerSignal: (event) {
+                  if (active == null) return; // print preview: PdfPreview zooms
+                  if (event is! PointerScrollEvent) return;
+                  final keys = HardwareKeyboard.instance;
+                  if (!keys.isControlPressed && !keys.isMetaPressed) return;
+                  if (event.scrollDelta.dy == 0) return;
+                  event.scrollDelta.dy < 0 ? zoom.zoomIn() : zoom.zoomOut();
+                },
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Stack(
+                    children: [
+                      Positioned.fill(child: _body(activeTab)),
+                      // The floating, draggable format palette — hidden in Preview
+                      // and print-preview tabs (nothing to edit there) and, in a
+                      // source mode, while find is open so it can't cover the find
+                      // card on narrow windows.
+                      if (active != null &&
+                          active.mode != EditorMode.preview &&
+                          !(_find.visible && active.mode.isSource))
+                        FloatingFormatToolbar(
+                          controller: active,
+                          area: constraints.biggest,
+                        ),
+                      if (_dragging) _dropHint(context),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -375,16 +439,27 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     // Key by the document so switching tabs recreates the view's State (e.g.
     // SplitView re-attaches its text listener to the new document's controller).
     final key = ValueKey(doc);
-    switch (doc.mode) {
-      case EditorMode.wysiwyg:
-        return WysiwygView(key: key, controller: doc);
-      case EditorMode.split:
-        return SplitView(key: key, controller: doc, find: _find);
-      case EditorMode.raw:
-        return RawSourceView(key: key, controller: doc, find: _find);
-      case EditorMode.preview:
-        return PreviewView(key: key, markdown: doc.currentMarkdown());
-    }
+    final view = switch (doc.mode) {
+      EditorMode.wysiwyg => WysiwygView(key: key, controller: doc),
+      EditorMode.split => SplitView(key: key, controller: doc, find: _find),
+      EditorMode.raw => RawSourceView(key: key, controller: doc, find: _find),
+      EditorMode.preview =>
+        PreviewView(key: key, markdown: doc.currentMarkdown()),
+    };
+    // Document zoom, applied to document views only (print previews have
+    // their own zoom, and app chrome stays at 100%). The zoom composes with
+    // the inherited scaler rather than replacing it, so a platform /
+    // accessibility text size keeps applying and zoom stays relative to it.
+    // The source/preview panes pick this up as the ambient text scaler; the
+    // WYSIWYG editor ignores MediaQuery and re-derives its
+    // EditorStyle.textScaleFactor from it instead (see WysiwygView).
+    final factor = context.watch<ZoomController>().factor;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: ZoomedTextScaler(MediaQuery.textScalerOf(context), factor),
+      ),
+      child: view,
+    );
   }
 
   /// [active] is null when the active tab is a print preview; document-bound
@@ -448,6 +523,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 value: 'print',
                 enabled: active != null,
                 child: const Text('Print / Export PDF')),
+            ..._zoomMenuItems(context, active),
             const PopupMenuItem(
                 value: 'support', child: Text('Support the project ❤')),
             const PopupMenuItem(value: 'about', child: Text('About')),
@@ -496,11 +572,34 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               value: 'saveAs',
               enabled: active != null,
               child: const Text('Save As…')),
+          ..._zoomMenuItems(context, active),
           const PopupMenuItem(
               value: 'support', child: Text('Support the project ❤')),
           const PopupMenuItem(value: 'about', child: Text('About')),
         ],
       ),
+    ];
+  }
+
+  /// Zoom entries shared by both overflow menus. The current level shows on
+  /// the reset item so the menu doubles as the zoom indicator. Disabled on
+  /// print-preview tabs (zoom is a document-view setting).
+  List<PopupMenuEntry<String>> _zoomMenuItems(
+      BuildContext context, DocumentController? active) {
+    final zoom = context.read<ZoomController>();
+    return [
+      PopupMenuItem(
+          value: 'zoomIn',
+          enabled: active != null && zoom.canZoomIn,
+          child: const Text('Zoom in (Ctrl +)')),
+      PopupMenuItem(
+          value: 'zoomOut',
+          enabled: active != null && zoom.canZoomOut,
+          child: const Text('Zoom out (Ctrl −)')),
+      PopupMenuItem(
+          value: 'zoomReset',
+          enabled: active != null && !zoom.isDefault,
+          child: Text('Reset zoom — ${zoom.label} (Ctrl 0)')),
     ];
   }
 
@@ -727,6 +826,15 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         break;
       case 'print':
         if (active != null) _print(context, active);
+        break;
+      case 'zoomIn':
+        if (active != null) context.read<ZoomController>().zoomIn();
+        break;
+      case 'zoomOut':
+        if (active != null) context.read<ZoomController>().zoomOut();
+        break;
+      case 'zoomReset':
+        if (active != null) context.read<ZoomController>().reset();
         break;
       case 'support':
         _support(context);
