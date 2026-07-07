@@ -6,8 +6,9 @@ import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart'
     show DropdownButtonFormField, MaterialApp, PopupMenuButton, Scaffold;
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter/widgets.dart'
-    show Size, SizedBox, TextSelection, Widget;
+    show MediaQuery, Size, SizedBox, TextSelection, Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -18,6 +19,8 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
+import 'package:markdown_studio/state/zoom_controller.dart';
+import 'package:markdown_studio/widgets/preview_view.dart';
 import 'package:markdown_studio/widgets/print_preview_view.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:pdf/pdf.dart' show PdfColors, PdfPageFormat;
@@ -110,6 +113,7 @@ void main() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+          ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
           ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
           ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
           Provider(create: (_) => FileAssociationService(prefs)),
@@ -148,6 +152,7 @@ void main() {
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+          ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
           ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
           ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
           Provider(create: (_) => FileAssociationService(prefs)),
@@ -327,6 +332,93 @@ void main() {
           registeredCommand: null,
         ),
         isFalse);
+  });
+
+  test('Zoom controller steps, clamps, snaps, and persists', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final zoom = ZoomController(prefs);
+
+    expect(zoom.factor, 1.0);
+    expect(zoom.label, '100%');
+
+    zoom.zoomIn();
+    expect(zoom.factor, 1.1);
+    zoom.zoomOut();
+    // Snapped to the step grid — no floating-point drift away from 100%.
+    expect(zoom.factor, 1.0);
+
+    for (var i = 0; i < 40; i++) {
+      zoom.zoomIn();
+    }
+    expect(zoom.factor, ZoomController.maxFactor);
+    expect(zoom.canZoomIn, isFalse);
+
+    for (var i = 0; i < 40; i++) {
+      zoom.zoomOut();
+    }
+    expect(zoom.factor, ZoomController.minFactor);
+    expect(zoom.canZoomOut, isFalse);
+
+    zoom.reset();
+    expect(zoom.factor, 1.0);
+    zoom.zoomIn();
+    zoom.zoomIn();
+    await zoom.pendingWrites;
+
+    // A fresh controller (new launch) restores the persisted factor.
+    expect(ZoomController(prefs).factor, 1.2);
+  });
+
+  testWidgets('Ctrl +/-/0 zooms the document views', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({'assoc_prompt_done': true});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+          ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+          ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
+          ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
+          Provider(create: (_) => FileAssociationService(prefs)),
+        ],
+        child: const MarkdownStudioApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final zoom = Provider.of<ZoomController>(
+        tester.element(find.byType(MarkdownStudioApp)),
+        listen: false);
+
+    Future<void> combo(LogicalKeyboardKey key) async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(key);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+    }
+
+    await combo(LogicalKeyboardKey.equal);
+    expect(zoom.factor, 1.1);
+    await combo(LogicalKeyboardKey.minus);
+    await combo(LogicalKeyboardKey.minus);
+    expect(zoom.factor, 0.9);
+    await combo(LogicalKeyboardKey.digit0);
+    expect(zoom.factor, 1.0);
+
+    // The document view scales with the zoom (ambient text scaler). A fresh
+    // document opens in Preview mode, so that's the mounted view.
+    zoom.zoomIn();
+    await tester.pumpAndSettle();
+    final scaler = MediaQuery.of(
+      tester.element(find.byType(PreviewView)),
+    ).textScaler;
+    expect(scaler.scale(10), moreOrLessEquals(11.0));
   });
 
   test('Print profiles seed with built-ins', () async {

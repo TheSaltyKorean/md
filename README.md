@@ -53,8 +53,9 @@ portable builds just extract and run. Step-by-step install notes ship with
 - **Four view modes** — Notion-style WYSIWYG **Edit**, **Split**
   source + live preview, **Raw** source, read-only **Preview**.
 - **Editor comforts** — multi-document tabs (drag to reorder or tear off),
-  find & replace (Ctrl/Cmd+F/H), floating format toolbar, drag & drop,
-  auto-reload of external changes, light/dark/system themes.
+  find & replace (Ctrl/Cmd+F/H), browser-style zoom (Ctrl +/−/0 or
+  Ctrl+scroll), floating format toolbar, drag & drop, auto-reload of
+  external changes, light/dark/system themes.
 - **Print & PDF studio** — per-document **branding profiles** (fonts,
   colours, logo, headers/footers, watermarks) in a print-preview tab;
   profiles are plain JSON an AI assistant can generate.
