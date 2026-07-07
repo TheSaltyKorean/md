@@ -311,48 +311,32 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           },
           // Browser-style zoom. "+" is Shift+= on most layouts, so both the
           // plain and shifted "=" activate zoom-in; numpad keys included.
-          // Zoom only applies to document tabs — on a print-preview tab the
-          // inputs are inert so PdfPreview's own zoom/scroll isn't shadowed
-          // by silently changing (and persisting) the document zoom.
+          // On print-preview tabs the same level scales the preview's page
+          // width (user request) — PdfPreview's own pinch zoom still works
+          // on top of it.
           for (final key in [
             LogicalKeyboardKey.equal,
             LogicalKeyboardKey.add, // layouts with a dedicated "+" key
             LogicalKeyboardKey.numpadAdd,
           ]) ...{
-            SingleActivator(key, control: true): () {
-              if (active != null) zoom.zoomIn();
-            },
-            SingleActivator(key, control: true, shift: true): () {
-              if (active != null) zoom.zoomIn();
-            },
-            SingleActivator(key, meta: true): () {
-              if (active != null) zoom.zoomIn();
-            },
-            SingleActivator(key, meta: true, shift: true): () {
-              if (active != null) zoom.zoomIn();
-            },
+            SingleActivator(key, control: true): zoom.zoomIn,
+            SingleActivator(key, control: true, shift: true): zoom.zoomIn,
+            SingleActivator(key, meta: true): zoom.zoomIn,
+            SingleActivator(key, meta: true, shift: true): zoom.zoomIn,
           },
           for (final key in [
             LogicalKeyboardKey.minus,
             LogicalKeyboardKey.numpadSubtract,
           ]) ...{
-            SingleActivator(key, control: true): () {
-              if (active != null) zoom.zoomOut();
-            },
-            SingleActivator(key, meta: true): () {
-              if (active != null) zoom.zoomOut();
-            },
+            SingleActivator(key, control: true): zoom.zoomOut,
+            SingleActivator(key, meta: true): zoom.zoomOut,
           },
           for (final key in [
             LogicalKeyboardKey.digit0,
             LogicalKeyboardKey.numpad0,
           ]) ...{
-            SingleActivator(key, control: true): () {
-              if (active != null) zoom.reset();
-            },
-            SingleActivator(key, meta: true): () {
-              if (active != null) zoom.reset();
-            },
+            SingleActivator(key, control: true): zoom.reset,
+            SingleActivator(key, meta: true): zoom.reset,
           },
         },
         child: Focus(
@@ -387,7 +371,6 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               // accepted trade-off for not swallowing normal scrolling.
               child: Listener(
                 onPointerSignal: (event) {
-                  if (active == null) return; // print preview: PdfPreview zooms
                   if (event is! PointerScrollEvent) return;
                   final keys = HardwareKeyboard.instance;
                   if (!keys.isControlPressed && !keys.isMetaPressed) return;
@@ -462,6 +445,25 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     );
   }
 
+  /// Compact "130%" chip shown while zoom is off default: constant feedback
+  /// of the current level, and a one-click reset (also Ctrl+0).
+  Widget? _zoomChip(ZoomController zoom) {
+    if (zoom.isDefault) return null;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Tooltip(
+          message: 'Zoom — click to reset to 100% (Ctrl 0)',
+          child: ActionChip(
+            visualDensity: VisualDensity.compact,
+            label: Text(zoom.label),
+            onPressed: zoom.reset,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// [active] is null when the active tab is a print preview; document-bound
   /// actions (mode toggle, find, save, print) are then hidden or disabled.
   List<Widget> _actions(
@@ -472,6 +474,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     bool isNarrow,
   ) {
     final cs = Theme.of(context).colorScheme;
+    final zoomChip = _zoomChip(context.watch<ZoomController>());
     final themeIcon = Icon(switch (theme.mode) {
       ThemeMode.system => Icons.brightness_auto_outlined,
       ThemeMode.light => Icons.light_mode_outlined,
@@ -490,6 +493,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     if (isNarrow) {
       // Phone layout: keep Save + auto-reload + theme; everything else in menu.
       return [
+        if (zoomChip != null) zoomChip,
         IconButton(
           tooltip: 'Save',
           icon: const Icon(Icons.save_outlined),
@@ -523,7 +527,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 value: 'print',
                 enabled: active != null,
                 child: const Text('Print / Export PDF')),
-            ..._zoomMenuItems(context, active),
+            ..._zoomMenuItems(context),
             const PopupMenuItem(
                 value: 'support', child: Text('Support the project ❤')),
             const PopupMenuItem(value: 'about', child: Text('About')),
@@ -539,6 +543,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Center(child: _ModeToggle(doc: active)),
         ),
+      if (zoomChip != null) zoomChip,
       IconButton(
         tooltip: 'Open',
         icon: const Icon(Icons.folder_open_outlined),
@@ -572,7 +577,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               value: 'saveAs',
               enabled: active != null,
               child: const Text('Save As…')),
-          ..._zoomMenuItems(context, active),
+          ..._zoomMenuItems(context),
           const PopupMenuItem(
               value: 'support', child: Text('Support the project ❤')),
           const PopupMenuItem(value: 'about', child: Text('About')),
@@ -582,23 +587,21 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   }
 
   /// Zoom entries shared by both overflow menus. The current level shows on
-  /// the reset item so the menu doubles as the zoom indicator. Disabled on
-  /// print-preview tabs (zoom is a document-view setting).
-  List<PopupMenuEntry<String>> _zoomMenuItems(
-      BuildContext context, DocumentController? active) {
+  /// the reset item so the menu doubles as the zoom indicator.
+  List<PopupMenuEntry<String>> _zoomMenuItems(BuildContext context) {
     final zoom = context.read<ZoomController>();
     return [
       PopupMenuItem(
           value: 'zoomIn',
-          enabled: active != null && zoom.canZoomIn,
+          enabled: zoom.canZoomIn,
           child: const Text('Zoom in (Ctrl +)')),
       PopupMenuItem(
           value: 'zoomOut',
-          enabled: active != null && zoom.canZoomOut,
+          enabled: zoom.canZoomOut,
           child: const Text('Zoom out (Ctrl −)')),
       PopupMenuItem(
           value: 'zoomReset',
-          enabled: active != null && !zoom.isDefault,
+          enabled: !zoom.isDefault,
           child: Text('Reset zoom — ${zoom.label} (Ctrl 0)')),
     ];
   }
@@ -828,13 +831,13 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         if (active != null) _print(context, active);
         break;
       case 'zoomIn':
-        if (active != null) context.read<ZoomController>().zoomIn();
+        context.read<ZoomController>().zoomIn();
         break;
       case 'zoomOut':
-        if (active != null) context.read<ZoomController>().zoomOut();
+        context.read<ZoomController>().zoomOut();
         break;
       case 'zoomReset':
-        if (active != null) context.read<ZoomController>().reset();
+        context.read<ZoomController>().reset();
         break;
       case 'support':
         _support(context);

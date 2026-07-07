@@ -13,6 +13,7 @@ import 'package:provider/provider.dart';
 import '../models/print_profile.dart';
 import '../services/print_profile_service.dart';
 import '../services/print_service.dart';
+import '../state/zoom_controller.dart';
 import 'print_profile_editor.dart';
 
 /// Print / PDF-export experience, hosted in its own workspace tab (not a modal
@@ -537,6 +538,11 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
         Expanded(
           child: PdfPreview(
             key: ValueKey('preview-$_selectedId-$_previewEpoch'),
+            // The app-wide document zoom scales the previewed page's width
+            // (PdfPreview otherwise fits it to the viewport; its own pinch
+            // zoom still works on top). Rendering is unaffected — zoom must
+            // never change what prints.
+            maxPageWidth: 700 * context.watch<ZoomController>().factor,
             // A refresh or profile switch remounts the preview; start it at
             // the page size/orientation the user was previewing so their
             // selection carries across (and Print/Save keep matching it).

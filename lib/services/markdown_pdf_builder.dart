@@ -87,24 +87,24 @@ class MarkdownPdfBuilder {
       if (src != null && _isRemote(src)) urls.add(src);
     }
 
-    // Mirror the exact positions the renderer feeds to _image(): an <img>
-    // block itself, a DIRECT <img> child of a paragraph (the paragraph
-    // pipeline pulls those out), and either of these inside a blockquote
-    // (whose children render through the same block pipeline). Anything
-    // deeper — images inside links, emphasis, headings, list items, table
-    // cells — goes through the inline-span pipeline, which has no image
-    // support, so fetching it would be a network request for content the
-    // PDF drops.
+    // Mirror the exact positions the renderer feeds to the image path: an
+    // <img> block itself, a DIRECT <img> child of a paragraph (the
+    // paragraph pipeline pulls those out) or of a table cell (cells render
+    // their images as widgets), and any of these inside a blockquote or
+    // table structure. Anything deeper — images inside links, emphasis,
+    // headings, list items — goes through the inline-span pipeline, which
+    // has no image support, so fetching it would be a network request for
+    // content the PDF drops.
     void walk(md.Node node) {
       if (node is! md.Element) return;
       switch (node.tag) {
         case 'img':
           collect(node);
-        case 'p':
+        case 'p' || 'th' || 'td':
           for (final child in node.children ?? const <md.Node>[]) {
             if (child is md.Element && child.tag == 'img') collect(child);
           }
-        case 'blockquote':
+        case 'blockquote' || 'table' || 'thead' || 'tbody' || 'tr':
           node.children?.forEach(walk);
       }
     }
@@ -1357,24 +1357,49 @@ class MarkdownPdfBuilder {
         final cells = <pw.Widget>[];
         for (final cell in row.children ?? const <md.Node>[]) {
           if (cell is! md.Element) continue;
-          cells.add(
-            pw.Padding(
-              padding:
-                  const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              // Walk inline children so `<span>` fill-in lines / labels render
-              // and inline code stays literal (the `code` case). Header cells
-              // force white so links/code don't adopt their own colour on the
-              // coloured header fill.
-              child: pw.RichText(
+          // Images can't ride in text spans, so a cell splits into its
+          // image children (rendered as capped image widgets — screenshot
+          // tables are a common pattern) and everything else (the usual
+          // inline-span walk, so `<span>` fill-ins and literal code keep
+          // working). Header cells force white so links/code don't adopt
+          // their own colour on the coloured header fill.
+          final images = <md.Element>[];
+          final rest = <md.Node>[];
+          for (final child in cell.children ?? const <md.Node>[]) {
+            if (child is md.Element && child.tag == 'img') {
+              images.add(child);
+            } else {
+              rest.add(child);
+            }
+          }
+          final parts = <pw.Widget>[
+            if (rest.any((n) => n.textContent.trim().isNotEmpty))
+              pw.RichText(
                 text: pw.TextSpan(
                   children: _inline(
-                    cell.children,
+                    rest,
                     boldDefault: isHead,
                     forceColor: isHead ? PdfColors.white : null,
                     sizeOverride: 10.5,
                   ),
                 ),
               ),
+            for (final img in images)
+              pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(vertical: 2),
+                child: _imageOrPlaceholder(img, heightCap: _cellImageCap),
+              ),
+          ];
+          cells.add(
+            pw.Padding(
+              padding:
+                  const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: parts.length == 1
+                  ? parts.first
+                  : pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: parts,
+                    ),
             ),
           );
         }
@@ -1396,7 +1421,18 @@ class MarkdownPdfBuilder {
     );
   }
 
-  pw.Widget _image(md.Element el) {
+  /// Height cap for an image inside a table cell: a [pw.Table] row cannot
+  /// split across pages, so cell images stay conservatively small.
+  static const double _cellImageCap = 180;
+
+  pw.Widget _image(md.Element el) => pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 6),
+        child: _imageOrPlaceholder(el, heightCap: maxImageHeight),
+      );
+
+  /// The image for [el], or its textual placeholder when the source can't
+  /// be loaded. [heightCap] bounds the rendered height (null = uncapped).
+  pw.Widget _imageOrPlaceholder(md.Element el, {double? heightCap}) {
     final src = el.attributes['src'];
     final alt = el.attributes['alt'] ?? '';
     if (src != null) {
@@ -1407,19 +1443,14 @@ class MarkdownPdfBuilder {
         // fill the page constraints; `scaleDown` keeps intrinsic size and
         // only shrinks oversized images.
         final image = pw.Image(pw.MemoryImage(bytes),
-            fit: maxImageHeight == null
-                ? pw.BoxFit.contain
-                : pw.BoxFit.scaleDown);
-        return pw.Padding(
-          padding: const pw.EdgeInsets.symmetric(vertical: 6),
-          // Cap the height so a tall image scales down to one page rather
-          // than overflowing (an image cannot be split across pages).
-          child: maxImageHeight == null
-              ? image
-              : pw.ConstrainedBox(
-                  constraints: pw.BoxConstraints(maxHeight: maxImageHeight!),
-                  child: image),
-        );
+            fit: heightCap == null ? pw.BoxFit.contain : pw.BoxFit.scaleDown);
+        // Cap the height so a tall image scales down to fit rather than
+        // overflowing (an image cannot be split across pages).
+        return heightCap == null
+            ? image
+            : pw.ConstrainedBox(
+                constraints: pw.BoxConstraints(maxHeight: heightCap),
+                child: image);
       } catch (_) {
         // fall through to placeholder
       }
@@ -1436,15 +1467,12 @@ class MarkdownPdfBuilder {
               ? '${source.substring(0, 77)}…'
               : source;
     }
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 4),
-      child: pw.Text(
-        '[image: $label]',
-        style: pw.TextStyle(
-          font: fonts.italic,
-          fontSize: 9,
-          color: PdfColors.grey600,
-        ),
+    return pw.Text(
+      '[image: $label]',
+      style: pw.TextStyle(
+        font: fonts.italic,
+        fontSize: 9,
+        color: PdfColors.grey600,
       ),
     );
   }
