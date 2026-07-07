@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:markdown/markdown.dart' as md;
@@ -54,7 +55,8 @@ class MarkdownPdfBuilder {
       {required this.profile,
       required this.fonts,
       this.baseDir,
-      this.maxImageHeight});
+      this.maxImageHeight,
+      this.remoteImages = const {}});
 
   final PrintProfile profile;
   final PdfFontSet fonts;
@@ -67,6 +69,49 @@ class MarkdownPdfBuilder {
   /// single image). Null = no cap. Supplied by the caller, which knows the
   /// page size.
   final double? maxImageHeight;
+
+  /// Bytes for `http(s)` image sources, keyed by the exact `src` URL.
+  /// [build] runs synchronously, so the caller downloads these up front (see
+  /// [remoteImageSources]) — the same pre-fetch pattern used for fonts. A
+  /// URL missing here (offline, fetch failed) renders as the placeholder.
+  final Map<String, Uint8List> remoteImages;
+
+  /// The `https` image URLs [markdown] references — what a caller should
+  /// try to download into [remoteImages] before building. Parsed with the
+  /// same settings as [build], so the two always agree.
+  static Set<String> remoteImageSources(String markdown) {
+    final nodes = _parse(markdown);
+    final urls = <String>{};
+    void collect(md.Element img) {
+      final src = img.attributes['src'];
+      if (src != null && _isRemote(src)) urls.add(src);
+    }
+
+    // Mirror the exact positions the renderer feeds to _image(): an <img>
+    // block itself, a DIRECT <img> child of a paragraph (the paragraph
+    // pipeline pulls those out), and either of these inside a blockquote
+    // (whose children render through the same block pipeline). Anything
+    // deeper — images inside links, emphasis, headings, list items, table
+    // cells — goes through the inline-span pipeline, which has no image
+    // support, so fetching it would be a network request for content the
+    // PDF drops.
+    void walk(md.Node node) {
+      if (node is! md.Element) return;
+      switch (node.tag) {
+        case 'img':
+          collect(node);
+        case 'p':
+          for (final child in node.children ?? const <md.Node>[]) {
+            if (child is md.Element && child.tag == 'img') collect(child);
+          }
+        case 'blockquote':
+          node.children?.forEach(walk);
+      }
+    }
+
+    nodes.forEach(walk);
+    return urls;
+  }
 
   PdfColor get _primary => PdfColor.fromInt(profile.primaryColor);
   PdfColor get _text => PdfColor.fromInt(profile.textColor);
@@ -116,7 +161,9 @@ class MarkdownPdfBuilder {
   /// stays one size. Non-legal documents keep 11pt unchanged.
   double get _bodySize => profile.legalMode ? 12.0 : 11.0;
 
-  List<pw.Widget> build(String markdown) {
+  /// One parser configuration for [build] *and* [remoteImageSources], so the
+  /// URLs discovered for pre-fetch are exactly the images build() renders.
+  static List<md.Node> _parse(String markdown) {
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
@@ -124,7 +171,11 @@ class MarkdownPdfBuilder {
       // inline HTML as text, so parse it into a 'u' element ourselves.
       inlineSyntaxes: [_UnderlineSyntax()],
     );
-    final nodes = document.parseLines(const LineSplitter().convert(markdown));
+    return document.parseLines(const LineSplitter().convert(markdown));
+  }
+
+  List<pw.Widget> build(String markdown) {
+    final nodes = _parse(markdown);
     final out = nodes.expand(_emit).toList();
     // A flowed block's gap is pure *inter*-block spacing. At the document end
     // or directly before a forced page break it serves no purpose — and when
@@ -1348,13 +1399,10 @@ class MarkdownPdfBuilder {
   pw.Widget _image(md.Element el) {
     final src = el.attributes['src'];
     final alt = el.attributes['alt'] ?? '';
-    if (src != null && !src.startsWith('http')) {
+    if (src != null) {
       try {
-        // Resolve relative image paths against the document's folder.
-        final resolved = (baseDir != null && !p.isAbsolute(src))
-            ? p.join(baseDir!, src)
-            : src;
-        final bytes = File(resolved).readAsBytesSync();
+        final bytes = _imageBytes(src);
+        if (bytes == null) throw const FormatException('unavailable');
         // Inside the bounded box `contain` would UPSCALE a small image to
         // fill the page constraints; `scaleDown` keeps intrinsic size and
         // only shrinks oversized images.
@@ -1376,10 +1424,22 @@ class MarkdownPdfBuilder {
         // fall through to placeholder
       }
     }
+    // Identify the image by alt text where possible. Never echo a data: URI
+    // (an undecodable payload could dump megabytes of base64 into the PDF),
+    // and keep any other source to a readable length.
+    var label = alt;
+    if (label.isEmpty) {
+      final source = src ?? 'unknown';
+      label = source.startsWith('data:')
+          ? 'embedded data'
+          : source.length > 80
+              ? '${source.substring(0, 77)}…'
+              : source;
+    }
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 4),
       child: pw.Text(
-        '[image: ${alt.isEmpty ? (src ?? 'unknown') : alt}]',
+        '[image: $label]',
         style: pw.TextStyle(
           font: fonts.italic,
           fontSize: 9,
@@ -1387,6 +1447,37 @@ class MarkdownPdfBuilder {
         ),
       ),
     );
+  }
+
+  /// Whether `src` is a fetchable remote URL (schemes compare
+  /// case-insensitively). Only `https` qualifies: Android and iOS release
+  /// builds block cleartext `http` by platform policy, so plain-http images
+  /// render the placeholder everywhere rather than working on some
+  /// platforms and not others.
+  static bool _isRemote(String src) =>
+      Uri.tryParse(src)?.scheme.toLowerCase() == 'https';
+
+  /// Bytes for an image `src`, from whichever scheme it uses: inline
+  /// `data:` URIs, pre-fetched `http(s)` URLs, `file://` URIs, and plain
+  /// paths (relative ones resolve against the document's folder). Null when
+  /// unavailable — the caller falls back to the placeholder.
+  Uint8List? _imageBytes(String src) {
+    final uri = Uri.tryParse(src);
+    // Note a Windows drive path ("C:\…") parses as a one-letter scheme and
+    // correctly falls through to the plain-path branch.
+    final scheme = uri?.scheme.toLowerCase() ?? '';
+    if (scheme == 'data') {
+      // UriData handles both base64 and percent-encoded payloads without
+      // corrupting binary octets.
+      return uri!.data?.contentAsBytes();
+    }
+    if (scheme == 'http' || scheme == 'https') return remoteImages[src];
+    final path = scheme == 'file'
+        ? uri!.toFilePath()
+        : (baseDir != null && !p.isAbsolute(src))
+            ? p.join(baseDir!, src)
+            : src;
+    return File(path).readAsBytesSync();
   }
 
   // --- Inline rendering -------------------------------------------------------

@@ -1263,6 +1263,65 @@ void main() {
     expect(_walk(ws).any(usesScaleDown), isTrue);
   });
 
+  test('data-URI, pre-fetched remote, and file:// images all render', () async {
+    final tiny = img.Image(width: 4, height: 4);
+    img.fill(tiny, color: img.ColorRgb8(200, 60, 60));
+    final png = Uint8List.fromList(img.encodePng(tiny));
+    final dataUri = 'data:image/png;base64,${base64Encode(png)}';
+    const remoteUrl = 'https://example.com/pic.png';
+    final tmp = Directory.systemTemp.createTempSync('mdimg2');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final onDisk = File('${tmp.path}/pic.png')..writeAsBytesSync(png);
+    final fileUri = Uri.file(onDisk.path).toString();
+
+    // Percent-encoded (non-base64) data URI: binary octets must survive
+    // decoding. Every byte is escaped — a markdown link destination ends at
+    // an unescaped ')', so an embedded data URI must be fully encoded.
+    final percentUri = 'data:image/png,'
+        '${png.map((b) => '%${b.toRadixString(16).padLeft(2, '0')}').join()}';
+    // URI schemes are case-insensitive; uppercase variants must still work.
+    final upperFileUri = fileUri.replaceFirst('file://', 'FILE://');
+    const upperUrl = 'HTTPS://example.com/pic2.png';
+
+    // Sources are discovered from the markdown so the caller knows what to
+    // pre-fetch; data/file/local sources need no fetching, and cleartext
+    // http is never fetched (mobile platforms block it — it degrades to the
+    // placeholder everywhere for consistency).
+    final mdText = '![a]($dataUri)\n\n![b]($remoteUrl)\n\n![c]($fileUri)\n\n'
+        '![d]($percentUri)\n\n![e]($upperFileUri)\n\n![f]($upperUrl)\n\n'
+        '![g](http://example.com/insecure.png)';
+    expect(
+        MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl, upperUrl});
+
+    // Discovery mirrors the renderer: images in positions the PDF drops
+    // (linked badges, headings, list items, table cells) are never fetched;
+    // a blockquoted paragraph image renders, so it is.
+    expect(
+        MarkdownPdfBuilder.remoteImageSources(
+            '[![badge](https://x.test/b.png)](https://x.test)\n\n'
+            '# ![h](https://x.test/h.png)\n\n'
+            '- ![li](https://x.test/li.png)\n\n'
+            '> ![q](https://x.test/q.png)'),
+        {'https://x.test/q.png'});
+
+    final builder = MarkdownPdfBuilder(
+      profile: PrintProfile.personal,
+      fonts: _standardFonts(),
+      remoteImages: {remoteUrl: png, upperUrl: png},
+    );
+    final ws = builder.build(mdText);
+    expect(_walk(ws).whereType<pw.Image>().length, 6);
+    expect(await _renderA4(ws), isNotEmpty);
+
+    // A remote image that was NOT pre-fetched (offline / failed download)
+    // degrades to the textual placeholder instead of throwing.
+    final offline = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final missing = offline.build('![b]($remoteUrl)');
+    expect(_walk(missing).whereType<pw.Image>(), isEmpty);
+    expect(await _renderA4(missing), isNotEmpty);
+  });
+
   test('legalMode keeps one gap for blockquotes and nested lists', () {
     final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());

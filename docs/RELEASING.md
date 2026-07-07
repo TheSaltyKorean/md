@@ -122,8 +122,9 @@ With those secrets set, every tagged release also produces
 --store`; the Store signs it on publication — no certificate needed). Then
 per release: upload that `.msix` in a Partner Center submission, fill the
 listing (screenshots, description), point the privacy-policy field at
-[`PRIVACY.md`](../PRIVACY.md) (the app makes one network request type:
-Google Fonts at print time), complete the age-rating questionnaire, and
+[`PRIVACY.md`](../PRIVACY.md) (the app's only network requests happen at
+print/preview/export time: Google Fonts, and images the document itself
+references by URL), complete the age-rating questionnaire, and
 submit for certification.
 
 **Pricing/monetization:** the app ships free with an in-app

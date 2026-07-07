@@ -1,4 +1,6 @@
+import 'dart:async' show TimeoutException;
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
@@ -69,6 +71,7 @@ class PrintService {
   }) async {
     final fonts = await _resolveFonts(profile.fontFamily);
     final logo = await _loadLogo(profile.logoPath);
+    final remoteImages = await _fetchRemoteImages(markdown);
     final margin = profile.marginCm * PdfPageFormat.cm;
     // Height available to body content on one page (page minus margins, with
     // an allowance for the running header/footer). Used to cap image height
@@ -80,6 +83,7 @@ class PrintService {
       fonts: fonts,
       baseDir: baseDir,
       maxImageHeight: contentHeight,
+      remoteImages: remoteImages,
     );
     final content = builder.build(markdown);
 
@@ -327,6 +331,152 @@ class PrintService {
     final m = now.month.toString().padLeft(2, '0');
     final d = now.day.toString().padLeft(2, '0');
     return '${now.year}-$m-$d';
+  }
+
+  /// Hard ceiling for one downloaded image. Big enough for any sane photo,
+  /// small enough that a document pointing at a huge file degrades to the
+  /// placeholder instead of ballooning memory during preview/export.
+  static const int _maxRemoteImageBytes = 20 * 1024 * 1024;
+
+  /// Aggregate budget across all of a document's images: once spent, the
+  /// remaining images render placeholders, so a photo-heavy document
+  /// degrades instead of holding hundreds of MB before PDF generation.
+  static const int _maxTotalRemoteImageBytes = 100 * 1024 * 1024;
+
+  /// Downloads run through a small worker pool instead of all at once, so a
+  /// document with many images can't open hundreds of sockets.
+  static const int _maxConcurrentImageFetches = 4;
+
+  /// Wall-clock ceiling for fetching ALL of a document's images. Per-image
+  /// deadlines alone still let an image-heavy document on slow hosts hold
+  /// the preview spinner for minutes (sequential batches x 20s each); past
+  /// this, remaining images render placeholders.
+  static const Duration _totalFetchBudget = Duration(seconds: 45);
+
+  /// Download the document's `https` images up front — [MarkdownPdfBuilder]
+  /// builds synchronously, so network content must be pre-fetched (the same
+  /// pattern as fonts). Failures are dropped: a missing entry renders as the
+  /// builder's placeholder instead of failing the whole print. Each image is
+  /// bounded twice — a whole-task timeout (covering DNS/connect, which stage
+  /// timeouts alone would not) and a byte cap — so one unreachable host or
+  /// huge file can't hang or exhaust the print.
+  Future<Map<String, Uint8List>> _fetchRemoteImages(String markdown) async {
+    final sources = MarkdownPdfBuilder.remoteImageSources(markdown).toList();
+    if (sources.isEmpty) return const {};
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    final result = <String, Uint8List>{};
+    var budget = _maxTotalRemoteImageBytes;
+    var next = 0;
+    final poolDeadline = DateTime.now().add(_totalFetchBudget);
+    // Fixed pool of sequential workers. Dart's event loop makes the shared
+    // index/budget updates race-free; only stored bytes count against the
+    // budget, so the retained total never exceeds it.
+    Future<void> worker() async {
+      while (next < sources.length &&
+          budget > 0 &&
+          DateTime.now().isBefore(poolDeadline)) {
+        final src = sources[next++];
+        final limit =
+            budget < _maxRemoteImageBytes ? budget : _maxRemoteImageBytes;
+        try {
+          // The deadline lives inside _fetchOne (not a Future.timeout
+          // wrapper, which completes the wrapper but leaves the download
+          // streaming in the background, silently exceeding the pool and
+          // byte bounds). Each fetch is also clamped to the pool deadline.
+          final bytes = await _fetchOne(client, src, limit, poolDeadline);
+          if (bytes.length <= budget) {
+            result[src] = bytes;
+            budget -= bytes.length;
+          }
+        } catch (_) {/* unreachable/oversized image -> placeholder */}
+      }
+    }
+
+    try {
+      await Future.wait(
+          List.generate(_maxConcurrentImageFetches, (_) => worker()));
+    } finally {
+      client.close();
+    }
+    return result;
+  }
+
+  Future<Uint8List> _fetchOne(HttpClient client, String src, int maxBytes,
+      DateTime poolDeadline) async {
+    var deadline = DateTime.now().add(const Duration(seconds: 20));
+    if (poolDeadline.isBefore(deadline)) deadline = poolDeadline;
+    Duration remaining() {
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) throw const HttpException('fetch deadline');
+      return left;
+    }
+
+    // Redirects are followed manually so every hop stays HTTPS — the
+    // default auto-follow would happily hop to a cleartext http target,
+    // bypassing the https-only policy for anything hosted behind a
+    // redirect.
+    var uri = Uri.parse(src);
+    var redirects = 0;
+    HttpClientResponse response;
+    while (true) {
+      final request = await client.getUrl(uri).timeout(remaining());
+      request.followRedirects = false;
+      try {
+        response = await request.close().timeout(remaining());
+      } on TimeoutException {
+        request.abort(); // actually tear the request down, don't just move on
+        rethrow;
+      }
+      if (!response.isRedirect) break;
+      final location = response.headers.value(HttpHeaders.locationHeader);
+      // Never read the redirect body — a large or endless one would run
+      // outside both the deadline and the byte cap. Destroying the socket
+      // discards it without downloading (no keep-alive reuse, but redirect
+      // hops are rare and the next hop is a different URL anyway).
+      try {
+        (await response.detachSocket()).destroy();
+      } catch (_) {/* already closed */}
+      if (location == null || ++redirects > 5) {
+        throw const HttpException('bad redirect');
+      }
+      uri = uri.resolve(location);
+      if (uri.scheme.toLowerCase() != 'https') {
+        throw const HttpException('redirect left https');
+      }
+    }
+    // Reject before reading the body — and tear the response down first, or
+    // the swallowed exception leaves an open socket/body running outside
+    // the pool and byte budgets (the in-body throws below don't need this:
+    // throwing out of await-for cancels the subscription).
+    if (response.statusCode != HttpStatus.ok ||
+        response.contentLength > maxBytes) {
+      try {
+        (await response.detachSocket()).destroy();
+      } catch (_) {/* already closed */}
+      throw HttpException(
+          response.statusCode != HttpStatus.ok
+              ? 'HTTP ${response.statusCode}'
+              : 'image exceeds size cap',
+          uri: uri);
+    }
+    final bytes = BytesBuilder();
+    // Stream.timeout bounds each inter-chunk gap and — unlike a
+    // Future.timeout around the whole fetch — cancels the subscription when
+    // it fires, so a slow-dripping server can't keep the download alive in
+    // the background. The deadline check bounds total elapsed time; a throw
+    // out of await-for also cancels the subscription.
+    await for (final chunk in response.timeout(const Duration(seconds: 10))) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw const HttpException('fetch deadline');
+      }
+      bytes.add(chunk);
+      // Content-Length can lie (or be absent): enforce the cap on the
+      // actually accumulated bytes too.
+      if (bytes.length > maxBytes) {
+        throw const HttpException('image exceeds size cap');
+      }
+    }
+    return bytes.takeBytes();
   }
 
   Future<pw.MemoryImage?> _loadLogo(String? path) async {

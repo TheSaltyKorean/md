@@ -37,6 +37,12 @@ stray colour or branding. The **Court Filing** profile (and the whole
 Legal / manuscript section) exists so a plain Markdown draft can come out the
 other side looking like a compliant filing, without hand-formatting every time.
 
+> **Legal disclaimer:** Markdown Studio is a formatting tool, not legal
+> advice, and its output — including the Court Filing profile — is not
+> guaranteed to meet any court's requirements. Filing rules vary by
+> jurisdiction; always check your local court's rules or consult a licensed
+> attorney.
+
 The same machinery serves everyday documents too — **contracts, technical
 specs**, branded reports, personal notes — each with its own reusable template.
 Write once in Markdown, pick the profile, print. And because profiles are just
