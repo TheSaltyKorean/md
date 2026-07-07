@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/text_search.dart';
+import '../state/zoom_controller.dart';
 import 'find_controller.dart';
 import 'source_pane.dart';
 
@@ -330,7 +331,17 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
               right: 8,
               child: SizedBox(
                 width: (w - 16).clamp(0.0, 440.0),
-                child: _controls(cs),
+                // The card is app chrome mounted inside the zoomed document
+                // subtree: shed the document zoom (its fixed-width controls
+                // would overflow at high zoom) but keep the platform /
+                // accessibility text scale.
+                child: MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler:
+                        scaler is ZoomedTextScaler ? scaler.inherited : scaler,
+                  ),
+                  child: _controls(cs),
+                ),
               ),
             ),
           ],

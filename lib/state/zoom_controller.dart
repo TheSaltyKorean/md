@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show TextScaler;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Browser-style document zoom, persisted across launches.
@@ -60,4 +61,33 @@ class ZoomController extends ChangeNotifier {
     notifyListeners();
     _track(() => _prefs.setDouble(_prefsKey, next));
   }
+}
+
+/// The inherited (platform / accessibility) text scaler with the document
+/// zoom applied on top, so zooming never discards the user's OS text size.
+///
+/// Chrome that mounts *inside* a zoomed document view (e.g. the find/replace
+/// card) can recover [inherited] to opt back out of the zoom while keeping
+/// the accessibility scale.
+class ZoomedTextScaler extends TextScaler {
+  const ZoomedTextScaler(this.inherited, this.zoom);
+
+  final TextScaler inherited;
+  final double zoom;
+
+  @override
+  double scale(double fontSize) => inherited.scale(fontSize) * zoom;
+
+  @override
+  // ignore: deprecated_member_use
+  double get textScaleFactor => inherited.textScaleFactor * zoom;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ZoomedTextScaler &&
+      other.inherited == inherited &&
+      other.zoom == zoom;
+
+  @override
+  int get hashCode => Object.hash(inherited, zoom);
 }

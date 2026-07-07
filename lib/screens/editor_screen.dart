@@ -456,8 +456,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final factor = context.watch<ZoomController>().factor;
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(
-        textScaler:
-            _ComposedTextScaler(MediaQuery.textScalerOf(context), factor),
+        textScaler: ZoomedTextScaler(MediaQuery.textScalerOf(context), factor),
       ),
       child: view,
     );
@@ -875,31 +874,6 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 }
 
 enum _AssocChoice { associate, notNow, never }
-
-/// The inherited (platform / accessibility) text scaler with the document
-/// zoom applied on top, so zooming never discards the user's OS text size.
-class _ComposedTextScaler extends TextScaler {
-  const _ComposedTextScaler(this.inherited, this.zoom);
-
-  final TextScaler inherited;
-  final double zoom;
-
-  @override
-  double scale(double fontSize) => inherited.scale(fontSize) * zoom;
-
-  @override
-  // ignore: deprecated_member_use
-  double get textScaleFactor => inherited.textScaleFactor * zoom;
-
-  @override
-  bool operator ==(Object other) =>
-      other is _ComposedTextScaler &&
-      other.inherited == inherited &&
-      other.zoom == zoom;
-
-  @override
-  int get hashCode => Object.hash(inherited, zoom);
-}
 
 /// Compact, icon-only Edit/Split/Raw/Preview toggle. Tooltips name each mode.
 class _ModeToggle extends StatelessWidget {

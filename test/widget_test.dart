@@ -8,7 +8,7 @@ import 'package:flutter/material.dart'
     show DropdownButtonFormField, MaterialApp, PopupMenuButton, Scaffold;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter/widgets.dart'
-    show MediaQuery, Size, SizedBox, TextSelection, Widget;
+    show MediaQuery, Size, SizedBox, TextScaler, TextSelection, Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -368,6 +368,14 @@ void main() {
 
     // A fresh controller (new launch) restores the persisted factor.
     expect(ZoomController(prefs).factor, 1.2);
+
+    // The composed scaler multiplies the inherited (accessibility) scale by
+    // the zoom, exposes the inherited part for chrome to opt back out, and
+    // compares by value so MediaQuery equality checks work across rebuilds.
+    const zs = ZoomedTextScaler(TextScaler.linear(1.5), 1.2);
+    expect(zs.scale(10), moreOrLessEquals(18.0));
+    expect(zs.inherited.scale(10), moreOrLessEquals(15.0));
+    expect(zs, const ZoomedTextScaler(TextScaler.linear(1.5), 1.2));
   });
 
   testWidgets('Ctrl +/-/0 zooms the document views', (tester) async {
