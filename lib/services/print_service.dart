@@ -337,6 +337,15 @@ class PrintService {
   /// placeholder instead of ballooning memory during preview/export.
   static const int _maxRemoteImageBytes = 20 * 1024 * 1024;
 
+  /// Aggregate budget across all of a document's images: once spent, the
+  /// remaining images render placeholders, so a photo-heavy document
+  /// degrades instead of holding hundreds of MB before PDF generation.
+  static const int _maxTotalRemoteImageBytes = 100 * 1024 * 1024;
+
+  /// Downloads run through a small worker pool instead of all at once, so a
+  /// document with many images can't open hundreds of sockets.
+  static const int _maxConcurrentImageFetches = 4;
+
   /// Download the document's `https` images up front — [MarkdownPdfBuilder]
   /// builds synchronously, so network content must be pre-fetched (the same
   /// pattern as fonts). Failures are dropped: a missing entry renders as the
@@ -345,30 +354,48 @@ class PrintService {
   /// timeouts alone would not) and a byte cap — so one unreachable host or
   /// huge file can't hang or exhaust the print.
   Future<Map<String, Uint8List>> _fetchRemoteImages(String markdown) async {
-    final sources = MarkdownPdfBuilder.remoteImageSources(markdown);
+    final sources = MarkdownPdfBuilder.remoteImageSources(markdown).toList();
     if (sources.isEmpty) return const {};
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     final result = <String, Uint8List>{};
-    try {
-      await Future.wait(sources.map((src) async {
+    var budget = _maxTotalRemoteImageBytes;
+    var next = 0;
+    // Fixed pool of sequential workers. Dart's event loop makes the shared
+    // index/budget updates race-free; only stored bytes count against the
+    // budget, so the retained total never exceeds it.
+    Future<void> worker() async {
+      while (next < sources.length && budget > 0) {
+        final src = sources[next++];
+        final limit =
+            budget < _maxRemoteImageBytes ? budget : _maxRemoteImageBytes;
         try {
-          result[src] =
-              await _fetchOne(client, src).timeout(const Duration(seconds: 20));
+          final bytes = await _fetchOne(client, src, limit)
+              .timeout(const Duration(seconds: 20));
+          if (bytes.length <= budget) {
+            result[src] = bytes;
+            budget -= bytes.length;
+          }
         } catch (_) {/* unreachable/oversized image -> placeholder */}
-      }));
+      }
+    }
+
+    try {
+      await Future.wait(
+          List.generate(_maxConcurrentImageFetches, (_) => worker()));
     } finally {
       client.close();
     }
     return result;
   }
 
-  Future<Uint8List> _fetchOne(HttpClient client, String src) async {
+  Future<Uint8List> _fetchOne(
+      HttpClient client, String src, int maxBytes) async {
     final request = await client.getUrl(Uri.parse(src));
     final response = await request.close();
     if (response.statusCode != HttpStatus.ok) {
       throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(src));
     }
-    if (response.contentLength > _maxRemoteImageBytes) {
+    if (response.contentLength > maxBytes) {
       throw const HttpException('image exceeds size cap');
     }
     final bytes = BytesBuilder();
@@ -376,7 +403,7 @@ class PrintService {
       bytes.add(chunk);
       // Content-Length can lie (or be absent): enforce the cap on the
       // actually accumulated bytes too.
-      if (bytes.length > _maxRemoteImageBytes) {
+      if (bytes.length > maxBytes) {
         throw const HttpException('image exceeds size cap');
       }
     }
