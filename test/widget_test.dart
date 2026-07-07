@@ -1293,6 +1293,17 @@ void main() {
     expect(
         MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl, upperUrl});
 
+    // Discovery mirrors the renderer: images in positions the PDF drops
+    // (linked badges, headings, list items, table cells) are never fetched;
+    // a blockquoted paragraph image renders, so it is.
+    expect(
+        MarkdownPdfBuilder.remoteImageSources(
+            '[![badge](https://x.test/b.png)](https://x.test)\n\n'
+            '# ![h](https://x.test/h.png)\n\n'
+            '- ![li](https://x.test/li.png)\n\n'
+            '> ![q](https://x.test/q.png)'),
+        {'https://x.test/q.png'});
+
     final builder = MarkdownPdfBuilder(
       profile: PrintProfile.personal,
       fonts: _standardFonts(),

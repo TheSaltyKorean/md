@@ -82,19 +82,30 @@ class MarkdownPdfBuilder {
   static Set<String> remoteImageSources(String markdown) {
     final nodes = _parse(markdown);
     final urls = <String>{};
-    // Contexts whose content renders through the inline-span pipeline,
-    // which has no image support — an <img> inside them never reaches
-    // _image(), so fetching it would be a network request for content the
+    void collect(md.Element img) {
+      final src = img.attributes['src'];
+      if (src != null && _isRemote(src)) urls.add(src);
+    }
+
+    // Mirror the exact positions the renderer feeds to _image(): an <img>
+    // block itself, a DIRECT <img> child of a paragraph (the paragraph
+    // pipeline pulls those out), and either of these inside a blockquote
+    // (whose children render through the same block pipeline). Anything
+    // deeper — images inside links, emphasis, headings, list items, table
+    // cells — goes through the inline-span pipeline, which has no image
+    // support, so fetching it would be a network request for content the
     // PDF drops.
-    const inlineOnly = {'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td'};
     void walk(md.Node node) {
-      if (node is md.Element) {
-        if (inlineOnly.contains(node.tag)) return;
-        if (node.tag == 'img') {
-          final src = node.attributes['src'];
-          if (src != null && _isRemote(src)) urls.add(src);
-        }
-        node.children?.forEach(walk);
+      if (node is! md.Element) return;
+      switch (node.tag) {
+        case 'img':
+          collect(node);
+        case 'p':
+          for (final child in node.children ?? const <md.Node>[]) {
+            if (child is md.Element && child.tag == 'img') collect(child);
+          }
+        case 'blockquote':
+          node.children?.forEach(walk);
       }
     }
 
