@@ -347,6 +347,12 @@ class PrintService {
   /// document with many images can't open hundreds of sockets.
   static const int _maxConcurrentImageFetches = 4;
 
+  /// Wall-clock ceiling for fetching ALL of a document's images. Per-image
+  /// deadlines alone still let an image-heavy document on slow hosts hold
+  /// the preview spinner for minutes (sequential batches x 20s each); past
+  /// this, remaining images render placeholders.
+  static const Duration _totalFetchBudget = Duration(seconds: 45);
+
   /// Download the document's `https` images up front — [MarkdownPdfBuilder]
   /// builds synchronously, so network content must be pre-fetched (the same
   /// pattern as fonts). Failures are dropped: a missing entry renders as the
@@ -361,11 +367,14 @@ class PrintService {
     final result = <String, Uint8List>{};
     var budget = _maxTotalRemoteImageBytes;
     var next = 0;
+    final poolDeadline = DateTime.now().add(_totalFetchBudget);
     // Fixed pool of sequential workers. Dart's event loop makes the shared
     // index/budget updates race-free; only stored bytes count against the
     // budget, so the retained total never exceeds it.
     Future<void> worker() async {
-      while (next < sources.length && budget > 0) {
+      while (next < sources.length &&
+          budget > 0 &&
+          DateTime.now().isBefore(poolDeadline)) {
         final src = sources[next++];
         final limit =
             budget < _maxRemoteImageBytes ? budget : _maxRemoteImageBytes;
@@ -373,8 +382,8 @@ class PrintService {
           // The deadline lives inside _fetchOne (not a Future.timeout
           // wrapper, which completes the wrapper but leaves the download
           // streaming in the background, silently exceeding the pool and
-          // byte bounds).
-          final bytes = await _fetchOne(client, src, limit);
+          // byte bounds). Each fetch is also clamped to the pool deadline.
+          final bytes = await _fetchOne(client, src, limit, poolDeadline);
           if (bytes.length <= budget) {
             result[src] = bytes;
             budget -= bytes.length;
@@ -392,9 +401,10 @@ class PrintService {
     return result;
   }
 
-  Future<Uint8List> _fetchOne(
-      HttpClient client, String src, int maxBytes) async {
-    final deadline = DateTime.now().add(const Duration(seconds: 20));
+  Future<Uint8List> _fetchOne(HttpClient client, String src, int maxBytes,
+      DateTime poolDeadline) async {
+    var deadline = DateTime.now().add(const Duration(seconds: 20));
+    if (poolDeadline.isBefore(deadline)) deadline = poolDeadline;
     Duration remaining() {
       final left = deadline.difference(DateTime.now());
       if (left <= Duration.zero) throw const HttpException('fetch deadline');
@@ -419,7 +429,13 @@ class PrintService {
       }
       if (!response.isRedirect) break;
       final location = response.headers.value(HttpHeaders.locationHeader);
-      await response.drain<void>();
+      // Never read the redirect body — a large or endless one would run
+      // outside both the deadline and the byte cap. Destroying the socket
+      // discards it without downloading (no keep-alive reuse, but redirect
+      // hops are rare and the next hop is a different URL anyway).
+      try {
+        (await response.detachSocket()).destroy();
+      } catch (_) {/* already closed */}
       if (location == null || ++redirects > 5) {
         throw const HttpException('bad redirect');
       }

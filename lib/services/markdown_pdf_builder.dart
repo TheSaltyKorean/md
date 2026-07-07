@@ -82,8 +82,14 @@ class MarkdownPdfBuilder {
   static Set<String> remoteImageSources(String markdown) {
     final nodes = _parse(markdown);
     final urls = <String>{};
+    // Contexts whose content renders through the inline-span pipeline,
+    // which has no image support — an <img> inside them never reaches
+    // _image(), so fetching it would be a network request for content the
+    // PDF drops.
+    const inlineOnly = {'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td'};
     void walk(md.Node node) {
       if (node is md.Element) {
+        if (inlineOnly.contains(node.tag)) return;
         if (node.tag == 'img') {
           final src = node.attributes['src'];
           if (src != null && _isRemote(src)) urls.add(src);
@@ -1407,10 +1413,22 @@ class MarkdownPdfBuilder {
         // fall through to placeholder
       }
     }
+    // Identify the image by alt text where possible. Never echo a data: URI
+    // (an undecodable payload could dump megabytes of base64 into the PDF),
+    // and keep any other source to a readable length.
+    var label = alt;
+    if (label.isEmpty) {
+      final source = src ?? 'unknown';
+      label = source.startsWith('data:')
+          ? 'embedded data'
+          : source.length > 80
+              ? '${source.substring(0, 77)}…'
+              : source;
+    }
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 4),
       child: pw.Text(
-        '[image: ${alt.isEmpty ? (src ?? 'unknown') : alt}]',
+        '[image: $label]',
         style: pw.TextStyle(
           font: fonts.italic,
           fontSize: 9,
