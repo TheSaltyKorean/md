@@ -1263,6 +1263,40 @@ void main() {
     expect(_walk(ws).any(usesScaleDown), isTrue);
   });
 
+  test('data-URI, pre-fetched remote, and file:// images all render', () async {
+    final tiny = img.Image(width: 4, height: 4);
+    img.fill(tiny, color: img.ColorRgb8(200, 60, 60));
+    final png = Uint8List.fromList(img.encodePng(tiny));
+    final dataUri = 'data:image/png;base64,${base64Encode(png)}';
+    const remoteUrl = 'https://example.com/pic.png';
+    final tmp = Directory.systemTemp.createTempSync('mdimg2');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final onDisk = File('${tmp.path}/pic.png')..writeAsBytesSync(png);
+    final fileUri = Uri.file(onDisk.path).toString();
+
+    // Sources are discovered from the markdown so the caller knows what to
+    // pre-fetch; data/file/local sources need no fetching.
+    final mdText = '![a]($dataUri)\n\n![b]($remoteUrl)\n\n![c]($fileUri)';
+    expect(MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl});
+
+    final builder = MarkdownPdfBuilder(
+      profile: PrintProfile.personal,
+      fonts: _standardFonts(),
+      remoteImages: {remoteUrl: png},
+    );
+    final ws = builder.build(mdText);
+    expect(_walk(ws).whereType<pw.Image>().length, 3);
+    expect(await _renderA4(ws), isNotEmpty);
+
+    // A remote image that was NOT pre-fetched (offline / failed download)
+    // degrades to the textual placeholder instead of throwing.
+    final offline = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    final missing = offline.build('![b]($remoteUrl)');
+    expect(_walk(missing).whereType<pw.Image>(), isEmpty);
+    expect(await _renderA4(missing), isNotEmpty);
+  });
+
   test('legalMode keeps one gap for blockquotes and nested lists', () {
     final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());

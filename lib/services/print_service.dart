@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
@@ -69,6 +70,7 @@ class PrintService {
   }) async {
     final fonts = await _resolveFonts(profile.fontFamily);
     final logo = await _loadLogo(profile.logoPath);
+    final remoteImages = await _fetchRemoteImages(markdown);
     final margin = profile.marginCm * PdfPageFormat.cm;
     // Height available to body content on one page (page minus margins, with
     // an allowance for the running header/footer). Used to cap image height
@@ -80,6 +82,7 @@ class PrintService {
       fonts: fonts,
       baseDir: baseDir,
       maxImageHeight: contentHeight,
+      remoteImages: remoteImages,
     );
     final content = builder.build(markdown);
 
@@ -327,6 +330,35 @@ class PrintService {
     final m = now.month.toString().padLeft(2, '0');
     final d = now.day.toString().padLeft(2, '0');
     return '${now.year}-$m-$d';
+  }
+
+  /// Download the document's `http(s)` images up front — [MarkdownPdfBuilder]
+  /// builds synchronously, so network content must be pre-fetched (the same
+  /// pattern as fonts). Failures are dropped: a missing entry renders as the
+  /// builder's placeholder instead of failing the whole print, and the
+  /// per-image timeout keeps an offline print from hanging.
+  Future<Map<String, Uint8List>> _fetchRemoteImages(String markdown) async {
+    final sources = MarkdownPdfBuilder.remoteImageSources(markdown);
+    if (sources.isEmpty) return const {};
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+    final result = <String, Uint8List>{};
+    try {
+      await Future.wait(sources.map((src) async {
+        try {
+          final request = await client.getUrl(Uri.parse(src));
+          final response =
+              await request.close().timeout(const Duration(seconds: 10));
+          if (response.statusCode != HttpStatus.ok) return;
+          final bytes = await response
+              .fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk))
+              .timeout(const Duration(seconds: 15));
+          result[src] = bytes.takeBytes();
+        } catch (_) {/* unreachable image -> placeholder */}
+      }));
+    } finally {
+      client.close();
+    }
+    return result;
   }
 
   Future<pw.MemoryImage?> _loadLogo(String? path) async {

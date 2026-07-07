@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:markdown/markdown.dart' as md;
@@ -54,7 +55,8 @@ class MarkdownPdfBuilder {
       {required this.profile,
       required this.fonts,
       this.baseDir,
-      this.maxImageHeight});
+      this.maxImageHeight,
+      this.remoteImages = const {}});
 
   final PrintProfile profile;
   final PdfFontSet fonts;
@@ -67,6 +69,35 @@ class MarkdownPdfBuilder {
   /// single image). Null = no cap. Supplied by the caller, which knows the
   /// page size.
   final double? maxImageHeight;
+
+  /// Bytes for `http(s)` image sources, keyed by the exact `src` URL.
+  /// [build] runs synchronously, so the caller downloads these up front (see
+  /// [remoteImageSources]) — the same pre-fetch pattern used for fonts. A
+  /// URL missing here (offline, fetch failed) renders as the placeholder.
+  final Map<String, Uint8List> remoteImages;
+
+  /// The `http(s)` image URLs [markdown] references — what a caller should
+  /// try to download into [remoteImages] before building. Parsed with the
+  /// same settings as [build], so the two always agree.
+  static Set<String> remoteImageSources(String markdown) {
+    final document = md.Document(
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+    );
+    final nodes = document.parseLines(const LineSplitter().convert(markdown));
+    final urls = <String>{};
+    void walk(md.Node node) {
+      if (node is md.Element) {
+        if (node.tag == 'img') {
+          final src = node.attributes['src'];
+          if (src != null && src.startsWith('http')) urls.add(src);
+        }
+        node.children?.forEach(walk);
+      }
+    }
+
+    nodes.forEach(walk);
+    return urls;
+  }
 
   PdfColor get _primary => PdfColor.fromInt(profile.primaryColor);
   PdfColor get _text => PdfColor.fromInt(profile.textColor);
@@ -1348,13 +1379,10 @@ class MarkdownPdfBuilder {
   pw.Widget _image(md.Element el) {
     final src = el.attributes['src'];
     final alt = el.attributes['alt'] ?? '';
-    if (src != null && !src.startsWith('http')) {
+    if (src != null) {
       try {
-        // Resolve relative image paths against the document's folder.
-        final resolved = (baseDir != null && !p.isAbsolute(src))
-            ? p.join(baseDir!, src)
-            : src;
-        final bytes = File(resolved).readAsBytesSync();
+        final bytes = _imageBytes(src);
+        if (bytes == null) throw const FormatException('unavailable');
         // Inside the bounded box `contain` would UPSCALE a small image to
         // fill the page constraints; `scaleDown` keeps intrinsic size and
         // only shrinks oversized images.
@@ -1387,6 +1415,29 @@ class MarkdownPdfBuilder {
         ),
       ),
     );
+  }
+
+  /// Bytes for an image `src`, from whichever scheme it uses: inline
+  /// `data:` URIs, pre-fetched `http(s)` URLs, `file://` URIs, and plain
+  /// paths (relative ones resolve against the document's folder). Null when
+  /// unavailable — the caller falls back to the placeholder.
+  Uint8List? _imageBytes(String src) {
+    if (src.startsWith('data:')) {
+      final comma = src.indexOf(',');
+      if (comma < 0) return null;
+      final header = src.substring(0, comma);
+      final payload = src.substring(comma + 1);
+      return header.endsWith(';base64')
+          ? base64Decode(payload)
+          : Uint8List.fromList(utf8.encode(Uri.decodeComponent(payload)));
+    }
+    if (src.startsWith('http')) return remoteImages[src];
+    final path = src.startsWith('file://')
+        ? Uri.parse(src).toFilePath()
+        : (baseDir != null && !p.isAbsolute(src))
+            ? p.join(baseDir!, src)
+            : src;
+    return File(path).readAsBytesSync();
   }
 
   // --- Inline rendering -------------------------------------------------------
