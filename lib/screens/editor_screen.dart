@@ -311,28 +311,47 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           },
           // Browser-style zoom. "+" is Shift+= on most layouts, so both the
           // plain and shifted "=" activate zoom-in; numpad keys included.
+          // Zoom only applies to document tabs — on a print-preview tab the
+          // inputs are inert so PdfPreview's own zoom/scroll isn't shadowed
+          // by silently changing (and persisting) the document zoom.
           for (final key in [
             LogicalKeyboardKey.equal,
             LogicalKeyboardKey.numpadAdd,
           ]) ...{
-            SingleActivator(key, control: true): zoom.zoomIn,
-            SingleActivator(key, control: true, shift: true): zoom.zoomIn,
-            SingleActivator(key, meta: true): zoom.zoomIn,
-            SingleActivator(key, meta: true, shift: true): zoom.zoomIn,
+            SingleActivator(key, control: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+            SingleActivator(key, control: true, shift: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+            SingleActivator(key, meta: true): () {
+              if (active != null) zoom.zoomIn();
+            },
+            SingleActivator(key, meta: true, shift: true): () {
+              if (active != null) zoom.zoomIn();
+            },
           },
           for (final key in [
             LogicalKeyboardKey.minus,
             LogicalKeyboardKey.numpadSubtract,
           ]) ...{
-            SingleActivator(key, control: true): zoom.zoomOut,
-            SingleActivator(key, meta: true): zoom.zoomOut,
+            SingleActivator(key, control: true): () {
+              if (active != null) zoom.zoomOut();
+            },
+            SingleActivator(key, meta: true): () {
+              if (active != null) zoom.zoomOut();
+            },
           },
           for (final key in [
             LogicalKeyboardKey.digit0,
             LogicalKeyboardKey.numpad0,
           ]) ...{
-            SingleActivator(key, control: true): zoom.reset,
-            SingleActivator(key, meta: true): zoom.reset,
+            SingleActivator(key, control: true): () {
+              if (active != null) zoom.reset();
+            },
+            SingleActivator(key, meta: true): () {
+              if (active != null) zoom.reset();
+            },
           },
         },
         child: Focus(
@@ -367,6 +386,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               // accepted trade-off for not swallowing normal scrolling.
               child: Listener(
                 onPointerSignal: (event) {
+                  if (active == null) return; // print preview: PdfPreview zooms
                   if (event is! PointerScrollEvent) return;
                   final keys = HardwareKeyboard.instance;
                   if (!keys.isControlPressed && !keys.isMetaPressed) return;
@@ -426,14 +446,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         PreviewView(key: key, markdown: doc.currentMarkdown()),
     };
     // Document zoom, applied to document views only (print previews have
-    // their own zoom, and app chrome stays at 100%). The source/preview panes
-    // pick this up as an ambient text scaler; the WYSIWYG editor ignores
-    // MediaQuery and is scaled via its EditorStyle.textScaleFactor instead
-    // (see WysiwygView).
+    // their own zoom, and app chrome stays at 100%). The zoom composes with
+    // the inherited scaler rather than replacing it, so a platform /
+    // accessibility text size keeps applying and zoom stays relative to it.
+    // The source/preview panes pick this up as the ambient text scaler; the
+    // WYSIWYG editor ignores MediaQuery and re-derives its
+    // EditorStyle.textScaleFactor from it instead (see WysiwygView).
     final factor = context.watch<ZoomController>().factor;
     return MediaQuery(
-      data: MediaQuery.of(context)
-          .copyWith(textScaler: TextScaler.linear(factor)),
+      data: MediaQuery.of(context).copyWith(
+        textScaler:
+            _ComposedTextScaler(MediaQuery.textScalerOf(context), factor),
+      ),
       child: view,
     );
   }
@@ -499,7 +523,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 value: 'print',
                 enabled: active != null,
                 child: const Text('Print / Export PDF')),
-            ..._zoomMenuItems(context),
+            ..._zoomMenuItems(context, active),
             const PopupMenuItem(
                 value: 'support', child: Text('Support the project ❤')),
             const PopupMenuItem(value: 'about', child: Text('About')),
@@ -548,7 +572,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               value: 'saveAs',
               enabled: active != null,
               child: const Text('Save As…')),
-          ..._zoomMenuItems(context),
+          ..._zoomMenuItems(context, active),
           const PopupMenuItem(
               value: 'support', child: Text('Support the project ❤')),
           const PopupMenuItem(value: 'about', child: Text('About')),
@@ -558,21 +582,23 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   }
 
   /// Zoom entries shared by both overflow menus. The current level shows on
-  /// the reset item so the menu doubles as the zoom indicator.
-  List<PopupMenuEntry<String>> _zoomMenuItems(BuildContext context) {
+  /// the reset item so the menu doubles as the zoom indicator. Disabled on
+  /// print-preview tabs (zoom is a document-view setting).
+  List<PopupMenuEntry<String>> _zoomMenuItems(
+      BuildContext context, DocumentController? active) {
     final zoom = context.read<ZoomController>();
     return [
       PopupMenuItem(
           value: 'zoomIn',
-          enabled: zoom.canZoomIn,
+          enabled: active != null && zoom.canZoomIn,
           child: const Text('Zoom in (Ctrl +)')),
       PopupMenuItem(
           value: 'zoomOut',
-          enabled: zoom.canZoomOut,
+          enabled: active != null && zoom.canZoomOut,
           child: const Text('Zoom out (Ctrl −)')),
       PopupMenuItem(
           value: 'zoomReset',
-          enabled: !zoom.isDefault,
+          enabled: active != null && !zoom.isDefault,
           child: Text('Reset zoom — ${zoom.label} (Ctrl 0)')),
     ];
   }
@@ -802,13 +828,13 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         if (active != null) _print(context, active);
         break;
       case 'zoomIn':
-        context.read<ZoomController>().zoomIn();
+        if (active != null) context.read<ZoomController>().zoomIn();
         break;
       case 'zoomOut':
-        context.read<ZoomController>().zoomOut();
+        if (active != null) context.read<ZoomController>().zoomOut();
         break;
       case 'zoomReset':
-        context.read<ZoomController>().reset();
+        if (active != null) context.read<ZoomController>().reset();
         break;
       case 'support':
         _support(context);
@@ -848,6 +874,31 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 }
 
 enum _AssocChoice { associate, notNow, never }
+
+/// The inherited (platform / accessibility) text scaler with the document
+/// zoom applied on top, so zooming never discards the user's OS text size.
+class _ComposedTextScaler extends TextScaler {
+  const _ComposedTextScaler(this.inherited, this.zoom);
+
+  final TextScaler inherited;
+  final double zoom;
+
+  @override
+  double scale(double fontSize) => inherited.scale(fontSize) * zoom;
+
+  @override
+  // ignore: deprecated_member_use
+  double get textScaleFactor => inherited.textScaleFactor * zoom;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _ComposedTextScaler &&
+      other.inherited == inherited &&
+      other.zoom == zoom;
+
+  @override
+  int get hashCode => Object.hash(inherited, zoom);
+}
 
 /// Compact, icon-only Edit/Split/Raw/Preview toggle. Tooltips name each mode.
 class _ModeToggle extends StatelessWidget {

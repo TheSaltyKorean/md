@@ -419,6 +419,33 @@ void main() {
       tester.element(find.byType(PreviewView)),
     ).textScaler;
     expect(scaler.scale(10), moreOrLessEquals(11.0));
+
+    // Zoom composes with (never replaces) the platform/accessibility text
+    // scale: 10pt × 1.5 (platform) × 1.1 (zoom) = 16.5.
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await tester.pumpAndSettle();
+    final composed = MediaQuery.of(
+      tester.element(find.byType(PreviewView)),
+    ).textScaler;
+    expect(composed.scale(10), moreOrLessEquals(16.5));
+    tester.platformDispatcher.clearTextScaleFactorTestValue();
+
+    // On a print-preview tab the zoom shortcuts are inert — PdfPreview has
+    // its own zoom, and the persisted document zoom must not silently drift.
+    zoom.reset();
+    final ws = Provider.of<WorkspaceController>(
+        tester.element(find.byType(MarkdownStudioApp)),
+        listen: false);
+    ws.openPrintPreview(markdown: '# sample', title: 'sample', docPath: null);
+    // Plain pumps: PdfPreview keeps scheduling frames while it renders, so
+    // pumpAndSettle would never settle here.
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.equal);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    expect(zoom.factor, 1.0);
   });
 
   test('Print profiles seed with built-ins', () async {

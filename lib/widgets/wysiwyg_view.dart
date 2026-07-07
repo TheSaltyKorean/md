@@ -1,9 +1,7 @@
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
 import '../state/document_controller.dart';
-import '../state/zoom_controller.dart';
 
 /// Hosts the AppFlowy block-style WYSIWYG editor. The editor is keyed on the
 /// controller's [DocumentController.editorEpoch] so it rebuilds cleanly when the
@@ -25,8 +23,10 @@ class WysiwygView extends StatelessWidget {
       cursorColor: theme.colorScheme.primary,
       selectionColor: theme.colorScheme.primary.withValues(alpha: 0.25),
       // AppFlowy ignores the ambient MediaQuery text scaler and applies its
-      // own factor, so document zoom is threaded through here.
-      textScaleFactor: context.watch<ZoomController>().factor,
+      // own factor. Re-derive it from the ambient scaler (accessibility text
+      // size × document zoom, composed by EditorScreen) against this
+      // editor's 16pt base, so all view modes scale identically.
+      textScaleFactor: MediaQuery.textScalerOf(context).scale(16) / 16,
       textStyleConfiguration: TextStyleConfiguration(
         text: theme.textTheme.bodyLarge!.copyWith(
           fontSize: 16,
