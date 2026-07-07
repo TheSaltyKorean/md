@@ -1357,39 +1357,57 @@ class MarkdownPdfBuilder {
         final cells = <pw.Widget>[];
         for (final cell in row.children ?? const <md.Node>[]) {
           if (cell is! md.Element) continue;
-          // Images can't ride in text spans, so a cell splits into its
-          // image children (rendered as capped image widgets — screenshot
-          // tables are a common pattern) and everything else (the usual
-          // inline-span walk, so `<span>` fill-ins and literal code keep
-          // working). Header cells force white so links/code don't adopt
-          // their own colour on the coloured header fill.
-          final images = <md.Element>[];
-          final rest = <md.Node>[];
-          for (final child in cell.children ?? const <md.Node>[]) {
-            if (child is md.Element && child.tag == 'img') {
-              images.add(child);
-            } else {
-              rest.add(child);
-            }
-          }
-          final parts = <pw.Widget>[
-            if (rest.any((n) => n.textContent.trim().isNotEmpty))
-              pw.RichText(
+          // Images can't ride in text spans, so a cell interleaves image
+          // widgets (screenshot tables are a common pattern) with inline
+          // runs, in source order. A run still renders when its only
+          // content is a visual element (e.g. a `<span>` fill-in line with
+          // no text); pure whitespace is skipped. Header cells force white
+          // so links/code don't adopt their own colour on the coloured
+          // header fill. Each image's cap shrinks with the number of images
+          // in the cell: a pw.Table row cannot split across pages, so the
+          // combined stack must stay within one page.
+          final children = cell.children ?? const <md.Node>[];
+          final imageCount = children
+              .whereType<md.Element>()
+              .where((e) => e.tag == 'img')
+              .length;
+          final perImageCap = imageCount == 0
+              ? _cellImageCap
+              : (_cellImageStackCap / imageCount)
+                  .clamp(24.0, _cellImageCap)
+                  .toDouble();
+          final parts = <pw.Widget>[];
+          final run = <md.Node>[];
+          void flushRun() {
+            final visible = run
+                .any((n) => n is md.Element || n.textContent.trim().isNotEmpty);
+            if (visible) {
+              parts.add(pw.RichText(
                 text: pw.TextSpan(
                   children: _inline(
-                    rest,
+                    List.of(run),
                     boldDefault: isHead,
                     forceColor: isHead ? PdfColors.white : null,
                     sizeOverride: 10.5,
                   ),
                 ),
-              ),
-            for (final img in images)
-              pw.Padding(
+              ));
+            }
+            run.clear();
+          }
+
+          for (final child in children) {
+            if (child is md.Element && child.tag == 'img') {
+              flushRun();
+              parts.add(pw.Padding(
                 padding: const pw.EdgeInsets.symmetric(vertical: 2),
-                child: _imageOrPlaceholder(img, heightCap: _cellImageCap),
-              ),
-          ];
+                child: _imageOrPlaceholder(child, heightCap: perImageCap),
+              ));
+            } else {
+              run.add(child);
+            }
+          }
+          flushRun();
           cells.add(
             pw.Padding(
               padding:
@@ -1424,6 +1442,11 @@ class MarkdownPdfBuilder {
   /// Height cap for an image inside a table cell: a [pw.Table] row cannot
   /// split across pages, so cell images stay conservatively small.
   static const double _cellImageCap = 180;
+
+  /// Combined height budget for ALL images in one cell (the per-image cap
+  /// shrinks when a cell stacks several) — the whole row must still fit a
+  /// page.
+  static const double _cellImageStackCap = 420;
 
   pw.Widget _image(md.Element el) => pw.Padding(
         padding: const pw.EdgeInsets.symmetric(vertical: 6),

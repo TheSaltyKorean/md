@@ -449,6 +449,21 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     }
   }
 
+  /// PdfPreview's document builder. Deliberately a method (stable tear-off
+  /// identity across rebuilds) — see the call site.
+  Future<Uint8List> _buildForFormat(PdfPageFormat format) {
+    // Remember the page size/orientation the user is currently previewing
+    // so "Save as PDF" matches it (not always A4).
+    _previewFormat = format;
+    return _service.generate(
+      markdown: widget.markdown,
+      profile: context.read<PrintProfileService>().byId(_selectedId),
+      title: widget.title,
+      format: format,
+      baseDir: _baseDir,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final profilesService = context.watch<PrintProfileService>();
@@ -547,18 +562,12 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
             // the page size/orientation the user was previewing so their
             // selection carries across (and Print/Save keep matching it).
             initialPageFormat: _previewFormat,
-            build: (format) {
-              // Remember the page size/orientation the user is currently
-              // previewing so "Save as PDF" matches it (not always A4).
-              _previewFormat = format;
-              return _service.generate(
-                markdown: widget.markdown,
-                profile: selected,
-                title: widget.title,
-                format: format,
-                baseDir: _baseDir,
-              );
-            },
+            // A stable method tear-off: PdfPreview re-rasterizes whenever
+            // the build callback's identity changes, and an inline closure
+            // gets a new identity on every rebuild — a zoom step (which only
+            // changes maxPageWidth) must not regenerate the PDF. Profile
+            // switches re-render via the ValueKey remount above.
+            build: _buildForFormat,
             canChangePageFormat: true,
             canChangeOrientation: true,
             // Print/Share live in the profile row above now, so hide the
