@@ -444,11 +444,20 @@ class PrintService {
         throw const HttpException('redirect left https');
       }
     }
-    if (response.statusCode != HttpStatus.ok) {
-      throw HttpException('HTTP ${response.statusCode}', uri: uri);
-    }
-    if (response.contentLength > maxBytes) {
-      throw const HttpException('image exceeds size cap');
+    // Reject before reading the body — and tear the response down first, or
+    // the swallowed exception leaves an open socket/body running outside
+    // the pool and byte budgets (the in-body throws below don't need this:
+    // throwing out of await-for cancels the subscription).
+    if (response.statusCode != HttpStatus.ok ||
+        response.contentLength > maxBytes) {
+      try {
+        (await response.detachSocket()).destroy();
+      } catch (_) {/* already closed */}
+      throw HttpException(
+          response.statusCode != HttpStatus.ok
+              ? 'HTTP ${response.statusCode}'
+              : 'image exceeds size cap',
+          uri: uri);
     }
     final bytes = BytesBuilder();
     // Stream.timeout bounds each inter-chunk gap and — unlike a
