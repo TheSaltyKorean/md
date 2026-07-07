@@ -1,3 +1,4 @@
+import 'dart:async' show TimeoutException;
 import 'dart:io';
 import 'dart:typed_data' show BytesBuilder;
 
@@ -369,8 +370,11 @@ class PrintService {
         final limit =
             budget < _maxRemoteImageBytes ? budget : _maxRemoteImageBytes;
         try {
-          final bytes = await _fetchOne(client, src, limit)
-              .timeout(const Duration(seconds: 20));
+          // The deadline lives inside _fetchOne (not a Future.timeout
+          // wrapper, which completes the wrapper but leaves the download
+          // streaming in the background, silently exceeding the pool and
+          // byte bounds).
+          final bytes = await _fetchOne(client, src, limit);
           if (bytes.length <= budget) {
             result[src] = bytes;
             budget -= bytes.length;
@@ -390,16 +394,56 @@ class PrintService {
 
   Future<Uint8List> _fetchOne(
       HttpClient client, String src, int maxBytes) async {
-    final request = await client.getUrl(Uri.parse(src));
-    final response = await request.close();
+    final deadline = DateTime.now().add(const Duration(seconds: 20));
+    Duration remaining() {
+      final left = deadline.difference(DateTime.now());
+      if (left <= Duration.zero) throw const HttpException('fetch deadline');
+      return left;
+    }
+
+    // Redirects are followed manually so every hop stays HTTPS — the
+    // default auto-follow would happily hop to a cleartext http target,
+    // bypassing the https-only policy for anything hosted behind a
+    // redirect.
+    var uri = Uri.parse(src);
+    var redirects = 0;
+    HttpClientResponse response;
+    while (true) {
+      final request = await client.getUrl(uri).timeout(remaining());
+      request.followRedirects = false;
+      try {
+        response = await request.close().timeout(remaining());
+      } on TimeoutException {
+        request.abort(); // actually tear the request down, don't just move on
+        rethrow;
+      }
+      if (!response.isRedirect) break;
+      final location = response.headers.value(HttpHeaders.locationHeader);
+      await response.drain<void>();
+      if (location == null || ++redirects > 5) {
+        throw const HttpException('bad redirect');
+      }
+      uri = uri.resolve(location);
+      if (uri.scheme.toLowerCase() != 'https') {
+        throw const HttpException('redirect left https');
+      }
+    }
     if (response.statusCode != HttpStatus.ok) {
-      throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(src));
+      throw HttpException('HTTP ${response.statusCode}', uri: uri);
     }
     if (response.contentLength > maxBytes) {
       throw const HttpException('image exceeds size cap');
     }
     final bytes = BytesBuilder();
-    await for (final chunk in response) {
+    // Stream.timeout bounds each inter-chunk gap and — unlike a
+    // Future.timeout around the whole fetch — cancels the subscription when
+    // it fires, so a slow-dripping server can't keep the download alive in
+    // the background. The deadline check bounds total elapsed time; a throw
+    // out of await-for also cancels the subscription.
+    await for (final chunk in response.timeout(const Duration(seconds: 10))) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw const HttpException('fetch deadline');
+      }
       bytes.add(chunk);
       // Content-Length can lie (or be absent): enforce the cap on the
       // actually accumulated bytes too.
