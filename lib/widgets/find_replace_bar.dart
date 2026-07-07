@@ -293,10 +293,16 @@ class _FindReplaceBarState extends State<FindReplaceBar> {
       builder: (context, constraints) {
         final w = constraints.maxWidth;
         _areaH = constraints.maxHeight;
-        _textScaler = MediaQuery.textScalerOf(context);
+        // The scaler participates in the cache key: document zoom (or an OS
+        // text-size change) resizes the source text, so the cached match
+        // rectangles must be re-measured or the overlays drift.
+        final scaler = MediaQuery.textScalerOf(context);
         final layoutWidth = w - kSourceContentPadding.horizontal;
-        if (layoutWidth != _layoutWidth || _rectText != widget.target.text) {
+        if (layoutWidth != _layoutWidth ||
+            _rectText != widget.target.text ||
+            scaler != _textScaler) {
           _layoutWidth = layoutWidth;
+          _textScaler = scaler;
           _rebuildRects(widget.target.text);
         }
         return Stack(

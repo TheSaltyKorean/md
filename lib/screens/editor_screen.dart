@@ -316,6 +316,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           // by silently changing (and persisting) the document zoom.
           for (final key in [
             LogicalKeyboardKey.equal,
+            LogicalKeyboardKey.add, // layouts with a dedicated "+" key
             LogicalKeyboardKey.numpadAdd,
           ]) ...{
             SingleActivator(key, control: true): () {
