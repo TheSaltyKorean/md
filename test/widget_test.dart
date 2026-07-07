@@ -1274,18 +1274,29 @@ void main() {
     final onDisk = File('${tmp.path}/pic.png')..writeAsBytesSync(png);
     final fileUri = Uri.file(onDisk.path).toString();
 
+    // Percent-encoded (non-base64) data URI: binary octets must survive
+    // decoding. Every byte is escaped — a markdown link destination ends at
+    // an unescaped ')', so an embedded data URI must be fully encoded.
+    final percentUri = 'data:image/png,'
+        '${png.map((b) => '%${b.toRadixString(16).padLeft(2, '0')}').join()}';
+    // URI schemes are case-insensitive; uppercase variants must still work.
+    final upperFileUri = fileUri.replaceFirst('file://', 'FILE://');
+    const upperUrl = 'HTTPS://example.com/pic2.png';
+
     // Sources are discovered from the markdown so the caller knows what to
     // pre-fetch; data/file/local sources need no fetching.
-    final mdText = '![a]($dataUri)\n\n![b]($remoteUrl)\n\n![c]($fileUri)';
-    expect(MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl});
+    final mdText = '![a]($dataUri)\n\n![b]($remoteUrl)\n\n![c]($fileUri)\n\n'
+        '![d]($percentUri)\n\n![e]($upperFileUri)\n\n![f]($upperUrl)';
+    expect(
+        MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl, upperUrl});
 
     final builder = MarkdownPdfBuilder(
       profile: PrintProfile.personal,
       fonts: _standardFonts(),
-      remoteImages: {remoteUrl: png},
+      remoteImages: {remoteUrl: png, upperUrl: png},
     );
     final ws = builder.build(mdText);
-    expect(_walk(ws).whereType<pw.Image>().length, 3);
+    expect(_walk(ws).whereType<pw.Image>().length, 6);
     expect(await _renderA4(ws), isNotEmpty);
 
     // A remote image that was NOT pre-fetched (offline / failed download)

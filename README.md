@@ -95,3 +95,11 @@ Details, platform prerequisites and the full project layout:
 [PolyForm Noncommercial 1.0.0](LICENSE.md) — free for personal,
 research and other non-commercial use; commercial use requires separate
 terms.
+
+## Legal disclaimer
+
+Markdown Studio is a formatting tool, **not legal advice**. Documents it
+produces — including output of the Court Filing profile — are not
+guaranteed to meet any court's requirements. Filing rules vary by
+jurisdiction; always check your local court's rules or consult a licensed
+attorney.

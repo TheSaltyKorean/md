@@ -868,7 +868,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       context: context,
       applicationName: 'Markdown Studio',
       applicationVersion: info.version,
-      applicationLegalese: 'A cross-platform Markdown viewer & WYSIWYG editor.',
+      applicationLegalese: 'A cross-platform Markdown viewer & WYSIWYG editor.'
+          '\n\nMarkdown Studio is a formatting tool and does not provide '
+          'legal advice. Documents it produces (including the Court Filing '
+          'profile) are not guaranteed to meet any court\u2019s requirements '
+          '\u2014 filing rules vary by jurisdiction; always check your local '
+          'court\u2019s rules or consult a licensed attorney.',
     );
   }
 }

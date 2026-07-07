@@ -89,7 +89,7 @@ class MarkdownPdfBuilder {
       if (node is md.Element) {
         if (node.tag == 'img') {
           final src = node.attributes['src'];
-          if (src != null && src.startsWith('http')) urls.add(src);
+          if (src != null && _isRemote(src)) urls.add(src);
         }
         node.children?.forEach(walk);
       }
@@ -1417,23 +1417,29 @@ class MarkdownPdfBuilder {
     );
   }
 
+  /// Whether `src` is an `http(s)` URL (schemes compare case-insensitively).
+  static bool _isRemote(String src) {
+    final scheme = Uri.tryParse(src)?.scheme.toLowerCase();
+    return scheme == 'http' || scheme == 'https';
+  }
+
   /// Bytes for an image `src`, from whichever scheme it uses: inline
   /// `data:` URIs, pre-fetched `http(s)` URLs, `file://` URIs, and plain
   /// paths (relative ones resolve against the document's folder). Null when
   /// unavailable — the caller falls back to the placeholder.
   Uint8List? _imageBytes(String src) {
-    if (src.startsWith('data:')) {
-      final comma = src.indexOf(',');
-      if (comma < 0) return null;
-      final header = src.substring(0, comma);
-      final payload = src.substring(comma + 1);
-      return header.endsWith(';base64')
-          ? base64Decode(payload)
-          : Uint8List.fromList(utf8.encode(Uri.decodeComponent(payload)));
+    final uri = Uri.tryParse(src);
+    // Note a Windows drive path ("C:\…") parses as a one-letter scheme and
+    // correctly falls through to the plain-path branch.
+    final scheme = uri?.scheme.toLowerCase() ?? '';
+    if (scheme == 'data') {
+      // UriData handles both base64 and percent-encoded payloads without
+      // corrupting binary octets.
+      return uri!.data?.contentAsBytes();
     }
-    if (src.startsWith('http')) return remoteImages[src];
-    final path = src.startsWith('file://')
-        ? Uri.parse(src).toFilePath()
+    if (scheme == 'http' || scheme == 'https') return remoteImages[src];
+    final path = scheme == 'file'
+        ? uri!.toFilePath()
         : (baseDir != null && !p.isAbsolute(src))
             ? p.join(baseDir!, src)
             : src;
