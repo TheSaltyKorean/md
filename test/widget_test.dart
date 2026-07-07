@@ -1284,9 +1284,12 @@ void main() {
     const upperUrl = 'HTTPS://example.com/pic2.png';
 
     // Sources are discovered from the markdown so the caller knows what to
-    // pre-fetch; data/file/local sources need no fetching.
+    // pre-fetch; data/file/local sources need no fetching, and cleartext
+    // http is never fetched (mobile platforms block it — it degrades to the
+    // placeholder everywhere for consistency).
     final mdText = '![a]($dataUri)\n\n![b]($remoteUrl)\n\n![c]($fileUri)\n\n'
-        '![d]($percentUri)\n\n![e]($upperFileUri)\n\n![f]($upperUrl)';
+        '![d]($percentUri)\n\n![e]($upperFileUri)\n\n![f]($upperUrl)\n\n'
+        '![g](http://example.com/insecure.png)';
     expect(
         MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl, upperUrl});
 

@@ -76,14 +76,11 @@ class MarkdownPdfBuilder {
   /// URL missing here (offline, fetch failed) renders as the placeholder.
   final Map<String, Uint8List> remoteImages;
 
-  /// The `http(s)` image URLs [markdown] references — what a caller should
+  /// The `https` image URLs [markdown] references — what a caller should
   /// try to download into [remoteImages] before building. Parsed with the
   /// same settings as [build], so the two always agree.
   static Set<String> remoteImageSources(String markdown) {
-    final document = md.Document(
-      extensionSet: md.ExtensionSet.gitHubFlavored,
-    );
-    final nodes = document.parseLines(const LineSplitter().convert(markdown));
+    final nodes = _parse(markdown);
     final urls = <String>{};
     void walk(md.Node node) {
       if (node is md.Element) {
@@ -147,7 +144,9 @@ class MarkdownPdfBuilder {
   /// stays one size. Non-legal documents keep 11pt unchanged.
   double get _bodySize => profile.legalMode ? 12.0 : 11.0;
 
-  List<pw.Widget> build(String markdown) {
+  /// One parser configuration for [build] *and* [remoteImageSources], so the
+  /// URLs discovered for pre-fetch are exactly the images build() renders.
+  static List<md.Node> _parse(String markdown) {
     final document = md.Document(
       extensionSet: md.ExtensionSet.gitHubFlavored,
       encodeHtml: false,
@@ -155,7 +154,11 @@ class MarkdownPdfBuilder {
       // inline HTML as text, so parse it into a 'u' element ourselves.
       inlineSyntaxes: [_UnderlineSyntax()],
     );
-    final nodes = document.parseLines(const LineSplitter().convert(markdown));
+    return document.parseLines(const LineSplitter().convert(markdown));
+  }
+
+  List<pw.Widget> build(String markdown) {
+    final nodes = _parse(markdown);
     final out = nodes.expand(_emit).toList();
     // A flowed block's gap is pure *inter*-block spacing. At the document end
     // or directly before a forced page break it serves no purpose — and when
@@ -1417,11 +1420,13 @@ class MarkdownPdfBuilder {
     );
   }
 
-  /// Whether `src` is an `http(s)` URL (schemes compare case-insensitively).
-  static bool _isRemote(String src) {
-    final scheme = Uri.tryParse(src)?.scheme.toLowerCase();
-    return scheme == 'http' || scheme == 'https';
-  }
+  /// Whether `src` is a fetchable remote URL (schemes compare
+  /// case-insensitively). Only `https` qualifies: Android and iOS release
+  /// builds block cleartext `http` by platform policy, so plain-http images
+  /// render the placeholder everywhere rather than working on some
+  /// platforms and not others.
+  static bool _isRemote(String src) =>
+      Uri.tryParse(src)?.scheme.toLowerCase() == 'https';
 
   /// Bytes for an image `src`, from whichever scheme it uses: inline
   /// `data:` URIs, pre-fetched `http(s)` URLs, `file://` URIs, and plain

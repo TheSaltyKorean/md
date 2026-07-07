@@ -332,11 +332,18 @@ class PrintService {
     return '${now.year}-$m-$d';
   }
 
-  /// Download the document's `http(s)` images up front — [MarkdownPdfBuilder]
+  /// Hard ceiling for one downloaded image. Big enough for any sane photo,
+  /// small enough that a document pointing at a huge file degrades to the
+  /// placeholder instead of ballooning memory during preview/export.
+  static const int _maxRemoteImageBytes = 20 * 1024 * 1024;
+
+  /// Download the document's `https` images up front — [MarkdownPdfBuilder]
   /// builds synchronously, so network content must be pre-fetched (the same
   /// pattern as fonts). Failures are dropped: a missing entry renders as the
-  /// builder's placeholder instead of failing the whole print, and the
-  /// per-image timeout keeps an offline print from hanging.
+  /// builder's placeholder instead of failing the whole print. Each image is
+  /// bounded twice — a whole-task timeout (covering DNS/connect, which stage
+  /// timeouts alone would not) and a byte cap — so one unreachable host or
+  /// huge file can't hang or exhaust the print.
   Future<Map<String, Uint8List>> _fetchRemoteImages(String markdown) async {
     final sources = MarkdownPdfBuilder.remoteImageSources(markdown);
     if (sources.isEmpty) return const {};
@@ -345,20 +352,35 @@ class PrintService {
     try {
       await Future.wait(sources.map((src) async {
         try {
-          final request = await client.getUrl(Uri.parse(src));
-          final response =
-              await request.close().timeout(const Duration(seconds: 10));
-          if (response.statusCode != HttpStatus.ok) return;
-          final bytes = await response
-              .fold<BytesBuilder>(BytesBuilder(), (b, chunk) => b..add(chunk))
-              .timeout(const Duration(seconds: 15));
-          result[src] = bytes.takeBytes();
-        } catch (_) {/* unreachable image -> placeholder */}
+          result[src] =
+              await _fetchOne(client, src).timeout(const Duration(seconds: 20));
+        } catch (_) {/* unreachable/oversized image -> placeholder */}
       }));
     } finally {
       client.close();
     }
     return result;
+  }
+
+  Future<Uint8List> _fetchOne(HttpClient client, String src) async {
+    final request = await client.getUrl(Uri.parse(src));
+    final response = await request.close();
+    if (response.statusCode != HttpStatus.ok) {
+      throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(src));
+    }
+    if (response.contentLength > _maxRemoteImageBytes) {
+      throw const HttpException('image exceeds size cap');
+    }
+    final bytes = BytesBuilder();
+    await for (final chunk in response) {
+      bytes.add(chunk);
+      // Content-Length can lie (or be absent): enforce the cap on the
+      // actually accumulated bytes too.
+      if (bytes.length > _maxRemoteImageBytes) {
+        throw const HttpException('image exceeds size cap');
+      }
+    }
+    return bytes.takeBytes();
   }
 
   Future<pw.MemoryImage?> _loadLogo(String? path) async {
