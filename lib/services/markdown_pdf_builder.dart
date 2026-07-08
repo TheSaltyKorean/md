@@ -1379,9 +1379,15 @@ class MarkdownPdfBuilder {
               : (maxImageHeight! - 40)
                   .clamp(24.0, _cellImageStackCap)
                   .toDouble();
+          // No lower clamp: with enough images a floor would multiply past
+          // the stack budget and the unsplittable row could exceed its
+          // page. The 4pt vertical padding around each image is part of
+          // the budget.
           final perImageCap = imageCount == 0
               ? _cellImageCap
-              : (stackCap / imageCount).clamp(24.0, _cellImageCap).toDouble();
+              : ((stackCap - 4.0 * imageCount) / imageCount)
+                  .clamp(1.0, _cellImageCap)
+                  .toDouble();
           final parts = <pw.Widget>[];
           final run = <md.Node>[];
           void flushRun() {

@@ -375,6 +375,45 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
           child: VerticalDivider(width: 1, color: cs.outlineVariant),
         ),
       ),
+      // Page size & orientation (moved out of PdfPreview's bottom bar: that
+      // bar would ride the zoomed preview surface off-screen, while this row
+      // always stays at viewport width).
+      PopupMenuButton<PdfPageFormat>(
+        tooltip: 'Page size',
+        initialValue: _previewFormat.portrait,
+        onSelected: (f) => setState(() {
+          _previewFormat =
+              _previewFormat.width > _previewFormat.height ? f.landscape : f;
+          _previewEpoch++; // remount: a new size regenerates the document
+        }),
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: PdfPageFormat.a4, child: Text('A4')),
+          PopupMenuItem(value: PdfPageFormat.letter, child: Text('Letter')),
+          PopupMenuItem(value: PdfPageFormat.legal, child: Text('Legal')),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.crop_free_rounded, size: 20),
+            const SizedBox(width: 4),
+            Text(_pageFormatName(_previewFormat)),
+          ]),
+        ),
+      ),
+      IconButton(
+        tooltip: _previewFormat.width > _previewFormat.height
+            ? 'Switch to portrait'
+            : 'Switch to landscape',
+        icon: Icon(_previewFormat.width > _previewFormat.height
+            ? Icons.crop_portrait_rounded
+            : Icons.crop_landscape_rounded),
+        onPressed: () => setState(() {
+          _previewFormat = _previewFormat.width > _previewFormat.height
+              ? _previewFormat.portrait
+              : _previewFormat.landscape;
+          _previewEpoch++;
+        }),
+      ),
       // --- Group 2: output actions (moved up from the preview's bottom bar so
       // all the controls live in one place). ---
       IconButton(
@@ -396,6 +435,17 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
         onPressed: () => _savePdf(selected),
       ),
     ];
+  }
+
+  static String _pageFormatName(PdfPageFormat f) {
+    final portrait = f.portrait;
+    bool same(PdfPageFormat a) =>
+        (a.width - portrait.width).abs() < 1 &&
+        (a.height - portrait.height).abs() < 1;
+    if (same(PdfPageFormat.a4)) return 'A4';
+    if (same(PdfPageFormat.letter)) return 'Letter';
+    if (same(PdfPageFormat.legal)) return 'Legal';
+    return 'Custom';
   }
 
   /// Save the rendered document straight to a `.pdf` file. Unlike printing to a
@@ -448,6 +498,10 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
           const SnackBar(content: Text('Saved PDF with selectable text')));
     }
   }
+
+  /// Zoom level the preview raster was last produced for (drives
+  /// shouldRepaint so a zoom step re-rasters at the new resolution).
+  double _rasterZoom = 1.0;
 
   /// PdfPreview's document builder. Deliberately a method (stable tear-off
   /// identity across rebuilds) — see the call site.
@@ -562,6 +616,20 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
           // on top.
           child: LayoutBuilder(builder: (context, constraints) {
             final factor = context.watch<ZoomController>().factor;
+            // Re-raster exactly when the zoom level changed: PdfPreview
+            // computes its raster resolution from the WINDOW width, so a
+            // zoomed-in surface would otherwise stretch the stale raster
+            // into blur. The dpi override targets the zoomed width; the
+            // PDF bytes are untouched (stable build tear-off).
+            final needsReraster = _rasterZoom != factor;
+            _rasterZoom = factor;
+            final dpr = MediaQuery.of(context).devicePixelRatio;
+            final zoomDpi = factor == 1.0
+                ? null // default behavior (incl. the package's mobile tuning)
+                : (constraints.maxWidth * factor - 16) *
+                    dpr /
+                    _previewFormat.width *
+                    PdfPageFormat.inch;
             return Center(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
@@ -574,6 +642,8 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                     // tab must still refresh this tab's cached pages.
                     key: ValueKey('preview-$_selectedId-$_previewEpoch-'
                         '${context.watch<PrintProfileService>().revision}'),
+                    dpi: zoomDpi,
+                    shouldRepaint: needsReraster,
                     // A refresh or profile switch remounts the preview; start it at
                     // the page size/orientation the user was previewing so their
                     // selection carries across (and Print/Save keep matching it).
@@ -584,8 +654,11 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                     // changes maxPageWidth) must not regenerate the PDF. Profile
                     // switches re-render via the ValueKey remount above.
                     build: _buildForFormat,
-                    canChangePageFormat: true,
-                    canChangeOrientation: true,
+                    // Page size/orientation moved into the toolbar row above (the
+                    // preview's own bottom bar would ride the zoomed surface
+                    // off-screen).
+                    canChangePageFormat: false,
+                    canChangeOrientation: false,
                     // Print/Share live in the profile row above now, so hide the
                     // preview's own print/share buttons (keep page-size/orientation).
                     allowPrinting: false,
