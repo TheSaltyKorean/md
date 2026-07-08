@@ -1066,11 +1066,15 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       if (cancelled) return;
       closeProgress();
       if (exitsForInstall) {
-        // Resources released first, then the wscript launcher is spawned —
-        // it waits for THIS process id to fully exit before starting the
-        // installer, so file replacement can never race shutdown.
-        await _releaseResources();
+        // Spawn first, release second: the wscript launcher only WAITS for
+        // this process id, so starting it before teardown is safe — and if
+        // the spawn throws, nothing has been released yet and the editor
+        // stays fully functional (socket, watchers) for the error path.
+        // Once it's running, release resources and exit; the launcher sees
+        // the pid vanish and only then starts the installer, so file
+        // replacement can never race shutdown.
         await updates.launchInstaller(path, kind);
+        await _releaseResources();
         exit(0);
       } else {
         await updates.launchInstaller(path, kind);
