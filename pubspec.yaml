@@ -4,7 +4,7 @@ publish_to: "none"
 
 # App version. Format: <semver>+<buildNumber>.
 # The build number must be incremented for every store submission.
-version: 1.0.4+5
+version: 1.0.5+6
 
 environment:
   sdk: ">=3.4.0 <4.0.0"
