@@ -13,6 +13,7 @@ import 'services/file_association_service.dart';
 import 'services/open_file_channel.dart';
 import 'services/print_profile_service.dart';
 import 'services/single_instance_service.dart';
+import 'services/update_service.dart';
 import 'state/theme_controller.dart';
 import 'state/workspace_controller.dart';
 import 'state/zoom_controller.dart';
@@ -70,6 +71,7 @@ Future<void> main(List<String> args) async {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
         ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+        ChangeNotifierProvider(create: (_) => UpdateController(prefs)),
         ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
         ChangeNotifierProvider<WorkspaceController>.value(value: workspace),
         Provider(create: (_) => FileAssociationService(prefs)),
