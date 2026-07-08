@@ -85,8 +85,11 @@ class UpdateController extends ChangeNotifier {
   @visibleForTesting
   static bool isNewer(String candidate, String current) {
     List<int>? parse(String v) {
-      // Anchored: a malformed tag like 'v1.2.3oops' must not prompt.
-      final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)$').firstMatch(v.trim());
+      // Anchored — a malformed tag like '1.2.3oops' must not prompt — but a
+      // '+build' suffix is tolerated: on Windows PackageInfo.version can
+      // carry it (the exe's ProductVersion string is '1.0.5+6'), and the
+      // running version failing to parse silently disabled every check.
+      final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)(?:\+\d+)?$').firstMatch(v.trim());
       if (m == null) return null;
       return [1, 2, 3].map((i) => int.parse(m.group(i)!)).toList();
     }
@@ -184,22 +187,26 @@ class UpdateController extends ChangeNotifier {
 
   /// Hand the downloaded installer to the OS, matching the install channel:
   /// msiexec for MSI, the setup.exe itself for Inno (same AppId = in-place
-  /// upgrade), the default .deb handler on Linux. The Windows installers
-  /// start behind a short delay so the app's own shutdown (which drains
-  /// pending writes for up to ~2s after spawning this) completes before any
-  /// file replacement can begin — otherwise the exe/DLLs are still loaded
-  /// and the upgrade hits file-in-use.
+  /// upgrade), the default .deb handler on Linux.
+  /// On Windows the installer is started by a tiny generated VBScript run
+  /// via wscript (GUI subsystem — no console window, unlike cmd/powershell
+  /// wrappers, and no cmd quoting: we author the script file's contents
+  /// directly). The script WAITS for this exact process id to exit before
+  /// launching the installer, so file replacement can never race the app's
+  /// own shutdown — the exe/DLLs stay loaded until process exit, which
+  /// resource cleanup alone doesn't cover.
   Future<void> launchInstaller(String path, InstallKind kind) async {
     switch (kind) {
-      // The delay uses ping, not `timeout`: timeout demands an interactive
-      // console and exits immediately under detached (no-stdio) processes,
-      // which would silently drop the grace period.
-      case InstallKind.msi:
-        await Process.start(
-            'cmd', ['/c', 'ping -n 4 127.0.0.1 >nul & msiexec /i "$path"'],
-            mode: ProcessStartMode.detached);
-      case InstallKind.inno:
-        await Process.start('cmd', ['/c', 'ping -n 4 127.0.0.1 >nul & "$path"'],
+      case InstallKind.msi || InstallKind.inno:
+        final script = windowsLauncherScript(
+          waitForPid: pid,
+          program: kind == InstallKind.msi ? 'msiexec' : path,
+          arguments: kind == InstallKind.msi ? '/i ""$path""' : '',
+        );
+        final vbs = File(
+            '${File(path).parent.path}${Platform.pathSeparator}run-update.vbs');
+        vbs.writeAsStringSync(script);
+        await Process.start('wscript', [vbs.path],
             mode: ProcessStartMode.detached);
       case InstallKind.deb:
         await Process.start('xdg-open', [path],
@@ -207,6 +214,27 @@ class UpdateController extends ChangeNotifier {
       case InstallKind.other:
         throw UnsupportedError('no installer launcher for this install');
     }
+  }
+
+  /// The Windows launcher script: poll until [waitForPid] is gone, then
+  /// ShellExecute the installer. Lives in the same private temp directory
+  /// as the downloaded installer. VBS string literals escape an embedded
+  /// quote by doubling it; [arguments] is embedded verbatim, so quote any
+  /// path inside it as `""…""`.
+  @visibleForTesting
+  static String windowsLauncherScript({
+    required int waitForPid,
+    required String program,
+    required String arguments,
+  }) {
+    String vbs(String v) => v.replaceAll('"', '""');
+    return '''
+Set wmi = GetObject("winmgmts:root\\cimv2")
+Do While wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId = $waitForPid").Count > 0
+  WScript.Sleep 200
+Loop
+CreateObject("Shell.Application").ShellExecute "${vbs(program)}", "$arguments", "", "open", 1
+''';
   }
 
   /// How this copy was installed — decides the one-click update artifact.

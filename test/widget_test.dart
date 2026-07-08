@@ -496,6 +496,10 @@ void main() {
     expect(UpdateController.isNewer('not-a-version', '1.0.4'), isFalse);
     // Anchored: numeric-prefixed garbage must not read as a version.
     expect(UpdateController.isNewer('9.9.9oops', '1.0.4'), isFalse);
+    // …but a '+build' suffix is real-world (Windows ProductVersion is
+    // '1.0.5+6') and must parse — this silently killed all update checks.
+    expect(UpdateController.isNewer('1.0.6', '1.0.5+6'), isTrue);
+    expect(UpdateController.isNewer('1.0.5+7', '1.0.5+6'), isFalse);
     expect(UpdateController.isNewer('1.0.5', 'garbage'), isFalse);
   });
 
@@ -535,6 +539,27 @@ void main() {
     expect(linux('/home/r/apps/markdown_studio'), InstallKind.other);
     expect(InstallKind.other.canOneClick, isFalse);
     expect(InstallKind.inno.canOneClick, isTrue);
+  });
+
+  test('Windows launcher script waits for the exact pid, quotes paths', () {
+    final msi = UpdateController.windowsLauncherScript(
+      waitForPid: 4242,
+      program: 'msiexec',
+      arguments: r'/i ""C:\Temp Dir\markdown-studio-1.0.7.msi""',
+    );
+    // Polls for OUR pid to be gone before anything launches.
+    expect(msi, contains('ProcessId = 4242'));
+    expect(msi, contains('WScript.Sleep'));
+    // The path travels inside VBS-doubled quotes, spaces intact.
+    expect(msi, contains(r'""C:\Temp Dir\markdown-studio-1.0.7.msi""'));
+    expect(msi, contains('"msiexec"'));
+
+    final inno = UpdateController.windowsLauncherScript(
+      waitForPid: 7,
+      program: r'C:\Temp Dir\markdown-studio-1.0.7-setup.exe',
+      arguments: '',
+    );
+    expect(inno, contains(r'C:\Temp Dir\markdown-studio-1.0.7-setup.exe'));
   });
 
   test('Update check finds newer releases and honors the toggle', () async {
@@ -607,6 +632,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Update to 9.9.9'), findsOneWidget);
+    // The launch check also surfaces an explicit notification, not just
+    // the chip (field feedback: the chip alone went unnoticed).
+    expect(find.text('Markdown Studio 9.9.9 is available.'), findsOneWidget);
   });
 
   test('Print profiles seed with built-ins', () async {

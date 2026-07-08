@@ -67,9 +67,21 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
-    // Quiet launch-time update check (single version request; menu-toggleable).
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<UpdateController>().check();
+    // Launch-time update check (single version request; menu-toggleable).
+    // A found update gets an explicit prompt — the toolbar chip alone is
+    // easy to miss (field feedback).
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final updates = context.read<UpdateController>();
+      if (!await updates.check()) return;
+      if (!mounted) return;
+      final info = updates.available!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Markdown Studio ${info.version} is available.'),
+        duration: const Duration(seconds: 10),
+        action: SnackBarAction(
+            label: 'Update', onPressed: () => _startUpdate(info)),
+      ));
     });
     // Rebuild when find opens/closes so the floating toolbar can yield to it.
     _find.addListener(_onFindChanged);
@@ -106,10 +118,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     await _shutdownAndExit();
   }
 
-  /// The unconditional tail of a window close (also used after handing an
-  /// update installer to the OS, so no app files are in use during the
-  /// upgrade). Confirm-discard, if wanted, happens before calling this.
+  /// The unconditional tail of a window close. Confirm-discard, if wanted,
+  /// happens before calling this.
   Future<void> _shutdownAndExit() async {
+    await _releaseResources();
+    exit(0);
+  }
+
+  /// Everything [_shutdownAndExit] does except the exit itself — the update
+  /// flow releases the app's resources FIRST, then spawns the installer,
+  /// then exits, so file replacement can never race a still-shutting-down
+  /// process.
+  Future<void> _releaseResources() async {
     final ws = context.read<WorkspaceController>();
     final single = context.read<SingleInstanceService>();
     final theme = context.read<ThemeController>();
@@ -136,7 +156,6 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       await single.dispose();
     } catch (_) {}
     ws.disposeWatchers();
-    exit(0);
   }
 
   /// On first eligible launch, offer to register the app as the `.md` handler.
@@ -1046,11 +1065,19 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           onAbortAvailable: (abort) => abortDownload = abort);
       if (cancelled) return;
       closeProgress();
-      await updates.launchInstaller(path, kind);
       if (exitsForInstall) {
-        // Leave nothing in use while the installer swaps the files.
-        await _shutdownAndExit();
+        // Spawn first, release second: the wscript launcher only WAITS for
+        // this process id, so starting it before teardown is safe — and if
+        // the spawn throws, nothing has been released yet and the editor
+        // stays fully functional (socket, watchers) for the error path.
+        // Once it's running, release resources and exit; the launcher sees
+        // the pid vanish and only then starts the installer, so file
+        // replacement can never race shutdown.
+        await updates.launchInstaller(path, kind);
+        await _releaseResources();
+        exit(0);
       } else {
+        await updates.launchInstaller(path, kind);
         messenger.showSnackBar(SnackBar(
             content: Text('Installer opened — ${info.version} takes over '
                 'on the next launch.')));
