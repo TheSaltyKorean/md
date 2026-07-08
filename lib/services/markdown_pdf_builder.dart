@@ -1371,11 +1371,17 @@ class MarkdownPdfBuilder {
               .whereType<md.Element>()
               .where((e) => e.tag == 'img')
               .length;
+          // The stack budget also respects the page's real content height
+          // (landscape/short formats leave less than the default budget) so
+          // an unsplittable multi-image row always fits its page.
+          final stackCap = maxImageHeight == null
+              ? _cellImageStackCap
+              : (maxImageHeight! - 40)
+                  .clamp(24.0, _cellImageStackCap)
+                  .toDouble();
           final perImageCap = imageCount == 0
               ? _cellImageCap
-              : (_cellImageStackCap / imageCount)
-                  .clamp(24.0, _cellImageCap)
-                  .toDouble();
+              : (stackCap / imageCount).clamp(24.0, _cellImageCap).toDouble();
           final parts = <pw.Widget>[];
           final run = <md.Node>[];
           void flushRun() {

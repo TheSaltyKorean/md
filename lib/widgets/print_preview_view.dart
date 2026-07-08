@@ -551,46 +551,67 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
           ),
         ),
         Expanded(
-          child: PdfPreview(
-            key: ValueKey('preview-$_selectedId-$_previewEpoch'),
-            // The app-wide document zoom scales the previewed page's width
-            // (PdfPreview otherwise fits it to the viewport; its own pinch
-            // zoom still works on top). Rendering is unaffected — zoom must
-            // never change what prints.
-            maxPageWidth: 700 * context.watch<ZoomController>().factor,
-            // A refresh or profile switch remounts the preview; start it at
-            // the page size/orientation the user was previewing so their
-            // selection carries across (and Print/Save keep matching it).
-            initialPageFormat: _previewFormat,
-            // A stable method tear-off: PdfPreview re-rasterizes whenever
-            // the build callback's identity changes, and an inline closure
-            // gets a new identity on every rebuild — a zoom step (which only
-            // changes maxPageWidth) must not regenerate the PDF. Profile
-            // switches re-render via the ValueKey remount above.
-            build: _buildForFormat,
-            canChangePageFormat: true,
-            canChangeOrientation: true,
-            // Print/Share live in the profile row above now, so hide the
-            // preview's own print/share buttons (keep page-size/orientation).
-            allowPrinting: false,
-            allowSharing: false,
-            pdfFileName: '${widget.title}.pdf',
-            loadingWidget: const Center(child: CircularProgressIndicator()),
-            // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
-            // printers are flaky on repeat jobs (the spooler can refuse the
-            // second one until you switch printers and back). When a print
-            // fails, point the user at the reliable in-app export instead.
-            onPrintError: (ctx, error) {
-              ScaffoldMessenger.of(ctx).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Printing failed. To make a PDF, use the “Save as PDF” '
-                    'icon above — it exports directly with selectable text.',
+          // The app-wide document zoom scales the preview by giving
+          // PdfPreview a render viewport of width x factor: wider than the
+          // real viewport when zoomed in (panned via the horizontal scroll
+          // view), narrower and centred when zoomed out, and exactly the
+          // old unconstrained fit at 100%. maxPageWidth can't do this — it
+          // only ever *shrinks* pages, so zooming past the fitted width
+          // would silently do nothing. Rendering is unaffected — zoom must
+          // never change what prints; PdfPreview's pinch zoom still works
+          // on top.
+          child: LayoutBuilder(builder: (context, constraints) {
+            final factor = context.watch<ZoomController>().factor;
+            return Center(
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: constraints.maxWidth * factor,
+                  height: constraints.maxHeight,
+                  child: PdfPreview(
+                    // The profile-service revision keys the raster too:
+                    // with a stable build tear-off, an edit made in another
+                    // tab must still refresh this tab's cached pages.
+                    key: ValueKey('preview-$_selectedId-$_previewEpoch-'
+                        '${context.watch<PrintProfileService>().revision}'),
+                    // A refresh or profile switch remounts the preview; start it at
+                    // the page size/orientation the user was previewing so their
+                    // selection carries across (and Print/Save keep matching it).
+                    initialPageFormat: _previewFormat,
+                    // A stable method tear-off: PdfPreview re-rasterizes whenever
+                    // the build callback's identity changes, and an inline closure
+                    // gets a new identity on every rebuild — a zoom step (which only
+                    // changes maxPageWidth) must not regenerate the PDF. Profile
+                    // switches re-render via the ValueKey remount above.
+                    build: _buildForFormat,
+                    canChangePageFormat: true,
+                    canChangeOrientation: true,
+                    // Print/Share live in the profile row above now, so hide the
+                    // preview's own print/share buttons (keep page-size/orientation).
+                    allowPrinting: false,
+                    allowSharing: false,
+                    pdfFileName: '${widget.title}.pdf',
+                    loadingWidget:
+                        const Center(child: CircularProgressIndicator()),
+                    // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
+                    // printers are flaky on repeat jobs (the spooler can refuse the
+                    // second one until you switch printers and back). When a print
+                    // fails, point the user at the reliable in-app export instead.
+                    onPrintError: (ctx, error) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Printing failed. To make a PDF, use the “Save as PDF” '
+                            'icon above — it exports directly with selectable text.',
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          }),
         ),
       ],
     );

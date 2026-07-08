@@ -8,6 +8,18 @@ import '../models/print_profile.dart';
 /// Stores the user's [PrintProfile]s, the default profile, and the mapping of
 /// document path -> profile id (so each document remembers its own branding).
 class PrintProfileService extends ChangeNotifier {
+  /// Bumped on every notification. Consumers that cache derived artifacts
+  /// (e.g. a rasterized print preview) can key on this to refresh when any
+  /// profile changes — including edits made from another workspace tab.
+  int get revision => _revision;
+  int _revision = 0;
+
+  @override
+  void notifyListeners() {
+    _revision++;
+    super.notifyListeners();
+  }
+
   PrintProfileService(this._prefs) {
     _load();
   }
