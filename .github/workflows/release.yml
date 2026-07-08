@@ -194,6 +194,30 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter build windows --release
+      - name: Bundle VC++ runtime DLLs
+        shell: pwsh
+        # Flutter Windows apps need msvcp140/vcruntime140/vcruntime140_1
+        # from the VC++ 2015+ redistributable. Dev/gaming PCs virtually
+        # always have them; a CLEAN Windows install does not, and the app
+        # dies at launch with STATUS_DLL_NOT_FOUND (0xC0000135) — exactly
+        # what winget's clean-VM validation caught on winget-pkgs#398219.
+        # Bundling them beside the exe (Microsoft licenses the redist DLLs
+        # for this) fixes every channel at once: the MSI and Inno installers
+        # and the portable zip all package this Release folder.
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC14*.CRT" |
+            Select-Object -First 1
+          if (-not $crt) { throw "VC++ redistributable CRT directory not found" }
+          $bundle = "build/windows/x64/runner/Release"
+          foreach ($dll in "msvcp140.dll","vcruntime140.dll","vcruntime140_1.dll") {
+            Copy-Item "$($crt.FullName)\$dll" $bundle
+            Write-Host "bundled $dll from $($crt.FullName)"
+          }
+          if ((Get-ChildItem "$bundle\vcruntime140.dll").Length -eq 0) {
+            throw "bundled DLL is empty"
+          }
       - name: Stage portable zip
         shell: pwsh
         run: |

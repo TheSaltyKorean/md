@@ -23,6 +23,11 @@ Release assets use **stable, versionless names** so the README can deep-link
 | `markdown-studio-windows-x64.msi` | WiX MSI (`tool/windows_installer.wxs`): Program Files, Start Menu, ARP entry, permanent UpgradeCode → in-place upgrades. |
 | `markdown-studio-windows-x64-setup.exe` | Inno Setup (`tool/windows_installer.iss`). |
 | `markdown-studio-windows-x64-portable.zip` | Bare Release folder. |
+
+All three Windows artifacts bundle the VC++ runtime DLLs (`msvcp140`,
+`vcruntime140`, `vcruntime140_1`) copied from the build runner's
+redistributable — without them a clean Windows install fails at launch with
+`STATUS_DLL_NOT_FOUND` (caught by winget's clean-VM validation).
 | `markdown-studio-linux-amd64.deb` | `/opt/markdown-studio`, desktop entry + icon, PATH symlink, `text/markdown` + `text/x-markdown` MIME. Built on Ubuntu 22.04 → depends `libc6 >= 2.35`, `libstdc++6 >= 12`. |
 | `markdown-studio-linux-x64-portable.tar.gz` | Bare bundle (glibc 2.35+ distros). |
 | `markdown-studio-android.apk` / `.aab` | Only on **signed** releases (see below). |
