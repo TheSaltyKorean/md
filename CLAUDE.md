@@ -111,7 +111,7 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
 - **Releases**: pushing a `v*` tag builds and publishes everything
   (`release.yml`); `workflow_dispatch` = dry run (no publish). Assets use
   stable versionless names so the README deep-links
-  `releases/latest/download/…`. Latest: **v1.0.3**.
+  `releases/latest/download/…`. Latest: **v1.0.4**.
 - **Windows**: MSI (WiX 5, permanent UpgradeCode — never change it),
   Inno setup.exe, portable zip. All unsigned; Store/winget are the trusted
   channels. WiX is pinned to 5.x (v6+ gates behind the OSMF EULA).
