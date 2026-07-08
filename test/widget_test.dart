@@ -497,27 +497,42 @@ void main() {
     expect(UpdateController.isNewer('1.0.5', 'garbage'), isFalse);
   });
 
-  test('One-click install detection: MSI/deb roots yes, MSIX/portable no', () {
+  test('Install-kind detection routes each channel to its own updater', () {
     const env = {
       'ProgramFiles': r'C:\Program Files',
       'ProgramFiles(x86)': r'C:\Program Files (x86)',
     };
-    bool win(String exe) => UpdateController.isInstalledDesktopExe(
-        exe: exe, env: env, isWindows: true, isLinux: false);
-    expect(
-        win(r'C:\Program Files\Markdown Studio\markdown_studio.exe'), isTrue);
+    InstallKind win(String exe, {bool inno = false}) =>
+        UpdateController.detectInstallKind(
+            exe: exe,
+            env: env,
+            isWindows: true,
+            isLinux: false,
+            hasInnoUninstaller: inno);
+    const installed = r'C:\Program Files\Markdown Studio\markdown_studio.exe';
+    expect(win(installed), InstallKind.msi);
+    // A setup.exe (Inno) install lands in the SAME directory but leaves its
+    // unins000.exe — it must get the setup.exe updater, never the MSI.
+    expect(win(installed, inno: true), InstallKind.inno);
     // A Store (MSIX) package also lives under Program Files — in
-    // WindowsApps — and must NOT take the MSI path.
+    // WindowsApps — and must take no installer path at all.
     expect(
         win(r'C:\Program Files\WindowsApps\12345.MarkdownStudio_1.0.5.0_x64'
             r'\markdown_studio.exe'),
-        isFalse);
-    expect(win(r'C:\Users\r\Downloads\portable\markdown_studio.exe'), isFalse);
+        InstallKind.other);
+    expect(win(r'C:\Users\r\Downloads\portable\markdown_studio.exe'),
+        InstallKind.other);
 
-    bool linux(String exe) => UpdateController.isInstalledDesktopExe(
-        exe: exe, env: const {}, isWindows: false, isLinux: true);
-    expect(linux('/opt/markdown-studio/markdown_studio'), isTrue);
-    expect(linux('/home/r/apps/markdown_studio'), isFalse);
+    InstallKind linux(String exe) => UpdateController.detectInstallKind(
+        exe: exe,
+        env: const {},
+        isWindows: false,
+        isLinux: true,
+        hasInnoUninstaller: false);
+    expect(linux('/opt/markdown-studio/markdown_studio'), InstallKind.deb);
+    expect(linux('/home/r/apps/markdown_studio'), InstallKind.other);
+    expect(InstallKind.other.canOneClick, isFalse);
+    expect(InstallKind.inno.canOneClick, isTrue);
   });
 
   test('Update check finds newer releases and honors the toggle', () async {

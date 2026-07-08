@@ -19,6 +19,7 @@ class UpdateInfo {
   static const _base =
       'https://github.com/TheSaltyKorean/md/releases/latest/download';
   String get msiUrl => '$_base/markdown-studio-windows-x64.msi';
+  String get setupExeUrl => '$_base/markdown-studio-windows-x64-setup.exe';
   String get debUrl => '$_base/markdown-studio-linux-amd64.deb';
 
   /// Where a user on a platform without a one-click path picks an installer.
@@ -126,8 +127,9 @@ class UpdateController extends ChangeNotifier {
   Future<String> downloadInstaller(
     String url,
     String filename,
-    void Function(double progress) onProgress,
-  ) async {
+    void Function(double progress) onProgress, {
+    bool Function()? isCancelled,
+  }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
     try {
@@ -147,74 +149,116 @@ class UpdateController extends ChangeNotifier {
       try {
         await for (final chunk
             in response.timeout(const Duration(seconds: 30))) {
+          if (isCancelled?.call() ?? false) {
+            // Abort for real: stop reading (cancels the subscription and
+            // the connection) and remove the partial file.
+            throw const UpdateCancelled();
+          }
           sink.add(chunk);
           received += chunk.length;
           onProgress(total > 0 ? received / total : -1);
         }
-      } finally {
+      } catch (_) {
         await sink.close();
+        try {
+          file.deleteSync();
+        } catch (_) {/* best effort */}
+        rethrow;
       }
+      await sink.close();
       return file.path;
     } finally {
       client.close();
     }
   }
 
-  /// Hand the downloaded installer to the OS. Windows: msiexec runs the
-  /// in-place upgrade (the caller exits the app so no files are in use).
-  /// Linux: the default handler (a software installer) opens the .deb.
-  Future<void> launchInstaller(String path) async {
-    if (Platform.isWindows) {
-      await Process.start('msiexec', ['/i', path],
-          mode: ProcessStartMode.detached);
-    } else if (Platform.isLinux) {
-      await Process.start('xdg-open', [path], mode: ProcessStartMode.detached);
-    } else {
-      throw UnsupportedError('no installer launcher for this platform');
+  /// Hand the downloaded installer to the OS, matching the install channel:
+  /// msiexec for MSI, the setup.exe itself for Inno (same AppId = in-place
+  /// upgrade; the caller exits the app first on Windows so no files are in
+  /// use), the default .deb handler on Linux.
+  Future<void> launchInstaller(String path, InstallKind kind) async {
+    switch (kind) {
+      case InstallKind.msi:
+        await Process.start('msiexec', ['/i', path],
+            mode: ProcessStartMode.detached);
+      case InstallKind.inno:
+        await Process.start(path, const [], mode: ProcessStartMode.detached);
+      case InstallKind.deb:
+        await Process.start('xdg-open', [path],
+            mode: ProcessStartMode.detached);
+      case InstallKind.other:
+        throw UnsupportedError('no installer launcher for this install');
     }
   }
 
-  /// Whether this build can run a one-click install: an *installed* desktop
-  /// copy (Program Files on Windows, /opt on Linux — the MSI/.deb install
-  /// roots). Portable, store, and dev copies go to the download page
-  /// instead: silently swapping files under a portable directory — or
-  /// side-installing an MSI next to a store copy — would fight the way the
-  /// user chose to install.
-  bool get canOneClickInstall {
-    if (kIsWeb) return false;
-    return isInstalledDesktopExe(
-      exe: Platform.resolvedExecutable,
+  /// How this copy was installed — decides the one-click update artifact.
+  InstallKind get installKind {
+    if (kIsWeb) return InstallKind.other;
+    final exe = Platform.resolvedExecutable;
+    return detectInstallKind(
+      exe: exe,
       env: Platform.environment,
       isWindows: Platform.isWindows,
       isLinux: Platform.isLinux,
+      hasInnoUninstaller: Platform.isWindows &&
+          File('${File(exe).parent.path}\\unins000.exe').existsSync(),
     );
   }
 
-  /// Pure decision behind [canOneClickInstall].
+  /// Pure decision behind [installKind]. An MSI install and a setup.exe
+  /// (Inno) install land in the SAME Program Files directory — but MSI only
+  /// MajorUpgrades MSI installs, so serving it over an Inno install would
+  /// leave duplicate uninstall state. Inno leaves its `unins000.exe` beside
+  /// the app, which is the discriminator. Store (MSIX) packages also live
+  /// under Program Files — in WindowsApps — and must never take either
+  /// installer path. Portable/dev/store/mobile copies get no one-click.
   @visibleForTesting
-  static bool isInstalledDesktopExe({
+  static InstallKind detectInstallKind({
     required String exe,
     required Map<String, String> env,
     required bool isWindows,
     required bool isLinux,
+    required bool hasInnoUninstaller,
   }) {
     final lower = exe.toLowerCase();
     if (isWindows) {
-      // Store (MSIX) packages ALSO live under Program Files — in
-      // WindowsApps — and must not take the MSI path: it would install a
-      // second, parallel copy instead of updating the store one.
-      if (lower.contains('\\windowsapps\\')) return false;
+      if (lower.contains('\\windowsapps\\')) return InstallKind.other;
       for (final v in ['ProgramFiles', 'ProgramFiles(x86)']) {
         final p = env[v];
         if (p != null &&
             p.isNotEmpty &&
             lower.startsWith('${p.toLowerCase()}\\')) {
-          return true;
+          return hasInnoUninstaller ? InstallKind.inno : InstallKind.msi;
         }
       }
-      return false;
+      return InstallKind.other;
     }
-    if (isLinux) return lower.startsWith('/opt/markdown-studio/');
-    return false;
+    if (isLinux && lower.startsWith('/opt/markdown-studio/')) {
+      return InstallKind.deb;
+    }
+    return InstallKind.other;
   }
+}
+
+/// Thrown when the user cancels a download mid-stream.
+class UpdateCancelled implements Exception {
+  const UpdateCancelled();
+}
+
+/// The install channel a one-click update must match.
+enum InstallKind {
+  /// Windows MSI — update via msiexec MajorUpgrade.
+  msi,
+
+  /// Windows Inno setup.exe — update by running the new setup.exe
+  /// (same AppId upgrades in place).
+  inno,
+
+  /// Linux .deb under /opt — update by opening the new .deb.
+  deb,
+
+  /// Portable, store, mobile, or dev copy — no one-click; download page.
+  other;
+
+  bool get canOneClick => this != InstallKind.other;
 }

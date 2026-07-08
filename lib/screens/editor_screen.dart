@@ -68,8 +68,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
     // Quiet launch-time update check (single version request; menu-toggleable).
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => context.read<UpdateController>().check());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<UpdateController>().check();
+    });
     // Rebuild when find opens/closes so the floating toolbar can yield to it.
     _find.addListener(_onFindChanged);
   }
@@ -524,8 +525,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
     if (isNarrow) {
       // Phone layout: keep Save + auto-reload + theme; everything else in menu.
+      // No update chip here: at phone widths the long button starves the
+      // tab strip; the overflow menu carries the same command.
       return [
-        if (updateChip != null) updateChip,
         if (zoomChip != null) zoomChip,
         IconButton(
           tooltip: 'Save',
@@ -934,21 +936,25 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   /// (portable, store, mobile, dev builds) goes to the download page.
   Future<void> _startUpdate(UpdateInfo info) async {
     final updates = context.read<UpdateController>();
-    final oneClick = updates.canOneClickInstall;
+    final kind = updates.installKind;
+    final oneClick = kind.canOneClick;
     final proceed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         icon: const Icon(Icons.system_update_alt_rounded),
         title: Text('Update to ${info.version}?'),
-        content: Text(oneClick
-            ? Platform.isWindows
-                ? 'The installer downloads and runs the in-place upgrade. '
-                    'The app closes while it installs; your settings and '
-                    'print profiles are kept.'
-                : 'The package downloads and opens in your software '
-                    'installer; the new version is used on the next launch.'
-            : 'Your install type updates from the download page — the '
-                'right installer is one click there.'),
+        content: Text(switch (kind) {
+          InstallKind.msi ||
+          InstallKind.inno =>
+            'The installer downloads and runs the in-place upgrade. '
+                'The app closes while it installs; your settings and '
+                'print profiles are kept.',
+          InstallKind.deb => 'The package downloads and opens in your software '
+              'installer; the new version is used on the next launch.',
+          InstallKind.other =>
+            'Your install type updates from the download page — the '
+                'right installer is one click there.',
+        }),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -963,15 +969,21 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     // From here on, always this State's context, re-checked after awaits.
 
     if (!oneClick) {
-      await launchUrl(Uri.parse(info.downloadPageUrl),
+      final ok = await launchUrl(Uri.parse(info.downloadPageUrl),
           mode: LaunchMode.externalApplication);
+      if (!ok && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not open a browser — visit '
+                '${info.downloadPageUrl} to update.')));
+      }
       return;
     }
 
     // Unsaved edits must be settled BEFORE the download: on Windows the app
     // exits to let the installer replace it.
     final ws = context.read<WorkspaceController>();
-    if (Platform.isWindows && ws.documents.any((d) => d.isDirty)) {
+    final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
+    if (exitsForInstall && ws.documents.any((d) => d.isDirty)) {
       final ok = await _confirmDiscard(context, 'One or more open documents');
       if (!ok) return;
       if (!mounted) return;
@@ -1017,23 +1029,30 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final url = Platform.isWindows ? info.msiUrl : info.debUrl;
-      final name = Platform.isWindows
-          ? 'markdown-studio-${info.version}.msi'
-          : 'markdown-studio-${info.version}.deb';
-      final path =
-          await updates.downloadInstaller(url, name, (v) => progress.value = v);
+      final (url, name) = switch (kind) {
+        InstallKind.msi => (info.msiUrl, 'markdown-studio-${info.version}.msi'),
+        InstallKind.inno => (
+            info.setupExeUrl,
+            'markdown-studio-${info.version}-setup.exe'
+          ),
+        _ => (info.debUrl, 'markdown-studio-${info.version}.deb'),
+      };
+      final path = await updates.downloadInstaller(
+          url, name, (v) => progress.value = v,
+          isCancelled: () => cancelled);
       if (cancelled) return;
       closeProgress();
-      await updates.launchInstaller(path);
-      if (Platform.isWindows) {
-        // Leave nothing in use while msiexec swaps the files.
+      await updates.launchInstaller(path, kind);
+      if (exitsForInstall) {
+        // Leave nothing in use while the installer swaps the files.
         await _shutdownAndExit();
       } else {
         messenger.showSnackBar(SnackBar(
             content: Text('Installer opened — ${info.version} takes over '
                 'on the next launch.')));
       }
+    } on UpdateCancelled {
+      // The user pressed Cancel; the partial download is already deleted.
     } catch (e) {
       closeProgress();
       messenger.showSnackBar(SnackBar(
