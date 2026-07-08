@@ -991,6 +991,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
     final progress = ValueNotifier<double>(-1);
     var cancelled = false;
+    void Function()? abortDownload;
     // Only ever pop the progress dialog once — a failure AFTER it was
     // dismissed (e.g. the installer launch throws) must not pop again and
     // take the editor route with it.
@@ -1019,6 +1020,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
             onPressed: () {
               cancelled = true;
               progressOpen = false;
+              // Bite immediately, even mid-stall — don't wait for a chunk.
+              abortDownload?.call();
               Navigator.pop(dialogContext);
             },
             child: const Text('Cancel'),
@@ -1039,7 +1042,8 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       };
       final path = await updates.downloadInstaller(
           url, name, (v) => progress.value = v,
-          isCancelled: () => cancelled);
+          isCancelled: () => cancelled,
+          onAbortAvailable: (abort) => abortDownload = abort);
       if (cancelled) return;
       closeProgress();
       await updates.launchInstaller(path, kind);
@@ -1054,6 +1058,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     } on UpdateCancelled {
       // The user pressed Cancel; the partial download is already deleted.
     } catch (e) {
+      if (cancelled) return; // aborted mid-stall: quiet, like any cancel
       closeProgress();
       messenger.showSnackBar(SnackBar(
           content: Text('Update failed ($e). '

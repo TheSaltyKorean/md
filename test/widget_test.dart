@@ -494,6 +494,8 @@ void main() {
     expect(UpdateController.isNewer('1.0.4', '1.0.4'), isFalse);
     expect(UpdateController.isNewer('1.0.3', '1.0.4'), isFalse);
     expect(UpdateController.isNewer('not-a-version', '1.0.4'), isFalse);
+    // Anchored: numeric-prefixed garbage must not read as a version.
+    expect(UpdateController.isNewer('9.9.9oops', '1.0.4'), isFalse);
     expect(UpdateController.isNewer('1.0.5', 'garbage'), isFalse);
   });
 

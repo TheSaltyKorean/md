@@ -85,7 +85,8 @@ class UpdateController extends ChangeNotifier {
   @visibleForTesting
   static bool isNewer(String candidate, String current) {
     List<int>? parse(String v) {
-      final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)').firstMatch(v.trim());
+      // Anchored: a malformed tag like 'v1.2.3oops' must not prompt.
+      final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)$').firstMatch(v.trim());
       if (m == null) return null;
       return [1, 2, 3].map((i) => int.parse(m.group(i)!)).toList();
     }
@@ -129,9 +130,14 @@ class UpdateController extends ChangeNotifier {
     String filename,
     void Function(double progress) onProgress, {
     bool Function()? isCancelled,
+    void Function(void Function() abort)? onAbortAvailable,
   }) async {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 10);
+    // Cancel must bite immediately even when the connection is stalled (no
+    // chunk arriving to observe the flag on): force-closing the client
+    // errors the stream right away.
+    onAbortAvailable?.call(() => client.close(force: true));
     try {
       final request = await client
           .getUrl(Uri.parse(url))
@@ -142,8 +148,12 @@ class UpdateController extends ChangeNotifier {
         throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(url));
       }
       final total = response.contentLength;
-      final file = File(
-          '${Directory.systemTemp.path}${Platform.pathSeparator}$filename');
+      // A private, freshly created temp directory (mkdtemp semantics: owner
+      // only) — writing a predictable name straight into the shared system
+      // temp would let another local user pre-plant a symlink and swap the
+      // installer we hand to the OS.
+      final dir = Directory.systemTemp.createTempSync('markdown-studio-');
+      final file = File('${dir.path}${Platform.pathSeparator}$filename');
       final sink = file.openWrite();
       var received = 0;
       try {
@@ -174,15 +184,21 @@ class UpdateController extends ChangeNotifier {
 
   /// Hand the downloaded installer to the OS, matching the install channel:
   /// msiexec for MSI, the setup.exe itself for Inno (same AppId = in-place
-  /// upgrade; the caller exits the app first on Windows so no files are in
-  /// use), the default .deb handler on Linux.
+  /// upgrade), the default .deb handler on Linux. The Windows installers
+  /// start behind a short delay so the app's own shutdown (which drains
+  /// pending writes for up to ~2s after spawning this) completes before any
+  /// file replacement can begin — otherwise the exe/DLLs are still loaded
+  /// and the upgrade hits file-in-use.
   Future<void> launchInstaller(String path, InstallKind kind) async {
     switch (kind) {
       case InstallKind.msi:
-        await Process.start('msiexec', ['/i', path],
+        await Process.start(
+            'cmd', ['/c', 'timeout /t 3 /nobreak >nul & msiexec /i "$path"'],
             mode: ProcessStartMode.detached);
       case InstallKind.inno:
-        await Process.start(path, const [], mode: ProcessStartMode.detached);
+        await Process.start(
+            'cmd', ['/c', 'timeout /t 3 /nobreak >nul & "$path"'],
+            mode: ProcessStartMode.detached);
       case InstallKind.deb:
         await Process.start('xdg-open', [path],
             mode: ProcessStartMode.detached);
