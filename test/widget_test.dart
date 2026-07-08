@@ -497,6 +497,29 @@ void main() {
     expect(UpdateController.isNewer('1.0.5', 'garbage'), isFalse);
   });
 
+  test('One-click install detection: MSI/deb roots yes, MSIX/portable no', () {
+    const env = {
+      'ProgramFiles': r'C:\Program Files',
+      'ProgramFiles(x86)': r'C:\Program Files (x86)',
+    };
+    bool win(String exe) => UpdateController.isInstalledDesktopExe(
+        exe: exe, env: env, isWindows: true, isLinux: false);
+    expect(
+        win(r'C:\Program Files\Markdown Studio\markdown_studio.exe'), isTrue);
+    // A Store (MSIX) package also lives under Program Files — in
+    // WindowsApps — and must NOT take the MSI path.
+    expect(
+        win(r'C:\Program Files\WindowsApps\12345.MarkdownStudio_1.0.5.0_x64'
+            r'\markdown_studio.exe'),
+        isFalse);
+    expect(win(r'C:\Users\r\Downloads\portable\markdown_studio.exe'), isFalse);
+
+    bool linux(String exe) => UpdateController.isInstalledDesktopExe(
+        exe: exe, env: const {}, isWindows: false, isLinux: true);
+    expect(linux('/opt/markdown-studio/markdown_studio'), isTrue);
+    expect(linux('/home/r/apps/markdown_studio'), isFalse);
+  });
+
   test('Update check finds newer releases and honors the toggle', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();

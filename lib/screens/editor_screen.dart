@@ -979,6 +979,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
     final progress = ValueNotifier<double>(-1);
     var cancelled = false;
+    // Only ever pop the progress dialog once — a failure AFTER it was
+    // dismissed (e.g. the installer launch throws) must not pop again and
+    // take the editor route with it.
+    var progressOpen = true;
+    void closeProgress() {
+      if (progressOpen && mounted) {
+        progressOpen = false;
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      progressOpen = false;
+    }
+
     if (!mounted) return;
     showDialog<void>(
       context: context,
@@ -994,6 +1006,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           TextButton(
             onPressed: () {
               cancelled = true;
+              progressOpen = false;
               Navigator.pop(dialogContext);
             },
             child: const Text('Cancel'),
@@ -1011,7 +1024,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       final path =
           await updates.downloadInstaller(url, name, (v) => progress.value = v);
       if (cancelled) return;
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      closeProgress();
       await updates.launchInstaller(path);
       if (Platform.isWindows) {
         // Leave nothing in use while msiexec swaps the files.
@@ -1022,9 +1035,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 'on the next launch.')));
       }
     } catch (e) {
-      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      closeProgress();
       messenger.showSnackBar(SnackBar(
-          content: Text('Update failed to download ($e). '
+          content: Text('Update failed ($e). '
               'Get it from markdownstudio.dev instead.')));
     }
   }

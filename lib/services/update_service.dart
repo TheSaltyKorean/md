@@ -176,24 +176,45 @@ class UpdateController extends ChangeNotifier {
 
   /// Whether this build can run a one-click install: an *installed* desktop
   /// copy (Program Files on Windows, /opt on Linux — the MSI/.deb install
-  /// roots). Portable and store/dev copies go to the download page instead:
-  /// silently swapping files under a portable directory or a store install
-  /// would fight the way the user chose to install.
+  /// roots). Portable, store, and dev copies go to the download page
+  /// instead: silently swapping files under a portable directory — or
+  /// side-installing an MSI next to a store copy — would fight the way the
+  /// user chose to install.
   bool get canOneClickInstall {
     if (kIsWeb) return false;
-    final exe = Platform.resolvedExecutable.toLowerCase();
-    if (Platform.isWindows) {
+    return isInstalledDesktopExe(
+      exe: Platform.resolvedExecutable,
+      env: Platform.environment,
+      isWindows: Platform.isWindows,
+      isLinux: Platform.isLinux,
+    );
+  }
+
+  /// Pure decision behind [canOneClickInstall].
+  @visibleForTesting
+  static bool isInstalledDesktopExe({
+    required String exe,
+    required Map<String, String> env,
+    required bool isWindows,
+    required bool isLinux,
+  }) {
+    final lower = exe.toLowerCase();
+    if (isWindows) {
+      // Store (MSIX) packages ALSO live under Program Files — in
+      // WindowsApps — and must not take the MSI path: it would install a
+      // second, parallel copy instead of updating the store one.
+      if (lower.contains('\\windowsapps\\')) return false;
       for (final v in ['ProgramFiles', 'ProgramFiles(x86)']) {
-        final p = Platform.environment[v];
+        final p = env[v];
         if (p != null &&
             p.isNotEmpty &&
-            exe.startsWith('${p.toLowerCase()}\\')) {
+            lower.startsWith('${p.toLowerCase()}\\')) {
           return true;
         }
       }
       return false;
     }
-    if (Platform.isLinux) return exe.startsWith('/opt/markdown-studio/');
+    if (isLinux) return lower.startsWith('/opt/markdown-studio/');
     return false;
   }
 }
