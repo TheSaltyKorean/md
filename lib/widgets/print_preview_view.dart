@@ -503,19 +503,35 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
   /// shouldRepaint so a zoom step re-rasters at the new resolution).
   double _rasterZoom = 1.0;
 
+  /// Generated-PDF memo. A zoom step re-rasters via `shouldRepaint`, and
+  /// printing's repaint path re-invokes the build callback — without this
+  /// cache every zoom tick would regenerate the document and refetch its
+  /// remote images just to change the on-screen resolution. The key covers
+  /// everything the bytes depend on; anything else returns the memo.
+  Uint8List? _pdfMemo;
+  String? _pdfMemoKey;
+
   /// PdfPreview's document builder. Deliberately a method (stable tear-off
   /// identity across rebuilds) — see the call site.
-  Future<Uint8List> _buildForFormat(PdfPageFormat format) {
+  Future<Uint8List> _buildForFormat(PdfPageFormat format) async {
     // Remember the page size/orientation the user is currently previewing
     // so "Save as PDF" matches it (not always A4).
     _previewFormat = format;
-    return _service.generate(
+    final profiles = context.read<PrintProfileService>();
+    final key = '${format.width}x${format.height}'
+        ':${format.marginLeft}:${format.marginTop}'
+        ':$_selectedId:${profiles.revision}:$_previewEpoch';
+    if (_pdfMemo != null && _pdfMemoKey == key) return _pdfMemo!;
+    final bytes = await _service.generate(
       markdown: widget.markdown,
-      profile: context.read<PrintProfileService>().byId(_selectedId),
+      profile: profiles.byId(_selectedId),
       title: widget.title,
       format: format,
       baseDir: _baseDir,
     );
+    _pdfMemo = bytes;
+    _pdfMemoKey = key;
+    return bytes;
   }
 
   @override
@@ -581,7 +597,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                     // Enough room for the dropdown plus the icon cluster at
                     // natural width? Then expand the dropdown; otherwise let
                     // the icons scroll.
-                    const comfortable = 620.0;
+                    const comfortable = 800.0;
                     return Row(
                       children: [
                         Expanded(child: dropdown),
