@@ -188,27 +188,53 @@ class UpdateController extends ChangeNotifier {
   /// Hand the downloaded installer to the OS, matching the install channel:
   /// msiexec for MSI, the setup.exe itself for Inno (same AppId = in-place
   /// upgrade), the default .deb handler on Linux.
-  /// The Windows installers are launched DIRECTLY — no cmd wrapper. A cmd
-  /// wrapper flashes a console window, and Dart's Windows argument quoting
-  /// mangles a nested-quoted path inside a cmd command string (field bug:
-  /// msiexec received a broken path and errored). msiexec/setup.exe are GUI
-  /// apps, so a direct spawn shows no console and the path passes as a real
-  /// argv element. The no-files-in-use guarantee comes from ordering
-  /// instead: the caller finishes the app's shutdown BEFORE calling this
-  /// and exits immediately after (see _startUpdate).
+  /// On Windows the installer is started by a tiny generated VBScript run
+  /// via wscript (GUI subsystem — no console window, unlike cmd/powershell
+  /// wrappers, and no cmd quoting: we author the script file's contents
+  /// directly). The script WAITS for this exact process id to exit before
+  /// launching the installer, so file replacement can never race the app's
+  /// own shutdown — the exe/DLLs stay loaded until process exit, which
+  /// resource cleanup alone doesn't cover.
   Future<void> launchInstaller(String path, InstallKind kind) async {
     switch (kind) {
-      case InstallKind.msi:
-        await Process.start('msiexec', ['/i', path],
+      case InstallKind.msi || InstallKind.inno:
+        final script = windowsLauncherScript(
+          waitForPid: pid,
+          program: kind == InstallKind.msi ? 'msiexec' : path,
+          arguments: kind == InstallKind.msi ? '/i ""$path""' : '',
+        );
+        final vbs = File(
+            '${File(path).parent.path}${Platform.pathSeparator}run-update.vbs');
+        vbs.writeAsStringSync(script);
+        await Process.start('wscript', [vbs.path],
             mode: ProcessStartMode.detached);
-      case InstallKind.inno:
-        await Process.start(path, const [], mode: ProcessStartMode.detached);
       case InstallKind.deb:
         await Process.start('xdg-open', [path],
             mode: ProcessStartMode.detached);
       case InstallKind.other:
         throw UnsupportedError('no installer launcher for this install');
     }
+  }
+
+  /// The Windows launcher script: poll until [waitForPid] is gone, then
+  /// ShellExecute the installer. Lives in the same private temp directory
+  /// as the downloaded installer. VBS string literals escape an embedded
+  /// quote by doubling it; [arguments] is embedded verbatim, so quote any
+  /// path inside it as `""…""`.
+  @visibleForTesting
+  static String windowsLauncherScript({
+    required int waitForPid,
+    required String program,
+    required String arguments,
+  }) {
+    String vbs(String v) => v.replaceAll('"', '""');
+    return '''
+Set wmi = GetObject("winmgmts:root\\cimv2")
+Do While wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId = $waitForPid").Count > 0
+  WScript.Sleep 200
+Loop
+CreateObject("Shell.Application").ShellExecute "${vbs(program)}", "$arguments", "", "open", 1
+''';
   }
 
   /// How this copy was installed — decides the one-click update artifact.

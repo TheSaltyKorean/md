@@ -1066,10 +1066,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       if (cancelled) return;
       closeProgress();
       if (exitsForInstall) {
-        // Order matters: finish this app's shutdown BEFORE spawning the
-        // installer, then exit immediately — file replacement can never
-        // race a still-shutting-down process, and the user never sees a
-        // console window (GUI installers spawn directly).
+        // Resources released first, then the wscript launcher is spawned —
+        // it waits for THIS process id to fully exit before starting the
+        // installer, so file replacement can never race shutdown.
         await _releaseResources();
         await updates.launchInstaller(path, kind);
         exit(0);

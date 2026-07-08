@@ -541,6 +541,27 @@ void main() {
     expect(InstallKind.inno.canOneClick, isTrue);
   });
 
+  test('Windows launcher script waits for the exact pid, quotes paths', () {
+    final msi = UpdateController.windowsLauncherScript(
+      waitForPid: 4242,
+      program: 'msiexec',
+      arguments: r'/i ""C:\Temp Dir\markdown-studio-1.0.7.msi""',
+    );
+    // Polls for OUR pid to be gone before anything launches.
+    expect(msi, contains('ProcessId = 4242'));
+    expect(msi, contains('WScript.Sleep'));
+    // The path travels inside VBS-doubled quotes, spaces intact.
+    expect(msi, contains(r'""C:\Temp Dir\markdown-studio-1.0.7.msi""'));
+    expect(msi, contains('"msiexec"'));
+
+    final inno = UpdateController.windowsLauncherScript(
+      waitForPid: 7,
+      program: r'C:\Temp Dir\markdown-studio-1.0.7-setup.exe',
+      arguments: '',
+    );
+    expect(inno, contains(r'C:\Temp Dir\markdown-studio-1.0.7-setup.exe'));
+  });
+
   test('Update check finds newer releases and honors the toggle', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
