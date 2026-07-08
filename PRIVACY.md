@@ -19,6 +19,10 @@ transmit any personal data, telemetry, analytics, or document content.**
   a placeholder is printed instead. In both cases only a standard file
   request is made — no document content or personal information is sent —
   and no request happens at all until you print, preview, or export.
+- **Update check.** At launch the app asks GitHub for the latest release
+  version (a single anonymous request; no document content or personal
+  information is sent) so it can offer a one-click update. Turn it off any
+  time: menu → *Check on startup*.
 - **No accounts, no ads, no third-party SDKs.**
 
 External links opened from the app (e.g. the support page or links in your

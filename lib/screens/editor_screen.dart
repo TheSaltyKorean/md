@@ -19,6 +19,7 @@ import '../services/file_association_service.dart';
 import '../services/file_service.dart';
 import '../services/print_profile_service.dart';
 import '../services/single_instance_service.dart';
+import '../services/update_service.dart';
 import '../state/document_controller.dart';
 import '../state/theme_controller.dart';
 import '../state/workspace_controller.dart';
@@ -66,6 +67,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     }
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
+    // Quiet launch-time update check (single version request; menu-toggleable).
+    WidgetsBinding.instance
+        .addPostFrameCallback((_) => context.read<UpdateController>().check());
     // Rebuild when find opens/closes so the floating toolbar can yield to it.
     _find.addListener(_onFindChanged);
   }
@@ -93,15 +97,24 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   @override
   void onWindowClose() async {
     final ws = context.read<WorkspaceController>();
-    final single = context.read<SingleInstanceService>();
-    final theme = context.read<ThemeController>();
-    final profiles = context.read<PrintProfileService>();
-    final zoom = context.read<ZoomController>();
     final anyDirty = ws.documents.any((d) => d.isDirty);
     if (anyDirty && mounted) {
       final ok = await _confirmDiscard(context, 'One or more open documents');
       if (!ok) return; // keep the window open
     }
+    await _shutdownAndExit();
+  }
+
+  /// The unconditional tail of a window close (also used after handing an
+  /// update installer to the OS, so no app files are in use during the
+  /// upgrade). Confirm-discard, if wanted, happens before calling this.
+  Future<void> _shutdownAndExit() async {
+    final ws = context.read<WorkspaceController>();
+    final single = context.read<SingleInstanceService>();
+    final theme = context.read<ThemeController>();
+    final profiles = context.read<PrintProfileService>();
+    final zoom = context.read<ZoomController>();
+    final updates = context.read<UpdateController>();
     // Drain any preference write still in flight (UI callbacks fire-and-forget
     // setAutoReload / cycle / setDefault), so a setting changed right before
     // closing isn't lost. Bounded so a stuck write can't hang the close.
@@ -111,6 +124,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         theme.pendingWrites,
         profiles.pendingWrites,
         zoom.pendingWrites,
+        updates.pendingWrites,
       ]).timeout(const Duration(seconds: 2));
     } catch (_) {}
     // Release the long-lived event sources (single-instance ServerSocket + file
@@ -464,6 +478,23 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     );
   }
 
+  /// "Update to X.Y.Z" button, shown once a newer release is known.
+  Widget? _updateChip(UpdateController updates) {
+    final info = updates.available;
+    if (info == null) return null;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: FilledButton.tonalIcon(
+          style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+          icon: const Icon(Icons.system_update_alt_rounded, size: 18),
+          label: Text('Update to ${info.version}'),
+          onPressed: () => _startUpdate(info),
+        ),
+      ),
+    );
+  }
+
   /// [active] is null when the active tab is a print preview; document-bound
   /// actions (mode toggle, find, save, print) are then hidden or disabled.
   List<Widget> _actions(
@@ -475,6 +506,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   ) {
     final cs = Theme.of(context).colorScheme;
     final zoomChip = _zoomChip(context.watch<ZoomController>());
+    final updateChip = _updateChip(context.watch<UpdateController>());
     final themeIcon = Icon(switch (theme.mode) {
       ThemeMode.system => Icons.brightness_auto_outlined,
       ThemeMode.light => Icons.light_mode_outlined,
@@ -493,6 +525,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     if (isNarrow) {
       // Phone layout: keep Save + auto-reload + theme; everything else in menu.
       return [
+        if (updateChip != null) updateChip,
         if (zoomChip != null) zoomChip,
         IconButton(
           tooltip: 'Save',
@@ -528,6 +561,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
                 enabled: active != null,
                 child: const Text('Print / Export PDF')),
             ..._zoomMenuItems(context),
+            ..._updateMenuItems(context),
             const PopupMenuItem(
                 value: 'support', child: Text('Support the project ❤')),
             const PopupMenuItem(value: 'about', child: Text('About')),
@@ -543,6 +577,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
           padding: const EdgeInsets.symmetric(horizontal: 6),
           child: Center(child: _ModeToggle(doc: active)),
         ),
+      if (updateChip != null) updateChip,
       if (zoomChip != null) zoomChip,
       IconButton(
         tooltip: 'Open',
@@ -578,11 +613,29 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
               enabled: active != null,
               child: const Text('Save As…')),
           ..._zoomMenuItems(context),
+          ..._updateMenuItems(context),
           const PopupMenuItem(
               value: 'support', child: Text('Support the project ❤')),
           const PopupMenuItem(value: 'about', child: Text('About')),
         ],
       ),
+    ];
+  }
+
+  /// Update entries shared by both overflow menus.
+  List<PopupMenuEntry<String>> _updateMenuItems(BuildContext context) {
+    final updates = context.read<UpdateController>();
+    final info = updates.available;
+    return [
+      PopupMenuItem(
+          value: 'checkUpdates',
+          child: Text(info == null
+              ? 'Check for updates'
+              : 'Update to ${info.version}…')),
+      CheckedPopupMenuItem(
+          value: 'toggleUpdateCheck',
+          checked: updates.checkOnStartup,
+          child: const Text('Check on startup')),
     ];
   }
 
@@ -839,12 +892,140 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       case 'zoomReset':
         context.read<ZoomController>().reset();
         break;
+      case 'checkUpdates':
+        _checkUpdatesManually();
+        break;
+      case 'toggleUpdateCheck':
+        final updates = context.read<UpdateController>();
+        updates.setCheckOnStartup(!updates.checkOnStartup);
+        break;
       case 'support':
         _support(context);
         break;
       case 'about':
         _about(context);
         break;
+    }
+  }
+
+  /// Manual "Check for updates": unlike the quiet launch check, report the
+  /// outcome either way.
+  Future<void> _checkUpdatesManually() async {
+    final updates = context.read<UpdateController>();
+    final messenger = ScaffoldMessenger.of(context);
+    if (updates.available != null) {
+      _startUpdate(updates.available!);
+      return;
+    }
+    final found = await updates.check(respectToggle: false);
+    if (!mounted) return;
+    if (found) {
+      _startUpdate(updates.available!);
+    } else {
+      final version = (await PackageInfo.fromPlatform()).version;
+      messenger.showSnackBar(SnackBar(
+          content: Text('No update found — you are on $version '
+              '(or the check could not reach GitHub).')));
+    }
+  }
+
+  /// Walk the user through the one-click update. Installed desktop copies
+  /// download the matching installer and hand it to the OS; anything else
+  /// (portable, store, mobile, dev builds) goes to the download page.
+  Future<void> _startUpdate(UpdateInfo info) async {
+    final updates = context.read<UpdateController>();
+    final oneClick = updates.canOneClickInstall;
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        icon: const Icon(Icons.system_update_alt_rounded),
+        title: Text('Update to ${info.version}?'),
+        content: Text(oneClick
+            ? Platform.isWindows
+                ? 'The installer downloads and runs the in-place upgrade. '
+                    'The app closes while it installs; your settings and '
+                    'print profiles are kept.'
+                : 'The package downloads and opens in your software '
+                    'installer; the new version is used on the next launch.'
+            : 'Your install type updates from the download page — the '
+                'right installer is one click there.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Later')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(oneClick ? 'Update now' : 'Open download page')),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+    // From here on, always this State's context, re-checked after awaits.
+
+    if (!oneClick) {
+      await launchUrl(Uri.parse(info.downloadPageUrl),
+          mode: LaunchMode.externalApplication);
+      return;
+    }
+
+    // Unsaved edits must be settled BEFORE the download: on Windows the app
+    // exits to let the installer replace it.
+    final ws = context.read<WorkspaceController>();
+    if (Platform.isWindows && ws.documents.any((d) => d.isDirty)) {
+      final ok = await _confirmDiscard(context, 'One or more open documents');
+      if (!ok) return;
+      if (!mounted) return;
+    }
+
+    final progress = ValueNotifier<double>(-1);
+    var cancelled = false;
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Downloading update…'),
+        content: ValueListenableBuilder<double>(
+          valueListenable: progress,
+          builder: (_, v, __) =>
+              LinearProgressIndicator(value: v < 0 ? null : v),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              cancelled = true;
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final url = Platform.isWindows ? info.msiUrl : info.debUrl;
+      final name = Platform.isWindows
+          ? 'markdown-studio-${info.version}.msi'
+          : 'markdown-studio-${info.version}.deb';
+      final path =
+          await updates.downloadInstaller(url, name, (v) => progress.value = v);
+      if (cancelled) return;
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      await updates.launchInstaller(path);
+      if (Platform.isWindows) {
+        // Leave nothing in use while msiexec swaps the files.
+        await _shutdownAndExit();
+      } else {
+        messenger.showSnackBar(SnackBar(
+            content: Text('Installer opened — ${info.version} takes over '
+                'on the next launch.')));
+      }
+    } catch (e) {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop();
+      messenger.showSnackBar(SnackBar(
+          content: Text('Update failed to download ($e). '
+              'Get it from markdownstudio.dev instead.')));
     }
   }
 

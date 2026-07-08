@@ -16,6 +16,7 @@ import 'package:markdown_studio/models/print_profile.dart';
 import 'package:markdown_studio/services/file_association_service.dart';
 import 'package:markdown_studio/services/markdown_pdf_builder.dart';
 import 'package:markdown_studio/services/print_profile_service.dart';
+import 'package:markdown_studio/services/update_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
@@ -122,6 +123,9 @@ void main() {
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
           ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+          ChangeNotifierProvider(
+              create: (_) =>
+                  UpdateController(prefs, fetchLatestTag: () async => null)),
           ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
           ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
           Provider(create: (_) => FileAssociationService(prefs)),
@@ -161,6 +165,9 @@ void main() {
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
           ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+          ChangeNotifierProvider(
+              create: (_) =>
+                  UpdateController(prefs, fetchLatestTag: () async => null)),
           ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
           ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
           Provider(create: (_) => FileAssociationService(prefs)),
@@ -402,6 +409,9 @@ void main() {
         providers: [
           ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
           ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+          ChangeNotifierProvider(
+              create: (_) =>
+                  UpdateController(prefs, fetchLatestTag: () async => null)),
           ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
           ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
           Provider(create: (_) => FileAssociationService(prefs)),
@@ -475,6 +485,88 @@ void main() {
     expect(zoom.factor, 1.1);
     zoom.reset();
     await tester.pump();
+  });
+
+  test('Update version comparison is strict and parse-safe', () {
+    expect(UpdateController.isNewer('1.0.5', '1.0.4'), isTrue);
+    expect(UpdateController.isNewer('1.1.0', '1.0.9'), isTrue);
+    expect(UpdateController.isNewer('2.0.0', '1.9.9'), isTrue);
+    expect(UpdateController.isNewer('1.0.4', '1.0.4'), isFalse);
+    expect(UpdateController.isNewer('1.0.3', '1.0.4'), isFalse);
+    expect(UpdateController.isNewer('not-a-version', '1.0.4'), isFalse);
+    expect(UpdateController.isNewer('1.0.5', 'garbage'), isFalse);
+  });
+
+  test('Update check finds newer releases and honors the toggle', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    PackageInfo.setMockInitialValues(
+      appName: 'Markdown Studio',
+      packageName: 'com.markdownstudio.markdown_studio',
+      version: '1.0.4',
+      buildNumber: '5',
+      buildSignature: '',
+      installerStore: null,
+    );
+
+    var fetches = 0;
+    final updates = UpdateController(prefs, fetchLatestTag: () async {
+      fetches++;
+      return 'v9.9.9';
+    });
+    expect(await updates.check(), isTrue);
+    expect(updates.available!.version, '9.9.9');
+
+    // Same-version tag: no update offered.
+    final same = UpdateController(prefs, fetchLatestTag: () async => 'v1.0.4');
+    expect(await same.check(), isFalse);
+    expect(same.available, isNull);
+
+    // Toggle off: the startup check never even fetches.
+    updates.setCheckOnStartup(false);
+    await updates.pendingWrites;
+    final before = fetches;
+    expect(await updates.check(), isFalse);
+    expect(fetches, before);
+    // …but a manual check bypasses the toggle.
+    expect(await updates.check(respectToggle: false), isTrue);
+    // The preference persists like the others.
+    expect(UpdateController(prefs).checkOnStartup, isFalse);
+  });
+
+  testWidgets('An available update surfaces as a toolbar chip', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({'assoc_prompt_done': true});
+    final prefs = await SharedPreferences.getInstance();
+    PackageInfo.setMockInitialValues(
+      appName: 'Markdown Studio',
+      packageName: 'com.markdownstudio.markdown_studio',
+      version: '1.0.4',
+      buildNumber: '5',
+      buildSignature: '',
+      installerStore: null,
+    );
+
+    await tester.pumpWidget(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+          ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+          ChangeNotifierProvider(
+              create: (_) => UpdateController(prefs,
+                  fetchLatestTag: () async => 'v9.9.9')),
+          ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
+          ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
+          Provider(create: (_) => FileAssociationService(prefs)),
+        ],
+        child: const MarkdownStudioApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Update to 9.9.9'), findsOneWidget);
   });
 
   test('Print profiles seed with built-ins', () async {
