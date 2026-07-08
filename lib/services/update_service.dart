@@ -191,13 +191,15 @@ class UpdateController extends ChangeNotifier {
   /// and the upgrade hits file-in-use.
   Future<void> launchInstaller(String path, InstallKind kind) async {
     switch (kind) {
+      // The delay uses ping, not `timeout`: timeout demands an interactive
+      // console and exits immediately under detached (no-stdio) processes,
+      // which would silently drop the grace period.
       case InstallKind.msi:
         await Process.start(
-            'cmd', ['/c', 'timeout /t 3 /nobreak >nul & msiexec /i "$path"'],
+            'cmd', ['/c', 'ping -n 4 127.0.0.1 >nul & msiexec /i "$path"'],
             mode: ProcessStartMode.detached);
       case InstallKind.inno:
-        await Process.start(
-            'cmd', ['/c', 'timeout /t 3 /nobreak >nul & "$path"'],
+        await Process.start('cmd', ['/c', 'ping -n 4 127.0.0.1 >nul & "$path"'],
             mode: ProcessStartMode.detached);
       case InstallKind.deb:
         await Process.start('xdg-open', [path],
