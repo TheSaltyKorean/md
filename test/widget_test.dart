@@ -57,6 +57,14 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
     for (final c in w.children) {
       yield* _allWidgets(c);
     }
+  } else if (w is pw.ConstrainedBox && w.child != null) {
+    yield* _allWidgets(w.child!);
+  } else if (w is pw.Table) {
+    for (final row in w.children) {
+      for (final c in row.children) {
+        yield* _allWidgets(c);
+      }
+    }
   }
 }
 
@@ -178,6 +186,7 @@ void main() {
     Future<void> pump(String? docPath) => tester.pumpWidget(MultiProvider(
           providers: [
             ChangeNotifierProvider<PrintProfileService>.value(value: service),
+            ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
           ],
           child: MaterialApp(
             home: Scaffold(
@@ -223,6 +232,7 @@ void main() {
     Widget app(String? docPath) => MultiProvider(
           providers: [
             ChangeNotifierProvider<PrintProfileService>.value(value: service),
+            ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
           ],
           child: MaterialApp(
             home: Scaffold(
@@ -257,6 +267,7 @@ void main() {
     Widget app(String? docPath) => MultiProvider(
           providers: [
             ChangeNotifierProvider<PrintProfileService>.value(value: service),
+            ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
           ],
           child: MaterialApp(
             home: Scaffold(
@@ -439,8 +450,16 @@ void main() {
     expect(composed.scale(10), moreOrLessEquals(16.5));
     tester.platformDispatcher.clearTextScaleFactorTestValue();
 
-    // On a print-preview tab the zoom shortcuts are inert — PdfPreview has
-    // its own zoom, and the persisted document zoom must not silently drift.
+    // While zoomed, a "110%" chip appears in the toolbar as persistent
+    // feedback; clicking it resets to 100% and it disappears.
+    expect(find.text('110%'), findsOneWidget);
+    await tester.tap(find.text('110%'));
+    await tester.pumpAndSettle();
+    expect(zoom.factor, 1.0);
+    expect(find.text('100%'), findsNothing);
+
+    // On a print-preview tab the same zoom drives the preview page width
+    // (user request) — the shortcuts stay live there.
     zoom.reset();
     final ws = Provider.of<WorkspaceController>(
         tester.element(find.byType(MarkdownStudioApp)),
@@ -453,7 +472,9 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.equal);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
-    expect(zoom.factor, 1.0);
+    expect(zoom.factor, 1.1);
+    zoom.reset();
+    await tester.pump();
   });
 
   test('Print profiles seed with built-ins', () async {
@@ -1294,15 +1315,16 @@ void main() {
         MarkdownPdfBuilder.remoteImageSources(mdText), {remoteUrl, upperUrl});
 
     // Discovery mirrors the renderer: images in positions the PDF drops
-    // (linked badges, headings, list items, table cells) are never fetched;
-    // a blockquoted paragraph image renders, so it is.
+    // (linked badges, headings, list items) are never fetched; blockquoted
+    // paragraph images and table-cell images render, so they are.
     expect(
         MarkdownPdfBuilder.remoteImageSources(
             '[![badge](https://x.test/b.png)](https://x.test)\n\n'
             '# ![h](https://x.test/h.png)\n\n'
             '- ![li](https://x.test/li.png)\n\n'
-            '> ![q](https://x.test/q.png)'),
-        {'https://x.test/q.png'});
+            '> ![q](https://x.test/q.png)\n\n'
+            '| shot |\n| --- |\n| ![t](https://x.test/t.png) |'),
+        {'https://x.test/q.png', 'https://x.test/t.png'});
 
     final builder = MarkdownPdfBuilder(
       profile: PrintProfile.personal,
@@ -1320,6 +1342,34 @@ void main() {
     final missing = offline.build('![b]($remoteUrl)');
     expect(_walk(missing).whereType<pw.Image>(), isEmpty);
     expect(await _renderA4(missing), isNotEmpty);
+  });
+
+  test('Images inside table cells render (screenshot-table pattern)', () async {
+    final tmp = Directory.systemTemp.createTempSync('mdimg3');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final shot = img.Image(width: 320, height: 200);
+    img.fill(shot, color: img.ColorRgb8(90, 120, 200));
+    File('${tmp.path}/shot.png')
+        .writeAsBytesSync(Uint8List.fromList(img.encodePng(shot)));
+
+    // The user-reported shape: a two-column table whose second column is a
+    // relative-path screenshot per row.
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal,
+        fonts: _standardFonts(),
+        baseDir: tmp.path,
+        maxImageHeight: 600);
+    final ws = builder.build('| View | Preview |\n| --- | --- |\n'
+        '| Workspace | ![workspace](./shot.png) |\n'
+        '| Lobby | ![lobby](shot.png) |');
+    expect(_walk(ws).whereType<pw.Image>().length, 2);
+    expect(await _renderA4(ws), isNotEmpty);
+
+    // Cell text still renders alongside, and a missing image degrades to
+    // the placeholder without breaking the table.
+    final broken = builder.build('| a |\n| --- |\n| ![x](gone.png) hi |');
+    expect(_walk(broken).whereType<pw.Image>(), isEmpty);
+    expect(await _renderA4(broken), isNotEmpty);
   });
 
   test('legalMode keeps one gap for blockquotes and nested lists', () {
