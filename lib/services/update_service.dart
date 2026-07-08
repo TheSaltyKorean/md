@@ -85,8 +85,11 @@ class UpdateController extends ChangeNotifier {
   @visibleForTesting
   static bool isNewer(String candidate, String current) {
     List<int>? parse(String v) {
-      // Anchored: a malformed tag like 'v1.2.3oops' must not prompt.
-      final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)$').firstMatch(v.trim());
+      // Anchored — a malformed tag like '1.2.3oops' must not prompt — but a
+      // '+build' suffix is tolerated: on Windows PackageInfo.version can
+      // carry it (the exe's ProductVersion string is '1.0.5+6'), and the
+      // running version failing to parse silently disabled every check.
+      final m = RegExp(r'^(\d+)\.(\d+)\.(\d+)(?:\+\d+)?$').firstMatch(v.trim());
       if (m == null) return null;
       return [1, 2, 3].map((i) => int.parse(m.group(i)!)).toList();
     }
@@ -184,23 +187,22 @@ class UpdateController extends ChangeNotifier {
 
   /// Hand the downloaded installer to the OS, matching the install channel:
   /// msiexec for MSI, the setup.exe itself for Inno (same AppId = in-place
-  /// upgrade), the default .deb handler on Linux. The Windows installers
-  /// start behind a short delay so the app's own shutdown (which drains
-  /// pending writes for up to ~2s after spawning this) completes before any
-  /// file replacement can begin — otherwise the exe/DLLs are still loaded
-  /// and the upgrade hits file-in-use.
+  /// upgrade), the default .deb handler on Linux.
+  /// The Windows installers are launched DIRECTLY — no cmd wrapper. A cmd
+  /// wrapper flashes a console window, and Dart's Windows argument quoting
+  /// mangles a nested-quoted path inside a cmd command string (field bug:
+  /// msiexec received a broken path and errored). msiexec/setup.exe are GUI
+  /// apps, so a direct spawn shows no console and the path passes as a real
+  /// argv element. The no-files-in-use guarantee comes from ordering
+  /// instead: the caller finishes the app's shutdown BEFORE calling this
+  /// and exits immediately after (see _startUpdate).
   Future<void> launchInstaller(String path, InstallKind kind) async {
     switch (kind) {
-      // The delay uses ping, not `timeout`: timeout demands an interactive
-      // console and exits immediately under detached (no-stdio) processes,
-      // which would silently drop the grace period.
       case InstallKind.msi:
-        await Process.start(
-            'cmd', ['/c', 'ping -n 4 127.0.0.1 >nul & msiexec /i "$path"'],
+        await Process.start('msiexec', ['/i', path],
             mode: ProcessStartMode.detached);
       case InstallKind.inno:
-        await Process.start('cmd', ['/c', 'ping -n 4 127.0.0.1 >nul & "$path"'],
-            mode: ProcessStartMode.detached);
+        await Process.start(path, const [], mode: ProcessStartMode.detached);
       case InstallKind.deb:
         await Process.start('xdg-open', [path],
             mode: ProcessStartMode.detached);

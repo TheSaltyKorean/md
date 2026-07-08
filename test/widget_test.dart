@@ -496,6 +496,10 @@ void main() {
     expect(UpdateController.isNewer('not-a-version', '1.0.4'), isFalse);
     // Anchored: numeric-prefixed garbage must not read as a version.
     expect(UpdateController.isNewer('9.9.9oops', '1.0.4'), isFalse);
+    // …but a '+build' suffix is real-world (Windows ProductVersion is
+    // '1.0.5+6') and must parse — this silently killed all update checks.
+    expect(UpdateController.isNewer('1.0.6', '1.0.5+6'), isTrue);
+    expect(UpdateController.isNewer('1.0.5+7', '1.0.5+6'), isFalse);
     expect(UpdateController.isNewer('1.0.5', 'garbage'), isFalse);
   });
 
@@ -607,6 +611,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('Update to 9.9.9'), findsOneWidget);
+    // The launch check also surfaces an explicit notification, not just
+    // the chip (field feedback: the chip alone went unnoticed).
+    expect(find.text('Markdown Studio 9.9.9 is available.'), findsOneWidget);
   });
 
   test('Print profiles seed with built-ins', () async {
