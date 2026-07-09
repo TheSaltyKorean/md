@@ -365,6 +365,19 @@ void main() {
           registeredCommand: null,
         ),
         isFalse);
+
+    // The per-user install root (since 1.0.9) also counts as installed and
+    // reclaims a stale association.
+    const perUser = r'C:\Users\r\AppData\Local\Programs';
+    const perUserExe =
+        r'C:\Users\r\AppData\Local\Programs\Markdown Studio\markdown_studio.exe';
+    expect(
+        FileAssociationService.needsRepair(
+          exe: perUserExe,
+          programDirs: const [perUser, pf, pf86],
+          registeredCommand: '(Default)    REG_SZ    "$devExe" "%1"',
+        ),
+        isTrue);
   });
 
   test('Zoom controller steps, clamps, snaps, and persists', () async {
@@ -538,9 +551,11 @@ void main() {
     // A setup.exe (Inno) install lands in the SAME directory but leaves its
     // unins000.exe — it must get the setup.exe updater, never the MSI.
     expect(win(installed, inno: true), InstallKind.inno);
-    // Legacy per-machine Program Files installs are still recognised.
+    // A legacy per-machine Program Files copy is NOT one-click: a per-user
+    // MSI can't upgrade it in place, so it routes to the download page for
+    // the one-time manual migration.
     expect(win(r'C:\Program Files\Markdown Studio\markdown_studio.exe'),
-        InstallKind.msi);
+        InstallKind.other);
     // A Store (MSIX) package lives under Program Files\WindowsApps and must
     // take no installer path at all.
     expect(

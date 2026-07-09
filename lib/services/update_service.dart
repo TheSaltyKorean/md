@@ -261,15 +261,19 @@ sh.Run """${vbs(relaunchExe)}""", 1, False
     );
   }
 
-  /// Pure decision behind [installKind]. Since 1.0.9 the MSI and Inno
-  /// installers both live under `%LocalAppData%\Programs\Markdown Studio`
-  /// (per-user); older builds installed per-machine under Program Files, so
-  /// both roots are accepted for robustness. MSI only MajorUpgrades MSI
+  /// Pure decision behind [installKind]. Since 1.0.9 the per-user MSI and
+  /// Inno installers live under `%LocalAppData%\Programs\Markdown Studio`,
+  /// the only one-click-updatable location. MSI only MajorUpgrades MSI
   /// installs, so serving it over an Inno install would leave duplicate
   /// uninstall state — Inno leaves its `unins000.exe` beside the app, which
-  /// is the discriminator. Store (MSIX) packages live under Program
-  /// Files\WindowsApps and must never take an installer path.
-  /// Portable/dev/store/mobile copies get no one-click.
+  /// is the discriminator.
+  ///
+  /// A legacy per-machine **Program Files** copy is deliberately NOT
+  /// one-click: a per-user MSI can't major-upgrade a per-machine install
+  /// (different context), so it would install alongside and the launcher
+  /// would relaunch the old Program Files exe — an endless "update
+  /// available" loop. Those (plus Store/WindowsApps, portable, and dev
+  /// copies) route to the download page for the one-time manual migration.
   @visibleForTesting
   static InstallKind detectInstallKind({
     required String exe,
@@ -280,16 +284,10 @@ sh.Run """${vbs(relaunchExe)}""", 1, False
   }) {
     final lower = exe.toLowerCase();
     if (isWindows) {
-      if (lower.contains('\\windowsapps\\')) return InstallKind.other;
       final localApps = env['LocalAppData'];
-      final roots = <String>[
-        if (localApps != null && localApps.isNotEmpty)
-          '${localApps.toLowerCase()}\\programs\\',
-        for (final v in ['ProgramFiles', 'ProgramFiles(x86)'])
-          if (env[v] != null && env[v]!.isNotEmpty)
-            '${env[v]!.toLowerCase()}\\',
-      ];
-      if (roots.any(lower.startsWith)) {
+      if (localApps != null &&
+          localApps.isNotEmpty &&
+          lower.startsWith('${localApps.toLowerCase()}\\programs\\')) {
         return hasInnoUninstaller ? InstallKind.inno : InstallKind.msi;
       }
       return InstallKind.other;
