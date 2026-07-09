@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -50,11 +49,10 @@ class PreviewView extends StatelessWidget {
         // assert, so it stays off here.
         selectable: false,
         padding: padding,
-        // Parse tables to an `mdtable` element instead of `table` — the
-        // package hard-codes `table` rendering, so a `table` builder can't
-        // add the copy chip, but a renamed tag routes to our own renderer
-        // (which reuses the real parser's structure, so every GFM rule —
-        // column counts, entity decoding, code-fence exclusion — holds).
+        // The real GFM parser identifies tables; we wrap each one with a
+        // "Copy table" chip but let the PACKAGE render the table itself
+        // (keeping selection, images, zoom, alignment, and inline
+        // formatting) — see _CopyableTableSyntax.
         blockSyntaxes: [_CopyableTableSyntax()],
         // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
         // ourselves and render it underlined (matches the PDF export).
@@ -64,7 +62,9 @@ class PreviewView extends StatelessWidget {
           // Custom fenced-code-block rendering with a copy button. The
           // package still wraps the returned widget in codeblockDecoration.
           'pre': _CodeBlockBuilder(theme),
-          'mdtable': _TableBuilder(styleSheet, _launch),
+          // The injected "Copy table" chip (inline, so it doesn't grow the
+          // package's block-tag registry the way a block builder would).
+          'copytable': _CopyTableChipBuilder(),
         },
         styleSheet: styleSheet,
         onTapLink: (text, href, title) async {
@@ -218,239 +218,80 @@ class _CopyButtonState extends State<_CopyButton> {
 
 // --- Tables (copy as TSV) ---------------------------------------------------
 
-/// The GFM table syntax, but relabelled `table` → `mdtable` so [_TableBuilder]
-/// (rather than the package's hard-coded table handling) renders it. Uses the
-/// real parser, so table detection is exactly GFM's: correct column counts,
-/// decoded entities, and no false positives inside code blocks.
+/// A per-parse Expando linking an injected `copytable` chip element to the
+/// table it belongs to, so the chip builder can compute the TSV from the
+/// table's real (inline-parsed) cells at build time.
+final Expando<md.Element> _chipTable = Expando('mdChipTable');
+
+/// The GFM table syntax, wrapped so a "Copy table" chip is emitted above each
+/// table. The table itself keeps its `table` tag, so the package renders it
+/// with full fidelity (selection, images, zoom, inline formatting, alignment);
+/// we only add the chip.
+///
+/// The wrapper is a `section` — a built-in block tag the package lays out as a
+/// column of its children, and (crucially) one we register no *block* builder
+/// for, so nothing is appended to the package's library-level block-tag list
+/// on every keystroke. The chip is an inline `copytable` element for the same
+/// reason.
 class _CopyableTableSyntax extends md.TableSyntax {
-  // The package's block visitor handles `tr`/`th`/`td` assuming a `table`
-  // context it builds itself, so renaming only `table` would make it choke on
-  // the still-`tr` rows. Rename the WHOLE structure to inert `md…` tags; the
-  // cells' UnparsedContent still flows through the inline pass (so bold,
-  // links, entities parse), and [_MarkdownTable] reads the `md…` tags.
-  static const _rename = {
-    'table': 'mdtable',
-    'thead': 'mdthead',
-    'tbody': 'mdtbody',
-    'tr': 'mdtr',
-    'th': 'mdth',
-    'td': 'mdtd',
-  };
-
-  md.Node _relabel(md.Node node) {
-    if (node is! md.Element) return node;
-    final tag = _rename[node.tag];
-    if (tag == null) return node; // inline cell content — leave untouched
-    return md.Element(tag, node.children?.map(_relabel).toList())
-      ..attributes.addAll(node.attributes);
-  }
-
   @override
   md.Node? parse(md.BlockParser parser) {
     final node = super.parse(parser);
-    if (node is md.Element && node.tag == 'table') return _relabel(node);
+    if (node is md.Element && node.tag == 'table') {
+      final chip = md.Element('copytable', []);
+      _chipTable[chip] = node; // resolve the TSV from real cells at build time
+      return md.Element('section', [
+        md.Element('p', [chip]),
+        node,
+      ]);
+    }
     return node;
   }
 }
 
-/// Routes the parsed `mdtable` element to the [_MarkdownTable] renderer.
-class _TableBuilder extends MarkdownElementBuilder {
-  _TableBuilder(this.styleSheet, this.onTapLink);
-
-  final MarkdownStyleSheet styleSheet;
-  final void Function(String href) onTapLink;
-
+/// Renders the inline "Copy table" chip. Reads the associated table (via
+/// [_chipTable]) whose cells are inline-parsed by now, so the TSV has decoded
+/// entities and the parser's normalised column counts.
+class _CopyTableChipBuilder extends MarkdownElementBuilder {
   @override
-  bool isBlockElement() => true;
-
-  @override
-  Widget visitElementAfterWithContext(
+  Widget? visitElementAfterWithContext(
     BuildContext context,
     md.Element element,
     TextStyle? preferredStyle,
     TextStyle? parentStyle,
-  ) =>
-      _MarkdownTable(
-          element: element, styleSheet: styleSheet, onTapLink: onTapLink);
+  ) {
+    final table = _chipTable[element];
+    if (table == null) return const SizedBox.shrink();
+    final tsv = _tableTsv(table);
+    if (tsv.isEmpty) return const SizedBox.shrink();
+    return _CopyTableChip(tsv: tsv);
+  }
 }
 
-/// Renders a parsed table faithfully (inline formatting, links, alignment)
-/// with a "Copy table" chip above it. Stateful so link tap recognizers can be
-/// disposed. The TSV is computed from the parser's normalised cells, so the
-/// clipboard always matches the rendered grid.
-class _MarkdownTable extends StatefulWidget {
-  const _MarkdownTable({
-    required this.element,
-    required this.styleSheet,
-    required this.onTapLink,
-  });
-
-  final md.Element element;
-  final MarkdownStyleSheet styleSheet;
-  final void Function(String href) onTapLink;
-
-  @override
-  State<_MarkdownTable> createState() => _MarkdownTableState();
-}
-
-class _MarkdownTableState extends State<_MarkdownTable> {
-  final List<TapGestureRecognizer> _recognizers = [];
-
-  @override
-  void dispose() {
-    for (final r in _recognizers) {
-      r.dispose();
+/// Tab-separated text of a parsed `<table>`: header row + body rows, each
+/// normalised to the header's column count (matching the rendered grid), with
+/// tabs/newlines inside a cell collapsed so they can't break the grid.
+String _tableTsv(md.Element table) {
+  final rows = <List<md.Element>>[];
+  for (final section in table.children ?? const <md.Node>[]) {
+    if (section is! md.Element) continue;
+    for (final row in section.children ?? const <md.Node>[]) {
+      if (row is! md.Element || row.tag != 'tr') continue;
+      rows.add([
+        for (final c in row.children ?? const <md.Node>[])
+          if (c is md.Element) c
+      ]);
     }
-    super.dispose();
   }
-
-  /// Rows as (cells, isHeader). Cells are the `mdth`/`mdtd` elements (the
-  /// relabelled `th`/`td` — see [_CopyableTableSyntax]).
-  List<(List<md.Element>, bool)> _rows() {
-    final rows = <(List<md.Element>, bool)>[];
-    for (final section in widget.element.children ?? const <md.Node>[]) {
-      if (section is! md.Element) continue;
-      final isHead = section.tag == 'mdthead';
-      for (final row in section.children ?? const <md.Node>[]) {
-        if (row is! md.Element || row.tag != 'mdtr') continue;
-        final cells = [
-          for (final c in row.children ?? const <md.Node>[])
-            if (c is md.Element) c
-        ];
-        rows.add((cells, isHead));
-      }
-    }
-    return rows;
-  }
-
-  String _cellText(md.Element? cell) =>
-      (cell?.textContent ?? '').replaceAll(RegExp(r'[\t\n]+'), ' ').trim();
-
-  TextAlign _align(md.Element cell) => switch (cell.attributes['align']) {
-        'center' => TextAlign.center,
-        'right' => TextAlign.right,
-        _ => TextAlign.left,
-      };
-
-  List<InlineSpan> _spans(List<md.Node>? nodes, TextStyle base) {
-    final cs = Theme.of(context).colorScheme;
-    final out = <InlineSpan>[];
-    for (final n in nodes ?? const <md.Node>[]) {
-      if (n is md.Text) {
-        out.add(TextSpan(text: n.text, style: base));
-        continue;
-      }
-      if (n is! md.Element) continue;
-      switch (n.tag) {
-        case 'strong':
-          out.addAll(
-              _spans(n.children, base.copyWith(fontWeight: FontWeight.bold)));
-        case 'em':
-          out.addAll(
-              _spans(n.children, base.copyWith(fontStyle: FontStyle.italic)));
-        case 'del':
-          out.addAll(_spans(n.children,
-              base.copyWith(decoration: TextDecoration.lineThrough)));
-        case 'u':
-          out.addAll(_spans(
-              n.children, base.copyWith(decoration: TextDecoration.underline)));
-        case 'code':
-          out.add(TextSpan(
-              text: n.textContent,
-              style: base.copyWith(
-                  fontFamily: 'monospace',
-                  backgroundColor: cs.surfaceContainerHighest)));
-        case 'br':
-          out.add(const TextSpan(text: '\n'));
-        case 'a':
-          final href = n.attributes['href'];
-          final linkStyle = base.copyWith(
-              color: cs.primary, decoration: TextDecoration.underline);
-          if (href == null) {
-            out.addAll(_spans(n.children, linkStyle));
-          } else {
-            final rec = TapGestureRecognizer()
-              ..onTap = () => widget.onTapLink(href);
-            _recognizers.add(rec);
-            out.add(TextSpan(
-                text: n.textContent, style: linkStyle, recognizer: rec));
-          }
-        default:
-          out.addAll(_spans(n.children, base));
-      }
-    }
-    return out;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Recognizers are recreated each build; dispose the previous set first.
-    for (final r in _recognizers) {
-      r.dispose();
-    }
-    _recognizers.clear();
-
-    final rows = _rows();
-    if (rows.isEmpty) return const SizedBox.shrink();
-    final cols = rows.first.$1.length;
-    if (cols == 0) return const SizedBox.shrink();
-
-    final cs = Theme.of(context).colorScheme;
-    final base = DefaultTextStyle.of(context).style.copyWith(fontSize: 14);
-
-    // TSV from the parser's cells, normalised to the header column count so
-    // it always matches the rendered grid.
-    final tsv = rows.map((r) {
-      final cells = r.$1;
-      return [
-        for (var i = 0; i < cols; i++)
-          _cellText(i < cells.length ? cells[i] : null)
-      ].join('\t');
-    }).join('\n');
-
-    final tableRows = <TableRow>[
-      for (final (cells, isHeader) in rows)
-        TableRow(
-          decoration: isHeader
-              ? BoxDecoration(color: cs.surfaceContainerHighest)
-              : null,
-          children: [
-            for (var i = 0; i < cols; i++)
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                child: RichText(
-                  textAlign:
-                      i < cells.length ? _align(cells[i]) : TextAlign.left,
-                  text: TextSpan(
-                    children: i < cells.length
-                        ? _spans(
-                            cells[i].children,
-                            base.copyWith(
-                                fontWeight: isHeader ? FontWeight.bold : null))
-                        : const [],
-                  ),
-                ),
-              ),
-          ],
-        ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _CopyTableChip(tsv: tsv),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Table(
-            defaultColumnWidth: const IntrinsicColumnWidth(),
-            border: TableBorder.all(color: cs.outlineVariant),
-            children: tableRows,
-          ),
-        ),
-      ],
-    );
-  }
+  if (rows.isEmpty) return '';
+  final cols = rows.first.length;
+  String cell(md.Element? c) =>
+      (c?.textContent ?? '').replaceAll(RegExp(r'[\t\n]+'), ' ').trim();
+  return rows
+      .map((r) => [
+            for (var i = 0; i < cols; i++) cell(i < r.length ? r[i] : null)
+          ].join('\t'))
+      .join('\n');
 }
 
 /// A small labelled "Copy table" chip that copies tab-separated text (pastes
