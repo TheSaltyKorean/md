@@ -803,7 +803,12 @@ class _EditorScreenState extends State<EditorScreen>
     final ws = context.read<WorkspaceController>();
     if (index < 0 || index >= ws.tabs.length) return;
     final tab = ws.tabs[index];
-    if (tab is DocumentTab && tab.doc.isDirty) {
+    // Prompt for a dirty buffer OR an unresolved external-change conflict: a
+    // restored clean-but-conflicted tab (auto-reload off) holds its old buffer
+    // and the Reload/Keep-mine choice only in memory/session, so closing it
+    // blind would silently drop that choice.
+    if (tab is DocumentTab &&
+        (tab.doc.isDirty || tab.doc.hasExternalConflict)) {
       final ok = await _confirmDiscard(context, '"${tab.doc.title}"');
       if (!ok) return;
     }
@@ -1004,21 +1009,32 @@ class _EditorScreenState extends State<EditorScreen>
       builder: (_) => AlertDialog(
         icon: const Icon(Icons.system_update_alt_rounded),
         title: Text('Update to ${info.version}?'),
-        content: Text(switch (kind) {
-          InstallKind.msi ||
-          InstallKind.inno =>
-            "Here's what happens: the update downloads, then Markdown "
-                'Studio closes, installs it in the background (no admin '
-                'prompt), and reopens right where you left off — your open '
-                'tabs and unsaved changes are restored. Takes a few seconds.',
-          InstallKind.deb => 'The package downloads and opens in your software '
-              'installer; the new version is used on the next launch. Your '
-              'open tabs and unsaved changes are restored on reopen.',
-          InstallKind.other =>
-            'Your install type updates from the download page — the '
-                'right installer is one click there. Your open tabs and '
-                'unsaved changes are restored when you reopen.',
-        }),
+        content: Text(
+          switch (kind) {
+                InstallKind.msi ||
+                InstallKind.inno =>
+                  "Here's what happens: the update downloads, then Markdown "
+                      'Studio closes, installs it in the background (no admin '
+                      'prompt), and reopens. Takes a few seconds.',
+                InstallKind.deb =>
+                  'The package downloads and opens in your software installer; '
+                      'the new version is used on the next launch.',
+                InstallKind.other =>
+                  'Your install type updates from the download page — the '
+                      'right installer is one click there.',
+              } +
+              // Only a plain (session-backed) window is restored across the
+              // relaunch. A window opened directly from a file has no session,
+              // so promising hot-restore here would be false — it reopens to
+              // the previously saved session instead, so tell the user to save
+              // first.
+              (ws.sessionEnabled
+                  ? ' Your open tabs and unsaved changes are restored when you '
+                      'reopen.'
+                  : ' This window was opened directly from a file, so after the '
+                      'update it reopens to your previously saved session — '
+                      'save any unsaved changes here first.'),
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -1113,16 +1129,18 @@ class _EditorScreenState extends State<EditorScreen>
         // this process id, so starting it before teardown is safe — and if
         // the spawn throws, nothing has been released yet and the editor
         // stays fully functional (socket, watchers) for the error path.
-        // Once it's running, release resources and exit; the launcher sees
-        // the pid vanish and only then starts the installer, so file
+        // Re-run the exit prep now that the download is done: the app stayed
+        // alive through it, during which a file watcher could have
+        // auto-reloaded a clean tab or surfaced a new conflict. _prepareExit
+        // ran BEFORE the download, so re-flush to capture those — and if that
+        // write now fails (e.g. the installer filled the disk), _prepareExit
+        // falls back to the discard prompt and we abort rather than relaunch
+        // onto a stale session.
+        if (!await _prepareExit() || !mounted) return;
+        // Once the installer is running, release resources and exit; the
+        // launcher only WAITS for this pid, so starting it before teardown is
+        // safe, and it starts the install only after the pid vanishes — file
         // replacement can never race shutdown.
-        //
-        // Re-flush the session first: the app stayed alive through the
-        // download, during which a file watcher could have auto-reloaded a
-        // clean tab or surfaced a new conflict. _prepareExit ran BEFORE the
-        // download, so without this those changes wouldn't be in session.json
-        // for the auto-relaunch to restore.
-        await ws.flushSession();
         await updates.launchInstaller(path, kind);
         await _releaseResources();
         exit(0);

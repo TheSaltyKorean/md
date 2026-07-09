@@ -1075,6 +1075,40 @@ void main() {
     ws.dispose();
   });
 
+  test('FileSessionStore round-trips through the real filesystem', () async {
+    final dir = Directory.systemTemp.createTempSync('mdfss');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = FileSessionStore(directory: dir);
+    expect(await store.read(), isNull); // nothing yet
+    await store.write('{"v":1}');
+    expect(await store.read(), '{"v":1}');
+    await store.clear();
+    expect(await store.read(), isNull);
+  });
+
+  test('FileSessionStore read falls back to the temp after a crash mid-rename',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('mdfss2');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = FileSessionStore(directory: dir);
+    // Simulate a crash right after a non-atomic rename removed the destination
+    // but before it moved the temp into place: only the .tmp exists, complete.
+    File('${dir.path}/session.json.tmp').writeAsStringSync('{"complete":true}');
+    expect(await store.read(), '{"complete":true}'); // recovered, not lost
+  });
+
+  test('FileSessionStore prefers the main file over a stale temp', () async {
+    final dir = Directory.systemTemp.createTempSync('mdfss3');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = FileSessionStore(directory: dir);
+    File('${dir.path}/session.json').writeAsStringSync('MAIN');
+    File('${dir.path}/session.json.tmp').writeAsStringSync('STALE');
+    expect(await store.read(), 'MAIN'); // temp is only a fallback
+    // clear() also removes the stale temp so it can't resurrect the session.
+    await store.clear();
+    expect(await store.read(), isNull);
+  });
+
   test('Malformed session entries are skipped, not fatal', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
