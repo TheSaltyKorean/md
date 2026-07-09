@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 
 /// Renders Markdown to a styled, scrollable, read-only view. Used both for the
 /// preview pane of the split view and for the full-screen read-only mode.
+///
+/// The whole render sits inside a [SelectionArea] so text can be highlighted
+/// and copied with the native context menu / keyboard shortcut across the
+/// entire document (not just one block at a time). Fenced code blocks also get
+/// an explicit copy button in their top-right corner.
 class PreviewView extends StatelessWidget {
   const PreviewView({
     super.key,
@@ -23,26 +29,36 @@ class PreviewView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Markdown(
-      data: markdown,
-      controller: controller,
-      selectable: true,
-      padding: padding,
-      // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
-      // ourselves and render it underlined (matches the PDF export).
-      inlineSyntaxes: [_UnderlineSyntax()],
-      builders: {'u': _UnderlineElementBuilder()},
-      styleSheet: _styleSheet(theme),
-      onTapLink: (text, href, title) async {
-        if (href == null) return;
-        final uri = Uri.tryParse(href);
-        if (uri == null) return;
-        // Launch directly: canLaunchUrl can falsely return false on Android 11+
-        // due to package visibility, making links appear dead.
-        try {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
-        } catch (_) {/* no handler available */}
-      },
+    return SelectionArea(
+      child: Markdown(
+        data: markdown,
+        controller: controller,
+        // SelectionArea provides selection for the whole document; the
+        // widget's own per-block SelectableText would nest inside it and
+        // assert, so it stays off here.
+        selectable: false,
+        padding: padding,
+        // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
+        // ourselves and render it underlined (matches the PDF export).
+        inlineSyntaxes: [_UnderlineSyntax()],
+        builders: {
+          'u': _UnderlineElementBuilder(),
+          // Custom fenced-code-block rendering with a copy button. The
+          // package still wraps the returned widget in codeblockDecoration.
+          'pre': _CodeBlockBuilder(theme),
+        },
+        styleSheet: _styleSheet(theme),
+        onTapLink: (text, href, title) async {
+          if (href == null) return;
+          final uri = Uri.tryParse(href);
+          if (uri == null) return;
+          // Launch directly: canLaunchUrl can falsely return false on
+          // Android 11+ due to package visibility, making links appear dead.
+          try {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          } catch (_) {/* no handler available */}
+        },
+      ),
     );
   }
 
@@ -80,6 +96,99 @@ class PreviewView extends StatelessWidget {
       tableBorder: TableBorder.all(color: cs.outlineVariant),
       tableHead: const TextStyle(fontWeight: FontWeight.bold),
       a: TextStyle(color: cs.primary, decoration: TextDecoration.underline),
+    );
+  }
+}
+
+/// Renders a fenced code block (`<pre>`) with a copy button pinned to the
+/// top-right corner. The package wraps whatever this returns in the
+/// stylesheet's `codeblockDecoration`, so the button ends up inside the
+/// rounded code box.
+class _CodeBlockBuilder extends MarkdownElementBuilder {
+  _CodeBlockBuilder(this.theme);
+
+  final ThemeData theme;
+
+  @override
+  bool isBlockElement() => true;
+
+  @override
+  Widget visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    // The <pre> wraps a <code> whose text is the block body; textContent
+    // flattens it. Drop the single trailing newline the parser appends.
+    var code = element.textContent;
+    if (code.endsWith('\n')) code = code.substring(0, code.length - 1);
+
+    final cs = theme.colorScheme;
+    final codeStyle = TextStyle(
+      fontFamily: 'monospace',
+      fontSize: 14,
+      height: 1.45,
+      color: cs.onSurfaceVariant,
+    );
+
+    return Stack(
+      children: [
+        // Extra right padding leaves room so the first line never runs
+        // under the copy button.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 44, 14),
+          child: Text(code, style: codeStyle),
+        ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: _CopyButton(text: code),
+        ),
+      ],
+    );
+  }
+}
+
+/// A compact icon button that copies [text] to the clipboard and briefly
+/// shows a check mark as confirmation. Excluded from text selection so it
+/// doesn't interfere with highlighting the code.
+class _CopyButton extends StatefulWidget {
+  const _CopyButton({required this.text});
+
+  final String text;
+
+  @override
+  State<_CopyButton> createState() => _CopyButtonState();
+}
+
+class _CopyButtonState extends State<_CopyButton> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SelectionContainer.disabled(
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        iconSize: 18,
+        padding: const EdgeInsets.all(6),
+        constraints: const BoxConstraints(),
+        tooltip: _copied ? 'Copied' : 'Copy code',
+        icon: Icon(
+          _copied ? Icons.check_rounded : Icons.copy_rounded,
+          color: _copied ? Colors.green : cs.onSurfaceVariant,
+        ),
+        onPressed: _copy,
+      ),
     );
   }
 }
