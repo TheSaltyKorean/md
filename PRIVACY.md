@@ -10,6 +10,11 @@ transmit any personal data, telemetry, analytics, or document content.**
 - **Settings stay on your device.** Preferences (theme, print profiles,
   per-document profile associations) are stored in local application storage
   only.
+- **Your open tabs stay on your device.** To reopen where you left off after
+  a restart or update, the app saves your open documents — including any
+  unsaved text — to a `session.json` file in its local application-support
+  folder. It is read only to restore your tabs and is never transmitted
+  anywhere.
 - **Network use — three kinds, none carrying your data.** (1) When printing
   or exporting a PDF with a Google Fonts typeface, the app downloads that
   font file from Google Fonts (fonts.google.com); offline it falls back to

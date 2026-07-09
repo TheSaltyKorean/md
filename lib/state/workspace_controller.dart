@@ -1,8 +1,36 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Offset;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/editor_mode.dart';
+import '../services/session_service.dart';
 import 'document_controller.dart';
+
+/// A document to restore, with its content resolved (disk read done) before
+/// the workspace is mutated. Internal to [WorkspaceController.restoreSession].
+class _RestoredDoc {
+  _RestoredDoc({
+    required this.path,
+    required this.name,
+    required this.content,
+    required this.markDirty,
+    required this.mode,
+    required this.baseline,
+    required this.conflict,
+  });
+
+  final String? path;
+  final String? name;
+  final String content;
+  final bool markDirty;
+  final String? mode;
+  final String? baseline;
+  final String? conflict;
+}
 
 /// A tab in the workspace strip: an editable document or a print preview.
 sealed class WorkspaceTab {}
@@ -43,20 +71,48 @@ class PrintPreviewTab extends WorkspaceTab {
 /// and the global auto-reload setting. Each document tab is its own
 /// [DocumentController].
 class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this._prefs) {
+  WorkspaceController(this._prefs, {SessionStore? sessionStore})
+      : _sessionStore = sessionStore {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
     final tx = _prefs.getDouble(_toolbarXKey);
     final ty = _prefs.getDouble(_toolbarYKey);
     if (tx != null && ty != null) _toolbarOffset = Offset(tx, ty);
     _tabs.add(DocumentTab(_newDoc()));
     _activeIndex = 0;
+    // Persist the session (debounced) whenever tabs, the active tab, or any
+    // open document changes, so a restart/update reopens where we left off.
+    if (_sessionStore != null) addListener(_scheduleSessionSave);
   }
 
   static const _autoReloadKey = 'auto_reload';
   static const _toolbarXKey = 'format_toolbar_x';
   static const _toolbarYKey = 'format_toolbar_y';
+  static const _sessionDebounce = Duration(milliseconds: 1200);
 
   final SharedPreferences _prefs;
+
+  /// Where the open-tabs session is stored (null disables session
+  /// persistence — e.g. in torn-off windows or tests that don't exercise it).
+  final SessionStore? _sessionStore;
+  Timer? _sessionTimer;
+  bool _sessionAbandoned = false;
+
+  /// Whether this workspace persists/restores its session. When false (a
+  /// torn-off window, or a launch where [restoreSession] abandoned to a
+  /// pre-opened document), closing with unsaved work still needs a discard
+  /// prompt — hot exit only applies when the session is actually saved.
+  bool get sessionEnabled => _sessionStore != null && !_sessionAbandoned;
+
+  /// Stop this run from persisting the session. Used when [restoreSession]
+  /// finds a document was already opened (an instance-forwarded path, or a
+  /// buffered platform-channel open) and bails: that pre-opened document must
+  /// not overwrite the saved session's unsaved buffers that restore just
+  /// abandoned — the saved session survives untouched for the next launch,
+  /// and the pre-opened document is protected by the normal close prompt.
+  void _abandonSession() {
+    _sessionAbandoned = true;
+    _sessionTimer?.cancel();
+  }
 
   final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
@@ -102,7 +158,16 @@ class WorkspaceController extends ChangeNotifier {
   DocumentController _newDoc() {
     final doc = DocumentController(isAutoReloadEnabled: () => _autoReload);
     doc.addListener(_relay);
+    // Content edits don't re-fire the dirty notification once already dirty,
+    // so listen to the per-edit tick to keep the session debounce armed.
+    doc.contentTick.addListener(_scheduleSessionSave);
     return doc;
+  }
+
+  void _detachDoc(DocumentController doc) {
+    doc.removeListener(_relay);
+    doc.contentTick.removeListener(_scheduleSessionSave);
+    doc.dispose();
   }
 
   // Relay any open document's changes (e.g. dirty flag, title) so the tab strip
@@ -225,8 +290,7 @@ class WorkspaceController extends ChangeNotifier {
     if (index < 0 || index >= _tabs.length) return;
     final tab = _tabs.removeAt(index);
     if (tab is DocumentTab) {
-      tab.doc.removeListener(_relay);
-      tab.doc.dispose();
+      _detachDoc(tab.doc);
       // Orphan any preview of this document: don't retain the disposed
       // controller, and don't let a later pathless document adopt the tab.
       for (final t in _tabs) {
@@ -277,11 +341,242 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  // --- Session persistence ----------------------------------------------------
+
+  /// A JSON-able snapshot of the open document tabs (print previews excluded),
+  /// including each document's unsaved buffer, dirty flag, and view mode, plus
+  /// which document is active. Restored verbatim by [restoreSession].
+  @visibleForTesting
+  Map<String, dynamic> sessionSnapshot() {
+    final docs = <Map<String, dynamic>>[];
+    var activeDoc = 0;
+    for (final tab in _tabs) {
+      if (tab is! DocumentTab) continue;
+      final d = tab.doc;
+      // A blank, never-touched Untitled is not real work: persisting it would
+      // resurrect it on next launch as a non-pristine tab that a real file
+      // open can no longer replace, leaving a stray empty tab behind.
+      if (d.isPristine) continue;
+      if (identical(tab, _tabs[_activeIndex])) activeDoc = docs.length;
+      docs.add({
+        'path': d.filePath,
+        'name': d.displayName,
+        'content': d.currentMarkdown(),
+        'dirty': d.isDirty,
+        'mode': d.mode.name,
+        // For a dirty file-backed tab, the disk content it was last in sync
+        // with — so restore can tell whether the file changed while closed.
+        if (d.isDirty && d.filePath != null) 'synced': d.syncedContent,
+        // Record only THAT an external-change conflict was pending, never the
+        // conflicting text: it can go stale between shutdown and the next
+        // launch, so restore re-reads the current file to produce fresh
+        // conflict content (and drops the conflict if the file has caught up).
+        if (d.hasExternalConflict) 'conflict': true,
+      });
+    }
+    return {'version': 1, 'active': activeDoc, 'docs': docs};
+  }
+
+  void _scheduleSessionSave() {
+    if (!sessionEnabled) return;
+    _sessionTimer?.cancel();
+    _sessionTimer = Timer(_sessionDebounce, _saveSession);
+  }
+
+  void _saveSession() {
+    if (!sessionEnabled) return;
+    final json = jsonEncode(sessionSnapshot());
+    _track(() => _sessionStore!.write(json));
+  }
+
+  /// Force an immediate session write, awaiting the result, and stop the
+  /// debounce timer. Returns false if the write failed (disk full/unwritable)
+  /// so the caller can fall back to a discard prompt rather than lose unsaved
+  /// work silently. A no-op returning true when persistence is disabled.
+  Future<bool> flushSession() async {
+    _sessionTimer?.cancel();
+    if (!sessionEnabled) return true;
+    final json = jsonEncode(sessionSnapshot());
+    // Run through the same _track chain as the debounced saves, so a forced
+    // flush can't complete BEFORE an older queued save and then be
+    // overwritten by it (last-writer-wins) once the caller awaits
+    // pendingWrites.
+    var ok = true;
+    await _track(() async {
+      try {
+        await _sessionStore!.write(json);
+      } catch (_) {
+        ok = false;
+      }
+    });
+    return ok;
+  }
+
+  /// Rebuild the tabs from a previously saved session. No-op when session
+  /// persistence is disabled, there is no saved session, or it's empty — the
+  /// initial blank document is left in place. Restored documents keep their
+  /// unsaved buffer, dirty state, and view mode.
+  Future<void> restoreSession() async {
+    final store = _sessionStore;
+    if (store == null) return;
+    // Only populate a *fresh* workspace. If a document was already opened
+    // (an OS file-association open via the platform channel, or an instance
+    // forward), don't clobber it with the saved session — and suppress
+    // persistence so that pre-opened document doesn't overwrite the saved
+    // session we're abandoning.
+    if (documents.any((d) => !d.isPristine)) {
+      _abandonSession();
+      return;
+    }
+    Map<String, dynamic>? data;
+    try {
+      final raw = await store.read();
+      if (raw == null) return;
+      data = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return; // absent or corrupt — keep the fresh blank document
+    }
+    // `docs` may be missing or (in a corrupt/forward-incompatible file) not a
+    // list — guard the type instead of casting so a bad value degrades to an
+    // empty restore rather than throwing.
+    final docsRaw = data['docs'];
+    final entries = docsRaw is List ? docsRaw : const [];
+    if (entries.isEmpty) return;
+
+    // Resolve each tab BEFORE mutating the workspace (the disk reads are
+    // async). This is the SINGLE place that reads the current file and decides
+    // each restored tab's content, baseline, and conflict — loadMarkdown then
+    // applies that decision verbatim (see fromRestore) rather than re-reading
+    // disk itself, so the two can't disagree.
+    final restored = <_RestoredDoc>[];
+    for (final entry in entries) {
+      if (entry is! Map) continue;
+      try {
+        final path = entry['path'] as String?;
+        final dirty = (entry['dirty'] as bool?) ?? false;
+        // Only whether a conflict was pending — never trust persisted text
+        // (tolerate an old session that stored the string form: any non-null
+        // value means "was conflicted").
+        final hadConflict = entry['conflict'] != null;
+        final synced = entry['synced'] as String?;
+        var content = (entry['content'] as String?) ?? '';
+        var markDirty = dirty;
+        var baseline = synced;
+        String? conflict;
+
+        if (path != null) {
+          String? disk;
+          try {
+            disk = await File(path).readAsString();
+          } catch (_) {
+            disk = null; // file gone/unreadable
+          }
+          if (disk == null) {
+            // No file to reconcile against. A clean tab that merely tracked
+            // the file keeps its buffer, but marked unsaved so it isn't
+            // treated as matching a now-missing file.
+            if (!dirty) markDirty = true;
+            baseline = synced ?? content;
+          } else if (disk == content) {
+            // The current file already equals the buffer: nothing unsaved,
+            // nothing to reconcile. Restore as a clean tab in sync with disk —
+            // even if it was saved dirty/conflicted, another tool has since
+            // written exactly this text, so the tab must not reopen forever as
+            // unsaved.
+            markDirty = false;
+            baseline = disk;
+          } else if (!dirty) {
+            // A CLEAN tab (with or without a prior conflict) whose file changed
+            // while closed. Mirror the live watcher / resolveIfSafe: auto-adopt
+            // only when auto-reload is on; otherwise surface a Reload/Keep-mine
+            // conflict so an auto-reload-off user can still keep their buffer.
+            // Either way the baseline tracks the current disk, matching the live
+            // invariant (so "Keep mine" won't re-fire on the next unchanged
+            // watcher event).
+            baseline = disk;
+            if (_autoReload) {
+              content = disk;
+            } else {
+              conflict = disk;
+            }
+          } else {
+            // A DIRTY tab whose file differs from the buffer. Dirty tabs never
+            // auto-reload. Surface a conflict unless the file is unchanged from
+            // the (clean) edit baseline — that's normal dirty editing, not an
+            // external change. `synced` is polluted for a tab that already had
+            // a conflict, so such a tab always reconciles against fresh disk.
+            if (!hadConflict && disk == synced) {
+              baseline = synced;
+            } else {
+              baseline = disk;
+              conflict = disk;
+            }
+          }
+        }
+
+        restored.add(_RestoredDoc(
+          path: path,
+          name: entry['name'] as String?,
+          content: content,
+          markDirty: markDirty,
+          mode: entry['mode'] as String?,
+          baseline: baseline,
+          conflict: conflict,
+        ));
+      } catch (_) {
+        // Malformed/forward-incompatible entry (e.g. a non-string field):
+        // skip it rather than aborting the whole restore.
+      }
+    }
+    if (restored.isEmpty) return;
+
+    // The disk reads above are async; a forwarded open-file request could
+    // have arrived meanwhile and added a real document. Re-check freshness so
+    // we don't clobber it — and suppress persistence for the same reason as
+    // the pre-read check above.
+    if (documents.any((d) => !d.isPristine)) {
+      _abandonSession();
+      return;
+    }
+
+    // Replace the initial blank tab(s).
+    for (final t in _tabs) {
+      if (t is DocumentTab) _detachDoc(t.doc);
+    }
+    _tabs.clear();
+    for (final r in restored) {
+      final doc = _newDoc()
+        ..loadMarkdown(r.content,
+            path: r.path,
+            displayName: r.name,
+            markDirty: r.markDirty,
+            restoredBaseline: r.baseline,
+            restoredConflict: r.conflict,
+            fromRestore: true);
+      for (final m in EditorMode.values) {
+        if (m.name == r.mode) {
+          doc.setMode(m);
+          break;
+        }
+      }
+      _tabs.add(DocumentTab(doc));
+    }
+    if (_tabs.isEmpty) _tabs.add(DocumentTab(_newDoc()));
+    // Type-guard the active index too (a corrupt/forward-version session could
+    // hold a non-int here): this runs after the tabs are rebuilt and outside
+    // the corrupt-session try, so a bad cast would crash launch instead of
+    // falling back to tab 0.
+    final activeRaw = data['active'];
+    final active = activeRaw is int ? activeRaw : 0;
+    _activeIndex = active.clamp(0, _tabs.length - 1);
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    _sessionTimer?.cancel();
     for (final d in documents) {
-      d.removeListener(_relay);
-      d.dispose();
+      _detachDoc(d);
     }
     super.dispose();
   }

@@ -45,7 +45,8 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> with WindowListener {
+class _EditorScreenState extends State<EditorScreen>
+    with WindowListener, WidgetsBindingObserver {
   DocumentController? _bannerDoc;
   bool _conflictShown = false;
   bool _dragging = false;
@@ -65,6 +66,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       // Intercept the window-close button so we can confirm unsaved changes.
       windowManager.setPreventClose(true);
     }
+    // Mobile has no window-close event: flush the session when the app is
+    // paused/backgrounded so edits aren't lost if it's then swiped away
+    // before the debounce fires.
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
     // Launch-time update check (single version request; menu-toggleable).
@@ -94,10 +99,45 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   @override
   void dispose() {
     if (_isDesktop) windowManager.removeListener(this);
+    WidgetsBinding.instance.removeObserver(this);
     _bannerDoc?.removeListener(_onActiveDocChanged);
     _find.removeListener(_onFindChanged);
     _find.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Persist the session when the app leaves the foreground (mobile has no
+    // window-close hook), so a swipe-away right after an edit doesn't lose it.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      context.read<WorkspaceController>().flushSession();
+    }
+  }
+
+  /// Persist the session for a clean exit and decide whether to proceed.
+  /// Returns true to go ahead with the exit, false to abort it (the user
+  /// cancelled a fallback discard prompt). With persistence on, a successful
+  /// flush means hot exit (no prompt); a *failed* flush (disk full/unwritable)
+  /// falls back to the discard warning so unsaved work isn't lost silently.
+  /// Without persistence (a torn-off window), any unsaved work prompts.
+  Future<bool> _prepareExit() async {
+    final ws = context.read<WorkspaceController>();
+    // Unsaved work worth a fallback prompt includes not just dirty buffers but
+    // a clean tab with an unresolved external-change conflict: its old buffer
+    // survives only in the session file, so a failed flush there must not exit
+    // silently and drop the user's "Keep mine" choice.
+    final anyUnsaved =
+        ws.documents.any((d) => d.isDirty || d.hasExternalConflict);
+    if (ws.sessionEnabled) {
+      if (await ws.flushSession()) return true; // saved — hot exit
+      if (!anyUnsaved) return true; // write failed but nothing to lose
+    } else if (!anyUnsaved) {
+      return true;
+    }
+    if (!mounted) return true;
+    return _confirmDiscard(context, 'One or more open documents');
   }
 
   /// Open find (and optionally replace). Find operates on the raw Markdown
@@ -109,12 +149,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   @override
   void onWindowClose() async {
-    final ws = context.read<WorkspaceController>();
-    final anyDirty = ws.documents.any((d) => d.isDirty);
-    if (anyDirty && mounted) {
-      final ok = await _confirmDiscard(context, 'One or more open documents');
-      if (!ok) return; // keep the window open
-    }
+    if (!await _prepareExit()) return; // user cancelled a discard prompt
     await _shutdownAndExit();
   }
 
@@ -136,6 +171,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final profiles = context.read<PrintProfileService>();
     final zoom = context.read<ZoomController>();
     final updates = context.read<UpdateController>();
+    // The final session write already happened in _prepareExit (awaited, so
+    // its success gates a discard fallback). Here we just drain the other
+    // fire-and-forget preference writes.
     // Drain any preference write still in flight (UI callbacks fire-and-forget
     // setAutoReload / cycle / setDefault), so a setting changed right before
     // closing isn't lost. Bounded so a stuck write can't hang the close.
@@ -308,19 +346,22 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       });
     }
 
-    final anyDirty = ws.documents.any((d) => d.isDirty);
     // On narrow (phone) widths the mode selector moves to its own bar and most
     // actions collapse into the overflow menu so the app bar can't overflow.
     final isNarrow = MediaQuery.sizeOf(context).width < 720;
     return PopScope(
-      // Guard the Android back gesture when there are unsaved changes.
-      canPop: !anyDirty,
+      // Always intercept Android back so we flush the session before the app
+      // exits — even when every doc is clean, the session still holds unsaved
+      // state (active tab, per-tab view mode, adopted clean content) that a
+      // debounced save may not have written yet. _prepareExit writes it and
+      // only reports success once it's safely on disk (or, if the write fails
+      // with unsaved work, the user confirms discarding).
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        final ok = await _confirmDiscard(context, 'One or more open documents');
-        // canPop stays false (docs still dirty), so popping the route would just
-        // re-trigger this guard. Exit the app explicitly instead.
-        if (ok) await SystemNavigator.pop();
+        if (await _prepareExit() && mounted) {
+          await SystemNavigator.pop();
+        }
       },
       // Find shortcuts wrap the whole Scaffold (not just the body) so Ctrl/Cmd+F,
       // Ctrl/Cmd+H and Esc fire regardless of which chrome control (app bar,
@@ -762,7 +803,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final ws = context.read<WorkspaceController>();
     if (index < 0 || index >= ws.tabs.length) return;
     final tab = ws.tabs[index];
-    if (tab is DocumentTab && tab.doc.isDirty) {
+    // Prompt for a dirty buffer OR an unresolved external-change conflict: a
+    // restored clean-but-conflicted tab (auto-reload off) holds its old buffer
+    // and the Reload/Keep-mine choice only in memory/session, so closing it
+    // blind would silently drop that choice.
+    if (tab is DocumentTab &&
+        (tab.doc.isDirty || tab.doc.hasExternalConflict)) {
       final ok = await _confirmDiscard(context, '"${tab.doc.title}"');
       if (!ok) return;
     }
@@ -955,6 +1001,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   /// (portable, store, mobile, dev builds) goes to the download page.
   Future<void> _startUpdate(UpdateInfo info) async {
     final updates = context.read<UpdateController>();
+    final ws = context.read<WorkspaceController>();
     final kind = updates.installKind;
     final oneClick = kind.canOneClick;
     final proceed = await showDialog<bool>(
@@ -962,18 +1009,32 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       builder: (_) => AlertDialog(
         icon: const Icon(Icons.system_update_alt_rounded),
         title: Text('Update to ${info.version}?'),
-        content: Text(switch (kind) {
-          InstallKind.msi ||
-          InstallKind.inno =>
-            'The installer downloads and runs the in-place upgrade. '
-                'The app closes while it installs; your settings and '
-                'print profiles are kept.',
-          InstallKind.deb => 'The package downloads and opens in your software '
-              'installer; the new version is used on the next launch.',
-          InstallKind.other =>
-            'Your install type updates from the download page — the '
-                'right installer is one click there.',
-        }),
+        content: Text(
+          switch (kind) {
+                InstallKind.msi ||
+                InstallKind.inno =>
+                  "Here's what happens: the update downloads, then Markdown "
+                      'Studio closes, installs it in the background (no admin '
+                      'prompt), and reopens. Takes a few seconds.',
+                InstallKind.deb =>
+                  'The package downloads and opens in your software installer; '
+                      'the new version is used on the next launch.',
+                InstallKind.other =>
+                  'Your install type updates from the download page — the '
+                      'right installer is one click there.',
+              } +
+              // Only a plain (session-backed) window is restored across the
+              // relaunch. A window opened directly from a file has no session,
+              // so promising hot-restore here would be false — it reopens to
+              // the previously saved session instead, so tell the user to save
+              // first.
+              (ws.sessionEnabled
+                  ? ' Your open tabs and unsaved changes are restored when you '
+                      'reopen.'
+                  : ' This window was opened directly from a file, so after the '
+                      'update it reopens to your previously saved session — '
+                      'save any unsaved changes here first.'),
+        ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -998,14 +1059,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       return;
     }
 
-    // Unsaved edits must be settled BEFORE the download: on Windows the app
-    // exits to let the installer replace it.
-    final ws = context.read<WorkspaceController>();
+    // The Windows install path exits the app, so persist the session first
+    // (it's restored on the auto-relaunch). _prepareExit hot-exits when the
+    // session saves and only prompts if it can't — same as a window close.
     final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
-    if (exitsForInstall && ws.documents.any((d) => d.isDirty)) {
-      final ok = await _confirmDiscard(context, 'One or more open documents');
-      if (!ok) return;
-      if (!mounted) return;
+    if (exitsForInstall) {
+      if (!await _prepareExit() || !mounted) return;
     }
 
     final progress = ValueNotifier<double>(-1);
@@ -1070,8 +1129,17 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         // this process id, so starting it before teardown is safe — and if
         // the spawn throws, nothing has been released yet and the editor
         // stays fully functional (socket, watchers) for the error path.
-        // Once it's running, release resources and exit; the launcher sees
-        // the pid vanish and only then starts the installer, so file
+        // Re-run the exit prep now that the download is done: the app stayed
+        // alive through it, during which a file watcher could have
+        // auto-reloaded a clean tab or surfaced a new conflict. _prepareExit
+        // ran BEFORE the download, so re-flush to capture those — and if that
+        // write now fails (e.g. the installer filled the disk), _prepareExit
+        // falls back to the discard prompt and we abort rather than relaunch
+        // onto a stale session.
+        if (!await _prepareExit() || !mounted) return;
+        // Once the installer is running, release resources and exit; the
+        // launcher only WAITS for this pid, so starting it before teardown is
+        // safe, and it starts the install only after the pid vanishes — file
         // replacement can never race shutdown.
         await updates.launchInstaller(path, kind);
         await _releaseResources();

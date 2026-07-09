@@ -34,6 +34,7 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/services/update_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
+import 'package:markdown_studio/services/session_service.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
 import 'package:markdown_studio/widgets/preview_view.dart';
@@ -743,6 +744,520 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.byType(IconButton), findsNothing);
+  });
+
+  test('Session restore round-trips tabs, unsaved buffers, and active tab',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final tmp = Directory.systemTemp.createTempSync('mdsess');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final one = File('${tmp.path}/one.md')..writeAsStringSync('# One');
+    final two = File('${tmp.path}/two.md')..writeAsStringSync('# Two');
+
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    ws.openDocument('# One', path: one.path);
+    ws.openDocument('# Two', path: two.path);
+    // Unsaved edit to a file-backed doc (editing needs a source mode).
+    ws.documents[1].setMode(EditorMode.split);
+    ws.documents[1].sourceController.text = '# Two edited';
+    // A pathless, unsaved draft.
+    ws.newDocument();
+    ws.documents[2].setMode(EditorMode.raw);
+    ws.documents[2].sourceController.text = 'draft notes';
+    // Make the middle document the active one.
+    ws.select(1);
+    await ws.flushSession();
+    expect(store.data, isNotNull);
+    ws.dispose();
+
+    // A fresh workspace (new launch) restores everything from the store.
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    // Before restore it's just the blank starter tab.
+    expect(ws2.documents.length, 1);
+    await ws2.restoreSession();
+
+    expect(ws2.documents.length, 3);
+    expect(ws2.documents[0].currentMarkdown(), '# One');
+    expect(ws2.documents[0].isDirty, isFalse);
+    expect(ws2.documents[1].currentMarkdown(), '# Two edited');
+    expect(ws2.documents[1].isDirty, isTrue); // unsaved edit preserved
+    expect(ws2.documents[2].currentMarkdown(), 'draft notes');
+    expect(ws2.documents[2].filePath, isNull); // pathless draft preserved
+    // View modes round-trip too.
+    expect(ws2.documents[1].mode, EditorMode.split);
+    expect(ws2.documents[2].mode, EditorMode.raw);
+    // The active document is restored too.
+    expect(ws2.activeDocument, same(ws2.documents[1]));
+    ws2.dispose();
+  });
+
+  test('Restore reflects a clean file changed on disk while closed', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final tmp = Directory.systemTemp.createTempSync('mdsess2');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/note.md')..writeAsStringSync('original');
+
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    ws.openDocument('original', path: f.path); // clean, saved
+    await ws.flushSession();
+    ws.dispose();
+
+    // The file changes on disk while the app is closed (git pull, sync…).
+    f.writeAsStringSync('changed on disk');
+
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    await ws2.restoreSession();
+    // The clean tab shows the CURRENT file, not the stale saved buffer — so a
+    // later save can't silently clobber the on-disk change.
+    expect(ws2.documents.last.currentMarkdown(), 'changed on disk');
+    expect(ws2.documents.last.isDirty, isFalse);
+    ws2.dispose();
+  });
+
+  test('Restore is skipped when a document was already opened', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': null,
+            'name': null,
+            'content': 'saved',
+            'dirty': true,
+            'mode': 'raw'
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // Simulate an OS file-association open before restore runs.
+    ws.openDocument('# Opened via association', path: '/tmp/assoc.md');
+    await ws.restoreSession();
+    // The just-opened document is kept; the saved session did not clobber it.
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.currentMarkdown(), '# Opened via association');
+    ws.dispose();
+  });
+
+  test('Restore re-surfaces an external conflict pending at shutdown',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc1');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // The file on disk still holds the external content the conflict is about.
+    final f = File('${tmp.path}/x.md')..writeAsStringSync('external content');
+    // The persisted marker is only a flag; restore re-reads the CURRENT disk
+    // to produce fresh conflict text (here written the old string way to prove
+    // an old session is still read as "was conflicted").
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my unsaved edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'external content',
+            'conflict': 'external content',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my unsaved edits');
+    expect(d.isDirty, isTrue);
+    // The unresolved conflict is restored (from fresh disk), not dropped.
+    expect(d.hasExternalConflict, isTrue);
+    expect(d.pendingExternalContent, 'external content');
+    ws.dispose();
+  });
+
+  test('Restore recomputes conflict text from the CURRENT file, not session',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc1b');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // The file changed AGAIN between shutdown and this launch: restore must
+    // surface the newest disk content, never the stale text from session.json.
+    final f = File('${tmp.path}/x.md')..writeAsStringSync('newest disk');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my unsaved edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'stale at shutdown',
+            'conflict': true,
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.hasExternalConflict, isTrue);
+    expect(d.pendingExternalContent, 'newest disk'); // fresh, not stale
+    ws.dispose();
+  });
+
+  test('Restore drops the conflict when the file has caught up to the buffer',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc1c');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // While closed, the file was edited to match the unsaved buffer — the
+    // conflict has resolved itself, so restore must not resurface it.
+    final f = File('${tmp.path}/x.md')..writeAsStringSync('my unsaved edits');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my unsaved edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'old disk',
+            'conflict': true,
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my unsaved edits');
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore keeps a conflict on a CLEAN doc (auto-reload off)', () async {
+    // Auto-reload OFF: a clean tab whose file changed while closed must come
+    // back with the old buffer and a Reload/Keep-mine conflict (not silently
+    // adopt disk), mirroring the live watcher.
+    SharedPreferences.setMockInitialValues({'auto_reload': false});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc2');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/y.md')..writeAsStringSync('newer disk');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'saved buffer',
+            'dirty': false, // clean, but with an unresolved external change
+            'mode': 'preview',
+            'conflict': true,
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.isDirty, isFalse); // stays clean…
+    expect(d.currentMarkdown(), 'saved buffer'); // …with its buffer intact…
+    expect(d.hasExternalConflict, isTrue); // …and the conflict preserved.
+    expect(d.pendingExternalContent, 'newer disk');
+    // Baseline tracks the CURRENT disk: a later watcher event for that same
+    // disk content must not re-fire the conflict after "Keep mine".
+    d.keepMineAfterExternalChange();
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore adopts disk for a clean tab when auto-reload is ON', () async {
+    // Auto-reload ON: a clean tab silently picks up the file's current content
+    // (no conflict), matching the live auto-reload watcher path.
+    SharedPreferences.setMockInitialValues({'auto_reload': true});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessar');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/y.md')..writeAsStringSync('newer disk');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'stale buffer',
+            'dirty': false,
+            'mode': 'preview',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'newer disk'); // adopted current file
+    expect(d.hasExternalConflict, isFalse);
+    expect(d.isDirty, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore marks a dirty tab clean when disk already matches the buffer',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessclean');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // Saved dirty, but another tool wrote the file to exactly the buffer while
+    // closed: restore must return a CLEAN tab (no phantom dirty/close prompt).
+    final f = File('${tmp.path}/doc.md')..writeAsStringSync('my edits');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'old disk',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my edits');
+    expect(d.isDirty, isFalse); // clean — disk already has this text
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore abandons to a pre-opened doc without clobbering the session',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': null, 'content': 'saved work', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final saved = store.data;
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // A document is already open (an instance-forward / early channel open)
+    // before restore runs — restore must bail AND suppress persistence.
+    ws.openDocument('a forwarded file', path: '/tmp/fwd.md');
+    await ws.restoreSession();
+    expect(ws.sessionEnabled, isFalse); // persistence suppressed for this run
+    expect(await ws.flushSession(), isTrue); // no-op success
+    expect(store.data, saved); // saved session untouched
+    ws.dispose();
+  });
+
+  test('FileSessionStore round-trips through the real filesystem', () async {
+    final dir = Directory.systemTemp.createTempSync('mdfss');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = FileSessionStore(directory: dir);
+    expect(await store.read(), isNull); // nothing yet
+    await store.write('{"v":1}');
+    expect(await store.read(), '{"v":1}');
+    await store.clear();
+    expect(await store.read(), isNull);
+  });
+
+  test('FileSessionStore read falls back to the temp after a crash mid-rename',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('mdfss2');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = FileSessionStore(directory: dir);
+    // Simulate a crash right after a non-atomic rename removed the destination
+    // but before it moved the temp into place: only the .tmp exists, complete.
+    File('${dir.path}/session.json.tmp').writeAsStringSync('{"complete":true}');
+    expect(await store.read(), '{"complete":true}'); // recovered, not lost
+  });
+
+  test('FileSessionStore prefers the main file over a stale temp', () async {
+    final dir = Directory.systemTemp.createTempSync('mdfss3');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final store = FileSessionStore(directory: dir);
+    File('${dir.path}/session.json').writeAsStringSync('MAIN');
+    File('${dir.path}/session.json.tmp').writeAsStringSync('STALE');
+    expect(await store.read(), 'MAIN'); // temp is only a fallback
+    // clear() also removes the stale temp so it can't resurrect the session.
+    await store.clear();
+    expect(await store.read(), isNull);
+  });
+
+  test('Malformed session entries are skipped, not fatal', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': 42, 'content': 'bad'}, // non-string path → would throw
+          {'path': null, 'content': 'good', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    // The malformed entry is skipped; the valid one restores.
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.currentMarkdown(), 'good');
+    ws.dispose();
+  });
+
+  test('A non-list docs value degrades to an empty restore', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    // A corrupt/forward-incompatible session where docs isn't a list must not
+    // throw — restore leaves the fresh blank document in place.
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({'version': 1, 'active': 0, 'docs': 'oops'});
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.isPristine, isTrue);
+    ws.dispose();
+  });
+
+  test('A non-int active index degrades to tab 0, not a launch crash',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    // A corrupt/forward-version session where active is a string must not throw
+    // (restoreSession is awaited before runApp — a crash here blocks launch).
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 'oops',
+        'docs': [
+          {'path': null, 'content': 'a', 'dirty': true, 'mode': 'raw'},
+          {'path': null, 'content': 'b', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    expect(ws.documents.length, 2); // both tabs restored…
+    expect(ws.activeIndex, 0); // …and active fell back to tab 0
+    ws.dispose();
+  });
+
+  test('A dirty tab does NOT conflict if the file already matches the buffer',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessnc');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // While closed, another tool saved the file to exactly the unsaved buffer,
+    // so there is nothing to reconcile — no false conflict should resurface.
+    final f = File('${tmp.path}/doc.md')..writeAsStringSync('my edits');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'old disk',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my edits');
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('flushSession reports a write failure so the caller can warn', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws =
+        WorkspaceController(prefs, sessionStore: _ThrowingSessionStore());
+    ws.openDocument('unsaved', path: '/tmp/x.md');
+    expect(await ws.flushSession(), isFalse);
+    ws.dispose();
+  });
+
+  test('A blank starter tab is not persisted as real work', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // Only the default pristine Untitled is open.
+    await ws.flushSession();
+    final snap = jsonDecode(store.data!) as Map<String, dynamic>;
+    expect(snap['docs'], isEmpty); // nothing real to restore
+    ws.dispose();
+  });
+
+  test('A dirty restored tab conflicts if its file changed while closed',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final tmp = Directory.systemTemp.createTempSync('mdsess3');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/doc.md')..writeAsStringSync('v1 on disk');
+
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    ws.openDocument('v1 on disk', path: f.path);
+    ws.documents.last.setMode(EditorMode.split);
+    ws.documents.last.sourceController.text = 'my unsaved edit';
+    await ws.flushSession();
+    ws.dispose();
+
+    // The file is changed by another tool while the app is closed.
+    f.writeAsStringSync('v2 changed externally');
+
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    await ws2.restoreSession();
+    final d = ws2.documents.last;
+    expect(d.currentMarkdown(), 'my unsaved edit'); // buffer preserved
+    expect(d.isDirty, isTrue);
+    // The external change is surfaced as a conflict, not silently ignored.
+    expect(d.hasExternalConflict, isTrue);
+    expect(d.pendingExternalContent, 'v2 changed externally');
+    ws2.dispose();
+  });
+
+  test('Session restore is a no-op with no saved session', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs, sessionStore: _FakeSessionStore());
+    await ws.restoreSession();
+    // The fresh blank document is left in place.
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.isPristine, isTrue);
+    ws.dispose();
   });
 
   testWidgets('A table shows a Copy table chip that copies TSV',
@@ -1963,4 +2478,31 @@ void main() {
     final reloaded = WorkspaceController(prefs);
     expect(reloaded.autoReload, isFalse);
   });
+}
+
+/// In-memory [SessionStore] for session-restore tests (no filesystem).
+class _FakeSessionStore implements SessionStore {
+  String? data;
+
+  @override
+  Future<String?> read() async => data;
+
+  @override
+  Future<void> write(String d) async => data = d;
+
+  @override
+  Future<void> clear() async => data = null;
+}
+
+/// A [SessionStore] whose writes always fail (disk full / unwritable), used to
+/// verify the flush-failure fallback.
+class _ThrowingSessionStore implements SessionStore {
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String d) async => throw const FileSystemException('full');
+
+  @override
+  Future<void> clear() async {}
 }

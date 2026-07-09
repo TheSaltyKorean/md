@@ -41,6 +41,10 @@ class DocumentController extends ChangeNotifier {
   /// Display name for documents with no re-writable path (e.g. mobile opens).
   String? _displayName;
 
+  /// The raw display name (null unless a pathless doc was given one), used to
+  /// round-trip the tab through session restore.
+  String? get displayName => _displayName;
+
   String get title =>
       _filePath != null ? p.basename(_filePath!) : (_displayName ?? 'Untitled');
 
@@ -64,6 +68,12 @@ class DocumentController extends ChangeNotifier {
   int _editorEpoch = 0;
   int get editorEpoch => _editorEpoch;
 
+  /// Ticks on every genuine content edit (source or WYSIWYG). Unlike the
+  /// dirty-flag notification — which fires only on the clean→dirty transition
+  /// — this fires for *every* edit, so a session-persistence listener can
+  /// re-arm its debounce on continued typing (not just the first keystroke).
+  final ValueNotifier<int> contentTick = ValueNotifier<int>(0);
+
   StreamSubscription<dynamic>? _txnSub;
   bool _suppressDirty = false;
 
@@ -81,6 +91,12 @@ class DocumentController extends ChangeNotifier {
 
   // --- External-change handling ----------------------------------------------
   String? _lastSyncedContent;
+
+  /// The disk content this document is last known to be in sync with (the
+  /// baseline external edits are compared against). Persisted for a dirty tab
+  /// so session restore can tell whether the file changed while closed.
+  String? get syncedContent => _lastSyncedContent;
+
   StreamSubscription<WatchEvent>? _watchSub;
 
   String? _pendingExternalContent;
@@ -113,6 +129,7 @@ class DocumentController extends ChangeNotifier {
       if (!_suppressDirty) {
         _wysiwygEdited = true;
         _markDirty();
+        contentTick.value++;
       }
     });
   }
@@ -126,7 +143,10 @@ class DocumentController extends ChangeNotifier {
     final textChanged = text != _lastSourceText;
     _lastSourceText = text;
     // Both source modes (split and raw) edit [sourceController] directly.
-    if (_mode.isSource && !_suppressDirty && textChanged) _markDirty();
+    if (_mode.isSource && !_suppressDirty && textChanged) {
+      _markDirty();
+      contentTick.value++;
+    }
   }
 
   void _markDirty() {
@@ -147,6 +167,9 @@ class DocumentController extends ChangeNotifier {
     String? path,
     String? displayName,
     bool markDirty = false,
+    String? restoredBaseline,
+    String? restoredConflict,
+    bool fromRestore = false,
   }) {
     _suppressDirty = true;
     // A fresh buffer replaces both representations, so nothing has been edited
@@ -161,7 +184,15 @@ class DocumentController extends ChangeNotifier {
     _suppressDirty = false;
     _pendingExternalContent = null;
     _startWatching(path);
-    if (markDirty) {
+    if (fromRestore) {
+      // Session restore already read the current file and decided this tab's
+      // dirty state, baseline, and conflict in one place — apply them verbatim
+      // (no second disk read that could reach a different verdict). A null
+      // [restoredConflict] means restore determined there is no conflict.
+      _dirty = markDirty;
+      _lastSyncedContent = restoredBaseline ?? content;
+      _pendingExternalContent = restoredConflict;
+    } else if (markDirty) {
       _dirty = true;
       String? disk;
       if (path != null) {
@@ -169,7 +200,18 @@ class DocumentController extends ChangeNotifier {
           disk = File(path).readAsStringSync();
         } catch (_) {/* file may not exist */}
       }
-      _lastSyncedContent = disk ?? content;
+      if (restoredBaseline != null) {
+        // Restoring an unsaved buffer: the baseline is what the file held at
+        // shutdown. If the file changed on disk while the app was closed,
+        // surface it as an external conflict so a later Save can't silently
+        // clobber that change.
+        _lastSyncedContent = restoredBaseline;
+        if (disk != null && disk != restoredBaseline) {
+          _pendingExternalContent = disk;
+        }
+      } else {
+        _lastSyncedContent = disk ?? content;
+      }
     } else {
       _dirty = false;
       _lastSyncedContent = content;
@@ -317,6 +359,7 @@ class DocumentController extends ChangeNotifier {
     _txnSub?.cancel();
     sourceController.removeListener(_onSourceChanged);
     sourceController.dispose();
+    contentTick.dispose();
     super.dispose();
   }
 }

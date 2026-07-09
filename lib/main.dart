@@ -12,6 +12,7 @@ import 'app.dart';
 import 'services/file_association_service.dart';
 import 'services/open_file_channel.dart';
 import 'services/print_profile_service.dart';
+import 'services/session_service.dart';
 import 'services/single_instance_service.dart';
 import 'services/update_service.dart';
 import 'state/theme_controller.dart';
@@ -39,7 +40,21 @@ Future<void> main(List<String> args) async {
   }
 
   final prefs = await SharedPreferences.getInstance();
-  final workspace = WorkspaceController(prefs);
+  final handoffPath = _flagValue(args, '--handoff');
+  final fileArgs = _fileArgs(args);
+  // The session (restore + persist) belongs only to a **plain** primary
+  // launch. It's disabled for:
+  //  - torn-off (`--new-window` / `--handoff`) windows — a separate process
+  //    that would clobber the app-wide session.json (last writer wins);
+  //  - a launch that names files (double-click a `.md`) — that should open
+  //    exactly those files, and must not overwrite the saved session's
+  //    unsaved buffers with only the requested file.
+  // The updater's silent relaunch passes no args, so it's a plain launch and
+  // restores everything. (Mobile has no argv, so mobile is always plain.)
+  final isTornOffWindow = forceNewWindow || handoffPath != null;
+  final plainLaunch = !isTornOffWindow && fileArgs.isEmpty;
+  final workspace = WorkspaceController(prefs,
+      sessionStore: plainLaunch ? FileSessionStore() : null);
 
   if (single.isSupported) {
     try {
@@ -51,19 +66,25 @@ Future<void> main(List<String> args) async {
     });
   }
 
-  // On Android/iOS/macOS, document opens arrive as intents/URLs rather than
-  // argv — wire up the platform channel that receives them.
-  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
-    await OpenFileChannel(workspace).init();
-  }
-
-  // A torn-off tab is handed off via a temp JSON file carrying its (possibly
-  // unsaved) content, so edits aren't lost when it opens in the new window.
-  final handoffPath = _flagValue(args, '--handoff');
   if (handoffPath != null) {
     await _openHandoff(handoffPath, workspace);
+  } else if (fileArgs.isNotEmpty) {
+    // Named files: open exactly those (session persistence is off, so the
+    // previously saved session survives untouched for the next plain launch).
+    await _openPaths(fileArgs, workspace);
   } else {
-    await _openPaths(_fileArgs(args), workspace);
+    // Plain launch (incl. the updater's silent relaunch). Restore the saved
+    // session FIRST, then pull any launch document from the platform channel
+    // (Android/iOS/macOS deliver document-open via a channel, not argv). The
+    // launch doc is ADDED as an active tab alongside the restored tabs — never
+    // replacing them — and session persistence stays on, so a mobile
+    // swipe-away (which only flushes the session, it can't prompt) still
+    // protects edits to the quick-opened document. Desktop argv launches are
+    // handled separately above (session off, close prompt as the backstop).
+    await workspace.restoreSession();
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      await OpenFileChannel(workspace).init();
+    }
   }
 
   runApp(
