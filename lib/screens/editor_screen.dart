@@ -346,19 +346,24 @@ class _EditorScreenState extends State<EditorScreen>
     // actions collapse into the overflow menu so the app bar can't overflow.
     final isNarrow = MediaQuery.sizeOf(context).width < 720;
     return PopScope(
-      // With session persistence, Android back is hot exit — everything is
-      // restored next launch, so allow the pop and flush on the way out. Only
-      // a window without persistence guards unsaved changes with a prompt.
-      canPop: ws.sessionEnabled || !anyDirty,
+      // Guard Android back whenever there are unsaved changes; the handler
+      // exits only after the session is safely WRITTEN (or, if that write
+      // fails or persistence is off, the user confirms discarding). Gating
+      // the exit on a successful flush means a disk-full/unwritable
+      // app-support dir can't silently drop unsaved work.
+      canPop: !anyDirty,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) {
-          // Popped (session-persisted or clean): save before teardown.
-          if (ws.sessionEnabled) await ws.flushSession();
-          return;
+        if (didPop) return;
+        if (ws.sessionEnabled) {
+          if (await ws.flushSession()) {
+            await SystemNavigator.pop(); // saved — safe to exit
+            return;
+          }
         }
-        // Not popped (unsaved + no persistence): confirm, then exit — canPop
-        // stays false, so popping the route would just re-trigger this guard.
-        final ok = await _confirmDiscard(context, 'One or more open documents');
+        if (!mounted) return;
+        // canPop stays false, so popping the route would just re-trigger this
+        // guard; exit the app explicitly instead.
+        final ok = await _confirmDiscard(this.context, 'One or more open docs');
         if (ok) await SystemNavigator.pop();
       },
       // Find shortcuts wrap the whole Scaffold (not just the body) so Ctrl/Cmd+F,

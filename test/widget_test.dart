@@ -876,6 +876,55 @@ void main() {
     ws.dispose();
   });
 
+  test('Restore keeps a conflict on a CLEAN doc (auto-reload off)', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': '/tmp/y.md',
+            'name': null,
+            'content': 'saved buffer',
+            'dirty': false, // clean, but with an unresolved external change
+            'mode': 'preview',
+            'synced': 'old disk',
+            'conflict': 'newer disk',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.isDirty, isFalse); // stays clean…
+    expect(d.currentMarkdown(), 'saved buffer'); // …with its buffer intact…
+    expect(d.hasExternalConflict, isTrue); // …and the conflict preserved.
+    expect(d.pendingExternalContent, 'newer disk');
+    ws.dispose();
+  });
+
+  test('Malformed session entries are skipped, not fatal', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': 42, 'content': 'bad'}, // non-string path → would throw
+          {'path': null, 'content': 'good', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    // The malformed entry is skipped; the valid one restores.
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.currentMarkdown(), 'good');
+    ws.dispose();
+  });
+
   test('flushSession reports a write failure so the caller can warn', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();

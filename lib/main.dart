@@ -73,14 +73,15 @@ Future<void> main(List<String> args) async {
     // previously saved session survives untouched for the next plain launch).
     await _openPaths(fileArgs, workspace);
   } else {
-    // Plain launch (incl. the updater's silent relaunch): reopen the previous
-    // session, then let the platform channel focus a launch document on top.
-    await workspace.restoreSession();
-    // On Android/iOS/macOS, document opens arrive as intents/URLs rather than
-    // argv — wire up the platform channel (may open the launch document).
+    // Plain launch (incl. the updater's silent relaunch). On
+    // Android/iOS/macOS a launch document arrives via the platform channel,
+    // not argv — init it FIRST so, if the app was launched to open a file,
+    // that document is present before restore, whose freshness guard then
+    // leaves it alone. With no launch document, restore reopens the session.
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       await OpenFileChannel(workspace).init();
     }
+    await workspace.restoreSession();
   }
 
   runApp(

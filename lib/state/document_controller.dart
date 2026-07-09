@@ -183,7 +183,15 @@ class DocumentController extends ChangeNotifier {
     _suppressDirty = false;
     _pendingExternalContent = null;
     _startWatching(path);
-    if (markDirty) {
+    if (restoredConflict != null) {
+      // An external-change conflict was already pending at shutdown (a doc
+      // can carry one whether dirty or, with auto-reload off, clean) —
+      // re-surface it exactly so it isn't silently cleared, which would let
+      // a later Save overwrite the unreconciled external change.
+      _dirty = markDirty;
+      _lastSyncedContent = restoredBaseline ?? content;
+      _pendingExternalContent = restoredConflict;
+    } else if (markDirty) {
       _dirty = true;
       String? disk;
       if (path != null) {
@@ -191,13 +199,7 @@ class DocumentController extends ChangeNotifier {
           disk = File(path).readAsStringSync();
         } catch (_) {/* file may not exist */}
       }
-      if (restoredConflict != null) {
-        // An external-change conflict was already pending at shutdown —
-        // re-surface it exactly, so it isn't silently cleared (which would
-        // let a later Save overwrite the unreconciled external change).
-        _lastSyncedContent = restoredBaseline ?? content;
-        _pendingExternalContent = restoredConflict;
-      } else if (restoredBaseline != null) {
+      if (restoredBaseline != null) {
         // Restoring an unsaved buffer: the baseline is what the file held at
         // shutdown. If the file changed on disk while the app was closed,
         // surface it as an external conflict so a later Save can't silently

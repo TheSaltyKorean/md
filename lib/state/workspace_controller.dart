@@ -384,12 +384,20 @@ class WorkspaceController extends ChangeNotifier {
     _sessionTimer?.cancel();
     final store = _sessionStore;
     if (store == null) return true;
-    try {
-      await store.write(jsonEncode(sessionSnapshot()));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    final json = jsonEncode(sessionSnapshot());
+    // Run through the same _track chain as the debounced saves, so a forced
+    // flush can't complete BEFORE an older queued save and then be
+    // overwritten by it (last-writer-wins) once the caller awaits
+    // pendingWrites.
+    var ok = true;
+    await _track(() async {
+      try {
+        await store.write(json);
+      } catch (_) {
+        ok = false;
+      }
+    });
+    return ok;
   }
 
   /// Rebuild the tabs from a previously saved session. No-op when session
@@ -422,33 +430,48 @@ class WorkspaceController extends ChangeNotifier {
     final restored = <_RestoredDoc>[];
     for (final entry in entries) {
       if (entry is! Map) continue;
-      final path = entry['path'] as String?;
-      final dirty = (entry['dirty'] as bool?) ?? false;
-      var content = (entry['content'] as String?) ?? '';
-      var markDirty = dirty;
-      if (!dirty && path != null) {
-        try {
-          content = await File(path).readAsString();
-        } catch (_) {
-          // File gone/unreadable: keep the saved buffer, but as *unsaved* so
-          // it isn't silently treated as matching a file that isn't there.
-          markDirty = true;
+      try {
+        final path = entry['path'] as String?;
+        final dirty = (entry['dirty'] as bool?) ?? false;
+        final conflict = entry['conflict'] as String?;
+        var content = (entry['content'] as String?) ?? '';
+        var markDirty = dirty;
+        // A clean tab with NO pending conflict reflects the CURRENT file
+        // (it may have changed while closed). A tab with a conflict, or a
+        // dirty tab, keeps its saved buffer so the unsaved/unreconciled
+        // state survives.
+        if (!dirty && conflict == null && path != null) {
+          try {
+            content = await File(path).readAsString();
+          } catch (_) {
+            // File gone/unreadable: keep the saved buffer, but as *unsaved*
+            // so it isn't silently treated as matching a missing file.
+            markDirty = true;
+          }
         }
+        restored.add(_RestoredDoc(
+          path: path,
+          name: entry['name'] as String?,
+          content: content,
+          markDirty: markDirty,
+          mode: entry['mode'] as String?,
+          // Disk baseline, so loadMarkdown can flag a conflict if the file
+          // changed while closed.
+          baseline: entry['synced'] as String?,
+          // A conflict that was already pending at shutdown.
+          conflict: conflict,
+        ));
+      } catch (_) {
+        // Malformed/forward-incompatible entry (e.g. a non-string field):
+        // skip it rather than aborting the whole restore.
       }
-      restored.add(_RestoredDoc(
-        path: path,
-        name: entry['name'] as String?,
-        content: content,
-        markDirty: markDirty,
-        mode: entry['mode'] as String?,
-        // The disk baseline for a dirty tab, so loadMarkdown can flag a
-        // conflict if the file changed while the app was closed.
-        baseline: dirty ? entry['synced'] as String? : null,
-        // An external-change conflict that was already pending at shutdown.
-        conflict: entry['conflict'] as String?,
-      ));
     }
     if (restored.isEmpty) return;
+
+    // The disk reads above are async; a forwarded open-file request could
+    // have arrived meanwhile and added a real document. Re-check freshness
+    // so we don't clobber it.
+    if (documents.any((d) => !d.isPristine)) return;
 
     // Replace the initial blank tab(s).
     for (final t in _tabs) {
