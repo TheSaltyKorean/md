@@ -109,8 +109,10 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
 
   final ThemeData theme;
 
-  @override
-  bool isBlockElement() => true;
+  // No isBlockElement() override: `pre` is already a built-in block tag, and
+  // returning true here would append 'pre' to the package's library-level
+  // block-tag list on every parse (i.e. every keystroke in the split view),
+  // growing it unbounded and slowing all later tag checks.
 
   @override
   Widget visitElementAfterWithContext(
@@ -134,14 +136,18 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
 
     return Stack(
       children: [
-        // Long lines scroll horizontally rather than soft-wrapping (matching
-        // the package's default code-block behaviour, which this builder
-        // replaces). Extra right padding leaves room so short blocks don't
-        // run under the copy button; the button itself stays pinned.
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.fromLTRB(14, 14, 44, 14),
-          child: Text(code, style: codeStyle, softWrap: false),
+        // The button gutter is reserved OUTSIDE the scroll view, so a long
+        // line's start never paints under the button at scroll offset 0 (the
+        // scrollable viewport simply ends before the button). Long lines
+        // scroll horizontally rather than soft-wrapping, matching the
+        // package's default code-block behaviour that this builder replaces.
+        Padding(
+          padding: const EdgeInsets.only(right: 36),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.all(14),
+            child: Text(code, style: codeStyle, softWrap: false),
+          ),
         ),
         Positioned(
           top: 4,
