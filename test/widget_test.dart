@@ -5,10 +5,25 @@ import 'dart:typed_data';
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:image/image.dart' as img;
 import 'package:flutter/material.dart'
-    show DropdownButtonFormField, MaterialApp, PopupMenuButton, Scaffold;
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
+    show
+        DropdownButtonFormField,
+        IconButton,
+        MaterialApp,
+        PopupMenuButton,
+        Scaffold,
+        SelectionArea;
+import 'package:flutter/services.dart'
+    show LogicalKeyboardKey, MethodCall, SystemChannels;
 import 'package:flutter/widgets.dart'
-    show MediaQuery, Size, SizedBox, TextScaler, TextSelection, Widget;
+    show
+        Axis,
+        MediaQuery,
+        SingleChildScrollView,
+        Size,
+        SizedBox,
+        TextScaler,
+        TextSelection,
+        Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -635,6 +650,68 @@ void main() {
     // The launch check also surfaces an explicit notification, not just
     // the chip (field feedback: the chip alone went unnoticed).
     expect(find.text('Markdown Studio 9.9.9 is available.'), findsOneWidget);
+  });
+
+  testWidgets('Preview is wrapped in a SelectionArea for document selection',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PreviewView(markdown: '# Hi\n\nSome prose.')),
+    ));
+    await tester.pumpAndSettle();
+    // Unified selection across the whole document (not per-block).
+    expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('Code blocks show a copy button that copies the block',
+      (tester) async {
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    const code = "void main() {\n  print('hi');\n}";
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(markdown: 'Intro.\n\n```dart\n$code\n```\n'),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final button = find.byTooltip('Copy code');
+    expect(button, findsOneWidget);
+
+    // Long lines scroll horizontally rather than soft-wrapping.
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is SingleChildScrollView && w.scrollDirection == Axis.horizontal),
+        findsWidgets);
+
+    await tester.tap(button);
+    await tester.pump();
+
+    final copied = calls.firstWhere((c) => c.method == 'Clipboard.setData');
+    // The exact block text, no fence markers and no trailing newline.
+    expect((copied.arguments as Map)['text'], code);
+
+    // The confirmation state flips to a check, then back.
+    expect(find.byTooltip('Copied'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(find.byTooltip('Copy code'), findsOneWidget);
+  });
+
+  testWidgets('Inline code does not get a copy button', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+          body: PreviewView(markdown: 'A sentence with `inline` code.')),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.byType(IconButton), findsNothing);
   });
 
   test('Print profiles seed with built-ins', () async {
