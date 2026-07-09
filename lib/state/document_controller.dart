@@ -169,6 +169,7 @@ class DocumentController extends ChangeNotifier {
     bool markDirty = false,
     String? restoredBaseline,
     String? restoredConflict,
+    bool fromRestore = false,
   }) {
     _suppressDirty = true;
     // A fresh buffer replaces both representations, so nothing has been edited
@@ -183,11 +184,11 @@ class DocumentController extends ChangeNotifier {
     _suppressDirty = false;
     _pendingExternalContent = null;
     _startWatching(path);
-    if (restoredConflict != null) {
-      // An external-change conflict was already pending at shutdown (a doc
-      // can carry one whether dirty or, with auto-reload off, clean) —
-      // re-surface it exactly so it isn't silently cleared, which would let
-      // a later Save overwrite the unreconciled external change.
+    if (fromRestore) {
+      // Session restore already read the current file and decided this tab's
+      // dirty state, baseline, and conflict in one place — apply them verbatim
+      // (no second disk read that could reach a different verdict). A null
+      // [restoredConflict] means restore determined there is no conflict.
       _dirty = markDirty;
       _lastSyncedContent = restoredBaseline ?? content;
       _pendingExternalContent = restoredConflict;

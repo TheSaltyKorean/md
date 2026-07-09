@@ -849,13 +849,20 @@ void main() {
       () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc1');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // The file on disk still holds the external content the conflict is about.
+    final f = File('${tmp.path}/x.md')..writeAsStringSync('external content');
+    // The persisted marker is only a flag; restore re-reads the CURRENT disk
+    // to produce fresh conflict text (here written the old string way to prove
+    // an old session is still read as "was conflicted").
     final store = _FakeSessionStore()
       ..data = jsonEncode({
         'version': 1,
         'active': 0,
         'docs': [
           {
-            'path': '/tmp/x.md',
+            'path': f.path,
             'name': null,
             'content': 'my unsaved edits',
             'dirty': true,
@@ -870,28 +877,96 @@ void main() {
     final d = ws.documents.last;
     expect(d.currentMarkdown(), 'my unsaved edits');
     expect(d.isDirty, isTrue);
-    // The unresolved conflict is restored, not silently dropped.
+    // The unresolved conflict is restored (from fresh disk), not dropped.
     expect(d.hasExternalConflict, isTrue);
     expect(d.pendingExternalContent, 'external content');
     ws.dispose();
   });
 
-  test('Restore keeps a conflict on a CLEAN doc (auto-reload off)', () async {
+  test('Restore recomputes conflict text from the CURRENT file, not session',
+      () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc1b');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // The file changed AGAIN between shutdown and this launch: restore must
+    // surface the newest disk content, never the stale text from session.json.
+    final f = File('${tmp.path}/x.md')..writeAsStringSync('newest disk');
     final store = _FakeSessionStore()
       ..data = jsonEncode({
         'version': 1,
         'active': 0,
         'docs': [
           {
-            'path': '/tmp/y.md',
+            'path': f.path,
+            'name': null,
+            'content': 'my unsaved edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'stale at shutdown',
+            'conflict': true,
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.hasExternalConflict, isTrue);
+    expect(d.pendingExternalContent, 'newest disk'); // fresh, not stale
+    ws.dispose();
+  });
+
+  test('Restore drops the conflict when the file has caught up to the buffer',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc1c');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // While closed, the file was edited to match the unsaved buffer — the
+    // conflict has resolved itself, so restore must not resurface it.
+    final f = File('${tmp.path}/x.md')..writeAsStringSync('my unsaved edits');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my unsaved edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'old disk',
+            'conflict': true,
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my unsaved edits');
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore keeps a conflict on a CLEAN doc (auto-reload off)', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessc2');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/y.md')..writeAsStringSync('newer disk');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
             'name': null,
             'content': 'saved buffer',
             'dirty': false, // clean, but with an unresolved external change
             'mode': 'preview',
-            'synced': 'old disk',
-            'conflict': 'newer disk',
+            'conflict': true,
           },
         ],
       });
@@ -922,6 +997,36 @@ void main() {
     // The malformed entry is skipped; the valid one restores.
     expect(ws.documents.length, 1);
     expect(ws.documents.first.currentMarkdown(), 'good');
+    ws.dispose();
+  });
+
+  test('A non-list docs value degrades to an empty restore', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    // A corrupt/forward-incompatible session where docs isn't a list must not
+    // throw — restore leaves the fresh blank document in place.
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({'version': 1, 'active': 0, 'docs': 'oops'});
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.isPristine, isTrue);
+    ws.dispose();
+  });
+
+  test('suspendSession stops persistence and reports disabled', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    expect(ws.sessionEnabled, isTrue);
+    ws.openDocument('a launch document', path: '/tmp/launch.md');
+    // Simulate a mobile launch-document open: suspend, then any flush is a
+    // no-op that leaves the previously saved session untouched.
+    ws.suspendSession();
+    expect(ws.sessionEnabled, isFalse);
+    expect(await ws.flushSession(), isTrue); // no-op success
+    expect(store.data, isNull); // nothing written over the saved session
     ws.dispose();
   });
 

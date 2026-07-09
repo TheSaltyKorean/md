@@ -341,30 +341,22 @@ class _EditorScreenState extends State<EditorScreen>
       });
     }
 
-    final anyDirty = ws.documents.any((d) => d.isDirty);
     // On narrow (phone) widths the mode selector moves to its own bar and most
     // actions collapse into the overflow menu so the app bar can't overflow.
     final isNarrow = MediaQuery.sizeOf(context).width < 720;
     return PopScope(
-      // Guard Android back whenever there are unsaved changes; the handler
-      // exits only after the session is safely WRITTEN (or, if that write
-      // fails or persistence is off, the user confirms discarding). Gating
-      // the exit on a successful flush means a disk-full/unwritable
-      // app-support dir can't silently drop unsaved work.
-      canPop: !anyDirty,
+      // Always intercept Android back so we flush the session before the app
+      // exits — even when every doc is clean, the session still holds unsaved
+      // state (active tab, per-tab view mode, adopted clean content) that a
+      // debounced save may not have written yet. _prepareExit writes it and
+      // only reports success once it's safely on disk (or, if the write fails
+      // with unsaved work, the user confirms discarding).
+      canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
-        if (ws.sessionEnabled) {
-          if (await ws.flushSession()) {
-            await SystemNavigator.pop(); // saved — safe to exit
-            return;
-          }
+        if (await _prepareExit() && mounted) {
+          await SystemNavigator.pop();
         }
-        if (!mounted) return;
-        // canPop stays false, so popping the route would just re-trigger this
-        // guard; exit the app explicitly instead.
-        final ok = await _confirmDiscard(this.context, 'One or more open docs');
-        if (ok) await SystemNavigator.pop();
       },
       // Find shortcuts wrap the whole Scaffold (not just the body) so Ctrl/Cmd+F,
       // Ctrl/Cmd+H and Esc fire regardless of which chrome control (app bar,

@@ -95,11 +95,22 @@ class WorkspaceController extends ChangeNotifier {
   /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
   Timer? _sessionTimer;
+  bool _sessionSuspended = false;
 
   /// Whether this workspace persists/restores its session. When false (a
-  /// torn-off window), closing with unsaved work still needs a discard prompt
-  /// — hot exit only applies when the session is actually saved.
-  bool get sessionEnabled => _sessionStore != null;
+  /// torn-off window, or a run that opened a launch document — see
+  /// [suspendSession]), closing with unsaved work still needs a discard
+  /// prompt: hot exit only applies when the session is actually saved.
+  bool get sessionEnabled => _sessionStore != null && !_sessionSuspended;
+
+  /// Turn off session persistence for the rest of this run. Used when a launch
+  /// document was opened via the platform channel (a "quick open this file"
+  /// launch, like a desktop file argument), so this run doesn't overwrite the
+  /// saved session's tabs with only the requested file.
+  void suspendSession() {
+    _sessionSuspended = true;
+    _sessionTimer?.cancel();
+  }
 
   final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
@@ -354,26 +365,26 @@ class WorkspaceController extends ChangeNotifier {
         // For a dirty file-backed tab, the disk content it was last in sync
         // with — so restore can tell whether the file changed while closed.
         if (d.isDirty && d.filePath != null) 'synced': d.syncedContent,
-        // An unresolved external-change conflict, so it survives the restart
-        // instead of being silently cleared (which would let a later Save
-        // overwrite the external change).
-        if (d.hasExternalConflict) 'conflict': d.pendingExternalContent,
+        // Record only THAT an external-change conflict was pending, never the
+        // conflicting text: it can go stale between shutdown and the next
+        // launch, so restore re-reads the current file to produce fresh
+        // conflict content (and drops the conflict if the file has caught up).
+        if (d.hasExternalConflict) 'conflict': true,
       });
     }
     return {'version': 1, 'active': activeDoc, 'docs': docs};
   }
 
   void _scheduleSessionSave() {
-    if (_sessionStore == null) return;
+    if (!sessionEnabled) return;
     _sessionTimer?.cancel();
     _sessionTimer = Timer(_sessionDebounce, _saveSession);
   }
 
   void _saveSession() {
-    final store = _sessionStore;
-    if (store == null) return;
+    if (!sessionEnabled) return;
     final json = jsonEncode(sessionSnapshot());
-    _track(() => store.write(json));
+    _track(() => _sessionStore!.write(json));
   }
 
   /// Force an immediate session write, awaiting the result, and stop the
@@ -383,7 +394,7 @@ class WorkspaceController extends ChangeNotifier {
   Future<bool> flushSession() async {
     _sessionTimer?.cancel();
     final store = _sessionStore;
-    if (store == null) return true;
+    if (store == null || _sessionSuspended) return true;
     final json = jsonEncode(sessionSnapshot());
     // Run through the same _track chain as the debounced saves, so a forced
     // flush can't complete BEFORE an older queued save and then be
@@ -419,46 +430,74 @@ class WorkspaceController extends ChangeNotifier {
     } catch (_) {
       return; // absent or corrupt — keep the fresh blank document
     }
-    final entries = (data['docs'] as List?) ?? const [];
+    // `docs` may be missing or (in a corrupt/forward-incompatible file) not a
+    // list — guard the type instead of casting so a bad value degrades to an
+    // empty restore rather than throwing.
+    final docsRaw = data['docs'];
+    final entries = docsRaw is List ? docsRaw : const [];
     if (entries.isEmpty) return;
 
-    // Resolve each tab's content BEFORE mutating the workspace (the disk
-    // reads are async): a clean file-backed tab reflects the CURRENT file,
-    // which may have changed while closed — restoring the stale saved buffer
-    // as a clean baseline would let a later save silently clobber those
-    // changes with no conflict shown. Unsaved (dirty) tabs keep their buffer.
+    // Resolve each tab BEFORE mutating the workspace (the disk reads are
+    // async). This is the SINGLE place that reads the current file and decides
+    // each restored tab's content, baseline, and conflict — loadMarkdown then
+    // applies that decision verbatim (see fromRestore) rather than re-reading
+    // disk itself, so the two can't disagree.
     final restored = <_RestoredDoc>[];
     for (final entry in entries) {
       if (entry is! Map) continue;
       try {
         final path = entry['path'] as String?;
         final dirty = (entry['dirty'] as bool?) ?? false;
-        final conflict = entry['conflict'] as String?;
+        // Only whether a conflict was pending — never trust persisted text
+        // (tolerate an old session that stored the string form: any non-null
+        // value means "was conflicted").
+        final hadConflict = entry['conflict'] != null;
+        final synced = entry['synced'] as String?;
         var content = (entry['content'] as String?) ?? '';
         var markDirty = dirty;
-        // A clean tab with NO pending conflict reflects the CURRENT file
-        // (it may have changed while closed). A tab with a conflict, or a
-        // dirty tab, keeps its saved buffer so the unsaved/unreconciled
-        // state survives.
-        if (!dirty && conflict == null && path != null) {
+        var baseline = synced;
+        String? conflict;
+
+        if (path != null) {
+          String? disk;
           try {
-            content = await File(path).readAsString();
+            disk = await File(path).readAsString();
           } catch (_) {
-            // File gone/unreadable: keep the saved buffer, but as *unsaved*
-            // so it isn't silently treated as matching a missing file.
-            markDirty = true;
+            disk = null; // file gone/unreadable
+          }
+          if (disk == null) {
+            // No file to reconcile against. A clean tab that merely tracked
+            // the file keeps its buffer, but marked unsaved so it isn't
+            // treated as matching a now-missing file.
+            if (!dirty) markDirty = true;
+          } else if (!dirty && !hadConflict) {
+            // Clean, unconflicted: adopt the CURRENT file (it may have changed
+            // while closed — there are no local edits to lose).
+            content = disk;
+            baseline = disk;
+          } else if (hadConflict) {
+            // A conflict was pending at shutdown. The pending external content
+            // IS whatever is on disk now (re-read fresh, never the stale saved
+            // copy); drop the conflict only if the file has caught up to this
+            // buffer. synced was polluted to the conflicting disk, so the
+            // buffer itself is the comparison point here.
+            baseline = synced ?? content;
+            if (disk != content) conflict = disk;
+          } else {
+            // A normal dirty tab: a conflict exists iff the file changed from
+            // the (clean) baseline the buffer was edited against.
+            baseline = synced ?? content;
+            if (disk != baseline) conflict = disk;
           }
         }
+
         restored.add(_RestoredDoc(
           path: path,
           name: entry['name'] as String?,
           content: content,
           markDirty: markDirty,
           mode: entry['mode'] as String?,
-          // Disk baseline, so loadMarkdown can flag a conflict if the file
-          // changed while closed.
-          baseline: entry['synced'] as String?,
-          // A conflict that was already pending at shutdown.
+          baseline: baseline,
           conflict: conflict,
         ));
       } catch (_) {
@@ -485,7 +524,8 @@ class WorkspaceController extends ChangeNotifier {
             displayName: r.name,
             markDirty: r.markDirty,
             restoredBaseline: r.baseline,
-            restoredConflict: r.conflict);
+            restoredConflict: r.conflict,
+            fromRestore: true);
       for (final m in EditorMode.values) {
         if (m.name == r.mode) {
           doc.setMode(m);

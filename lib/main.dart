@@ -80,6 +80,14 @@ Future<void> main(List<String> args) async {
     // leaves it alone. With no launch document, restore reopens the session.
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       await OpenFileChannel(workspace).init();
+      // If the channel opened a launch document, this run is really a
+      // "quick open this file" launch (argv-equivalent). Suspend session
+      // persistence so the exit/edit flush writes only-that-file over the
+      // saved session; the previous session stays intact for the next plain
+      // launch — matching the desktop file-argument behavior above.
+      if (workspace.documents.any((d) => !d.isPristine)) {
+        workspace.suspendSession();
+      }
     }
     await workspace.restoreSession();
   }
