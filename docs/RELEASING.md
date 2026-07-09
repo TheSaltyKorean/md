@@ -20,7 +20,7 @@ Release assets use **stable, versionless names** so the README can deep-link
 
 | Asset | Notes |
 | --- | --- |
-| `markdown-studio-windows-x64.msi` | WiX MSI (`tool/windows_installer.wxs`): Program Files, Start Menu, ARP entry, permanent UpgradeCode → in-place upgrades. |
+| `markdown-studio-windows-x64.msi` | WiX MSI (`tool/windows_installer.wxs`): **per-user** (`%LocalAppData%\Programs`, no admin), Start Menu, ARP entry, permanent UpgradeCode → in-place upgrades. The in-app updater installs it silently (`/passive`). Per-user since 1.0.9 — a pre-1.0.9 per-machine (Program Files) copy is a different install context and must be uninstalled once by hand. |
 | `markdown-studio-windows-x64-setup.exe` | Inno Setup (`tool/windows_installer.iss`). |
 | `markdown-studio-windows-x64-portable.zip` | Bare Release folder. |
 

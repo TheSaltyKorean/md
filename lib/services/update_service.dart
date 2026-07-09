@@ -185,23 +185,29 @@ class UpdateController extends ChangeNotifier {
     }
   }
 
-  /// Hand the downloaded installer to the OS, matching the install channel:
-  /// msiexec for MSI, the setup.exe itself for Inno (same AppId = in-place
-  /// upgrade), the default .deb handler on Linux.
-  /// On Windows the installer is started by a tiny generated VBScript run
-  /// via wscript (GUI subsystem — no console window, unlike cmd/powershell
-  /// wrappers, and no cmd quoting: we author the script file's contents
-  /// directly). The script WAITS for this exact process id to exit before
-  /// launching the installer, so file replacement can never race the app's
-  /// own shutdown — the exe/DLLs stay loaded until process exit, which
-  /// resource cleanup alone doesn't cover.
+  /// Hand the downloaded installer to the OS, matching the install channel.
+  ///
+  /// On Windows the per-user MSI/Inno installers run **silently** and
+  /// in-place — no admin, no prompts — via a tiny generated VBScript (run
+  /// with wscript: GUI subsystem, so no console window, and we author the
+  /// file directly, avoiding cmd quoting). The script: (1) waits for this
+  /// exact process id to exit — the exe/DLLs stay loaded until then, so file
+  /// replacement never races shutdown — (2) runs the installer and waits for
+  /// it, then (3) relaunches the (same-path) app. The whole update is
+  /// hands-off: the app closes, updates, and reopens on its own.
+  /// Linux opens the .deb in the system installer.
   Future<void> launchInstaller(String path, InstallKind kind) async {
     switch (kind) {
       case InstallKind.msi || InstallKind.inno:
+        // /passive (MSI) and /SILENT (Inno) show an unattended progress
+        // bar and need no interaction; per-user scope means no elevation.
+        final command = kind == InstallKind.msi
+            ? 'msiexec /i "$path" /passive /norestart'
+            : '"$path" /SILENT /SUPPRESSMSGBOXES /NORESTART';
         final script = windowsLauncherScript(
           waitForPid: pid,
-          program: kind == InstallKind.msi ? 'msiexec' : path,
-          arguments: kind == InstallKind.msi ? '/i ""$path""' : '',
+          installerCommand: command,
+          relaunchExe: Platform.resolvedExecutable,
         );
         final vbs = File(
             '${File(path).parent.path}${Platform.pathSeparator}run-update.vbs');
@@ -216,16 +222,18 @@ class UpdateController extends ChangeNotifier {
     }
   }
 
-  /// The Windows launcher script: poll until [waitForPid] is gone, then
-  /// ShellExecute the installer. Lives in the same private temp directory
-  /// as the downloaded installer. VBS string literals escape an embedded
-  /// quote by doubling it; [arguments] is embedded verbatim, so quote any
-  /// path inside it as `""…""`.
+  /// The Windows launcher script: wait until [waitForPid] is gone, run
+  /// [installerCommand] and wait for it, then relaunch [relaunchExe]. Lives
+  /// in the same private temp directory as the downloaded installer.
+  ///
+  /// `WScript.Shell.Run` takes a single command line, so quote any path
+  /// inside [installerCommand] with real `"` — they're VBS-escaped (doubled)
+  /// on the way in. Both installers are GUI apps, so no console appears.
   @visibleForTesting
   static String windowsLauncherScript({
     required int waitForPid,
-    required String program,
-    required String arguments,
+    required String installerCommand,
+    required String relaunchExe,
   }) {
     String vbs(String v) => v.replaceAll('"', '""');
     return '''
@@ -233,7 +241,9 @@ Set wmi = GetObject("winmgmts:root\\cimv2")
 Do While wmi.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE ProcessId = $waitForPid").Count > 0
   WScript.Sleep 200
 Loop
-CreateObject("Shell.Application").ShellExecute "${vbs(program)}", "$arguments", "", "open", 1
+Dim sh : Set sh = CreateObject("WScript.Shell")
+sh.Run "${vbs(installerCommand)}", 1, True
+sh.Run """${vbs(relaunchExe)}""", 1, False
 ''';
   }
 
@@ -251,13 +261,15 @@ CreateObject("Shell.Application").ShellExecute "${vbs(program)}", "$arguments", 
     );
   }
 
-  /// Pure decision behind [installKind]. An MSI install and a setup.exe
-  /// (Inno) install land in the SAME Program Files directory — but MSI only
-  /// MajorUpgrades MSI installs, so serving it over an Inno install would
-  /// leave duplicate uninstall state. Inno leaves its `unins000.exe` beside
-  /// the app, which is the discriminator. Store (MSIX) packages also live
-  /// under Program Files — in WindowsApps — and must never take either
-  /// installer path. Portable/dev/store/mobile copies get no one-click.
+  /// Pure decision behind [installKind]. Since 1.0.9 the MSI and Inno
+  /// installers both live under `%LocalAppData%\Programs\Markdown Studio`
+  /// (per-user); older builds installed per-machine under Program Files, so
+  /// both roots are accepted for robustness. MSI only MajorUpgrades MSI
+  /// installs, so serving it over an Inno install would leave duplicate
+  /// uninstall state — Inno leaves its `unins000.exe` beside the app, which
+  /// is the discriminator. Store (MSIX) packages live under Program
+  /// Files\WindowsApps and must never take an installer path.
+  /// Portable/dev/store/mobile copies get no one-click.
   @visibleForTesting
   static InstallKind detectInstallKind({
     required String exe,
@@ -269,13 +281,16 @@ CreateObject("Shell.Application").ShellExecute "${vbs(program)}", "$arguments", 
     final lower = exe.toLowerCase();
     if (isWindows) {
       if (lower.contains('\\windowsapps\\')) return InstallKind.other;
-      for (final v in ['ProgramFiles', 'ProgramFiles(x86)']) {
-        final p = env[v];
-        if (p != null &&
-            p.isNotEmpty &&
-            lower.startsWith('${p.toLowerCase()}\\')) {
-          return hasInnoUninstaller ? InstallKind.inno : InstallKind.msi;
-        }
+      final localApps = env['LocalAppData'];
+      final roots = <String>[
+        if (localApps != null && localApps.isNotEmpty)
+          '${localApps.toLowerCase()}\\programs\\',
+        for (final v in ['ProgramFiles', 'ProgramFiles(x86)'])
+          if (env[v] != null && env[v]!.isNotEmpty)
+            '${env[v]!.toLowerCase()}\\',
+      ];
+      if (roots.any(lower.startsWith)) {
+        return hasInnoUninstaller ? InstallKind.inno : InstallKind.msi;
       }
       return InstallKind.other;
     }
