@@ -15,7 +15,15 @@ import 'package:flutter/material.dart'
 import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, SystemChannels;
 import 'package:flutter/widgets.dart'
-    show MediaQuery, Size, SizedBox, TextScaler, TextSelection, Widget;
+    show
+        Axis,
+        MediaQuery,
+        SingleChildScrollView,
+        Size,
+        SizedBox,
+        TextScaler,
+        TextSelection,
+        Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/app.dart';
 import 'package:markdown_studio/models/editor_mode.dart';
@@ -677,6 +685,13 @@ void main() {
 
     final button = find.byTooltip('Copy code');
     expect(button, findsOneWidget);
+
+    // Long lines scroll horizontally rather than soft-wrapping.
+    expect(
+        find.byWidgetPredicate((w) =>
+            w is SingleChildScrollView && w.scrollDirection == Axis.horizontal),
+        findsWidgets);
+
     await tester.tap(button);
     await tester.pump();
 

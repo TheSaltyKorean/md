@@ -134,11 +134,14 @@ class _CodeBlockBuilder extends MarkdownElementBuilder {
 
     return Stack(
       children: [
-        // Extra right padding leaves room so the first line never runs
-        // under the copy button.
-        Padding(
+        // Long lines scroll horizontally rather than soft-wrapping (matching
+        // the package's default code-block behaviour, which this builder
+        // replaces). Extra right padding leaves room so short blocks don't
+        // run under the copy button; the button itself stays pinned.
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.fromLTRB(14, 14, 44, 14),
-          child: Text(code, style: codeStyle),
+          child: Text(code, style: codeStyle, softWrap: false),
         ),
         Positioned(
           top: 4,
