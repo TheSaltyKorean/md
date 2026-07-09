@@ -34,6 +34,7 @@ import 'package:markdown_studio/services/print_profile_service.dart';
 import 'package:markdown_studio/services/update_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
+import 'package:markdown_studio/services/session_service.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
 import 'package:markdown_studio/widgets/preview_view.dart';
@@ -743,6 +744,61 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(find.byType(IconButton), findsNothing);
+  });
+
+  test('Session restore round-trips tabs, unsaved buffers, and active tab',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    ws.openDocument('# One', path: '/tmp/one.md');
+    ws.openDocument('# Two', path: '/tmp/two.md');
+    // Unsaved edit to a file-backed doc (editing needs a source mode).
+    ws.documents[1].setMode(EditorMode.split);
+    ws.documents[1].sourceController.text = '# Two edited';
+    // A pathless, unsaved draft.
+    ws.newDocument();
+    ws.documents[2].setMode(EditorMode.raw);
+    ws.documents[2].sourceController.text = 'draft notes';
+    // Make the middle document the active one.
+    ws.select(1);
+    ws.flushSession();
+    await ws.pendingWrites;
+    expect(store.data, isNotNull);
+    ws.dispose();
+
+    // A fresh workspace (new launch) restores everything from the store.
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    // Before restore it's just the blank starter tab.
+    expect(ws2.documents.length, 1);
+    await ws2.restoreSession();
+
+    expect(ws2.documents.length, 3);
+    expect(ws2.documents[0].currentMarkdown(), '# One');
+    expect(ws2.documents[0].isDirty, isFalse);
+    expect(ws2.documents[1].currentMarkdown(), '# Two edited');
+    expect(ws2.documents[1].isDirty, isTrue); // unsaved edit preserved
+    expect(ws2.documents[2].currentMarkdown(), 'draft notes');
+    expect(ws2.documents[2].filePath, isNull); // pathless draft preserved
+    // View modes round-trip too.
+    expect(ws2.documents[1].mode, EditorMode.split);
+    expect(ws2.documents[2].mode, EditorMode.raw);
+    // The active document is restored too.
+    expect(ws2.activeDocument, same(ws2.documents[1]));
+    ws2.dispose();
+  });
+
+  test('Session restore is a no-op with no saved session', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs, sessionStore: _FakeSessionStore());
+    await ws.restoreSession();
+    // The fresh blank document is left in place.
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.isPristine, isTrue);
+    ws.dispose();
   });
 
   test('Print profiles seed with built-ins', () async {
@@ -1907,4 +1963,18 @@ void main() {
     final reloaded = WorkspaceController(prefs);
     expect(reloaded.autoReload, isFalse);
   });
+}
+
+/// In-memory [SessionStore] for session-restore tests (no filesystem).
+class _FakeSessionStore implements SessionStore {
+  String? data;
+
+  @override
+  Future<String?> read() async => data;
+
+  @override
+  Future<void> write(String d) async => data = d;
+
+  @override
+  Future<void> clear() async => data = null;
 }

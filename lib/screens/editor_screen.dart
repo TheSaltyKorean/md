@@ -109,12 +109,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   @override
   void onWindowClose() async {
-    final ws = context.read<WorkspaceController>();
-    final anyDirty = ws.documents.any((d) => d.isDirty);
-    if (anyDirty && mounted) {
-      final ok = await _confirmDiscard(context, 'One or more open documents');
-      if (!ok) return; // keep the window open
-    }
+    // Hot exit: the whole session (open tabs + unsaved buffers) is persisted
+    // and restored on the next launch, so closing never loses work and needs
+    // no "discard unsaved changes?" prompt. Closing a single dirty *tab*
+    // still prompts (see _closeTab) — that removes content nothing restores.
     await _shutdownAndExit();
   }
 
@@ -136,6 +134,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final profiles = context.read<PrintProfileService>();
     final zoom = context.read<ZoomController>();
     final updates = context.read<UpdateController>();
+    // Write the final session snapshot now (open tabs + unsaved buffers) so
+    // the next launch — including the updater's silent relaunch — reopens
+    // exactly here. The queued write is drained below with the others.
+    ws.flushSession();
     // Drain any preference write still in flight (UI callbacks fire-and-forget
     // setAutoReload / cycle / setDefault), so a setting changed right before
     // closing isn't lost. Bounded so a stuck write can't hang the close.
@@ -965,14 +967,17 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
         content: Text(switch (kind) {
           InstallKind.msi ||
           InstallKind.inno =>
-            'The installer downloads and runs the in-place upgrade. '
-                'The app closes while it installs; your settings and '
-                'print profiles are kept.',
+            "Here's what happens: the update downloads, then Markdown "
+                'Studio closes, installs it in the background (no admin '
+                'prompt), and reopens right where you left off — your open '
+                'tabs and unsaved changes are restored. Takes a few seconds.',
           InstallKind.deb => 'The package downloads and opens in your software '
-              'installer; the new version is used on the next launch.',
+              'installer; the new version is used on the next launch. Your '
+              'open tabs and unsaved changes are restored on reopen.',
           InstallKind.other =>
             'Your install type updates from the download page — the '
-                'right installer is one click there.',
+                'right installer is one click there. Your open tabs and '
+                'unsaved changes are restored when you reopen.',
         }),
         actions: [
           TextButton(
@@ -998,15 +1003,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       return;
     }
 
-    // Unsaved edits must be settled BEFORE the download: on Windows the app
-    // exits to let the installer replace it.
-    final ws = context.read<WorkspaceController>();
+    // No discard prompt: the app exits for the install on Windows, but the
+    // session (open tabs + unsaved buffers) is flushed on shutdown and
+    // restored on the auto-relaunch, so nothing is lost.
     final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
-    if (exitsForInstall && ws.documents.any((d) => d.isDirty)) {
-      final ok = await _confirmDiscard(context, 'One or more open documents');
-      if (!ok) return;
-      if (!mounted) return;
-    }
 
     final progress = ValueNotifier<double>(-1);
     var cancelled = false;

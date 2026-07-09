@@ -41,6 +41,10 @@ class DocumentController extends ChangeNotifier {
   /// Display name for documents with no re-writable path (e.g. mobile opens).
   String? _displayName;
 
+  /// The raw display name (null unless a pathless doc was given one), used to
+  /// round-trip the tab through session restore.
+  String? get displayName => _displayName;
+
   String get title =>
       _filePath != null ? p.basename(_filePath!) : (_displayName ?? 'Untitled');
 

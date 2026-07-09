@@ -12,6 +12,7 @@ import 'app.dart';
 import 'services/file_association_service.dart';
 import 'services/open_file_channel.dart';
 import 'services/print_profile_service.dart';
+import 'services/session_service.dart';
 import 'services/single_instance_service.dart';
 import 'services/update_service.dart';
 import 'state/theme_controller.dart';
@@ -39,7 +40,8 @@ Future<void> main(List<String> args) async {
   }
 
   final prefs = await SharedPreferences.getInstance();
-  final workspace = WorkspaceController(prefs);
+  final workspace =
+      WorkspaceController(prefs, sessionStore: FileSessionStore());
 
   if (single.isSupported) {
     try {
@@ -60,10 +62,15 @@ Future<void> main(List<String> args) async {
   // A torn-off tab is handed off via a temp JSON file carrying its (possibly
   // unsaved) content, so edits aren't lost when it opens in the new window.
   final handoffPath = _flagValue(args, '--handoff');
+  final fileArgs = _fileArgs(args);
   if (handoffPath != null) {
     await _openHandoff(handoffPath, workspace);
+  } else if (fileArgs.isNotEmpty) {
+    await _openPaths(fileArgs, workspace);
   } else {
-    await _openPaths(_fileArgs(args), workspace);
+    // A plain launch (including the updater's silent relaunch) reopens the
+    // previous session — tabs, unsaved buffers, and the active document.
+    await workspace.restoreSession();
   }
 
   runApp(

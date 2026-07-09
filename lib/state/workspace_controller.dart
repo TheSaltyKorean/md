@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Offset;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/editor_mode.dart';
+import '../services/session_service.dart';
 import 'document_controller.dart';
 
 /// A tab in the workspace strip: an editable document or a print preview.
@@ -43,20 +48,30 @@ class PrintPreviewTab extends WorkspaceTab {
 /// and the global auto-reload setting. Each document tab is its own
 /// [DocumentController].
 class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this._prefs) {
+  WorkspaceController(this._prefs, {SessionStore? sessionStore})
+      : _sessionStore = sessionStore {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
     final tx = _prefs.getDouble(_toolbarXKey);
     final ty = _prefs.getDouble(_toolbarYKey);
     if (tx != null && ty != null) _toolbarOffset = Offset(tx, ty);
     _tabs.add(DocumentTab(_newDoc()));
     _activeIndex = 0;
+    // Persist the session (debounced) whenever tabs, the active tab, or any
+    // open document changes, so a restart/update reopens where we left off.
+    if (_sessionStore != null) addListener(_scheduleSessionSave);
   }
 
   static const _autoReloadKey = 'auto_reload';
   static const _toolbarXKey = 'format_toolbar_x';
   static const _toolbarYKey = 'format_toolbar_y';
+  static const _sessionDebounce = Duration(milliseconds: 1200);
 
   final SharedPreferences _prefs;
+
+  /// Where the open-tabs session is stored (null disables session
+  /// persistence — e.g. in tests that don't exercise it).
+  final SessionStore? _sessionStore;
+  Timer? _sessionTimer;
 
   final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
@@ -277,8 +292,106 @@ class WorkspaceController extends ChangeNotifier {
     }
   }
 
+  // --- Session persistence ----------------------------------------------------
+
+  /// A JSON-able snapshot of the open document tabs (print previews excluded),
+  /// including each document's unsaved buffer, dirty flag, and view mode, plus
+  /// which document is active. Restored verbatim by [restoreSession].
+  @visibleForTesting
+  Map<String, dynamic> sessionSnapshot() {
+    final docs = <Map<String, dynamic>>[];
+    var activeDoc = 0;
+    var i = 0;
+    for (final tab in _tabs) {
+      if (tab is! DocumentTab) continue;
+      if (identical(tab, _tabs[_activeIndex])) activeDoc = i;
+      final d = tab.doc;
+      docs.add({
+        'path': d.filePath,
+        'name': d.displayName,
+        'content': d.currentMarkdown(),
+        'dirty': d.isDirty,
+        'mode': d.mode.name,
+      });
+      i++;
+    }
+    return {'version': 1, 'active': activeDoc, 'docs': docs};
+  }
+
+  void _scheduleSessionSave() {
+    if (_sessionStore == null) return;
+    _sessionTimer?.cancel();
+    _sessionTimer = Timer(_sessionDebounce, _saveSession);
+  }
+
+  void _saveSession() {
+    final store = _sessionStore;
+    if (store == null) return;
+    final json = jsonEncode(sessionSnapshot());
+    _track(() => store.write(json));
+  }
+
+  /// Force an immediate session write and stop the debounce timer. Called on
+  /// shutdown (normal close or update relaunch); the queued write is drained
+  /// via [pendingWrites].
+  void flushSession() {
+    _sessionTimer?.cancel();
+    _saveSession();
+  }
+
+  /// Rebuild the tabs from a previously saved session. No-op when session
+  /// persistence is disabled, there is no saved session, or it's empty — the
+  /// initial blank document is left in place. Restored documents keep their
+  /// unsaved buffer, dirty state, and view mode.
+  Future<void> restoreSession() async {
+    final store = _sessionStore;
+    if (store == null) return;
+    Map<String, dynamic>? data;
+    try {
+      final raw = await store.read();
+      if (raw == null) return;
+      data = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return; // absent or corrupt — keep the fresh blank document
+    }
+    final entries = (data['docs'] as List?) ?? const [];
+    if (entries.isEmpty) return;
+
+    // Replace the initial blank tab(s).
+    for (final t in _tabs) {
+      if (t is DocumentTab) {
+        t.doc.removeListener(_relay);
+        t.doc.dispose();
+      }
+    }
+    _tabs.clear();
+    for (final entry in entries) {
+      if (entry is! Map) continue;
+      final doc = _newDoc()
+        ..loadMarkdown(
+          (entry['content'] as String?) ?? '',
+          path: entry['path'] as String?,
+          displayName: entry['name'] as String?,
+          markDirty: (entry['dirty'] as bool?) ?? false,
+        );
+      final modeName = entry['mode'] as String?;
+      for (final m in EditorMode.values) {
+        if (m.name == modeName) {
+          doc.setMode(m);
+          break;
+        }
+      }
+      _tabs.add(DocumentTab(doc));
+    }
+    if (_tabs.isEmpty) _tabs.add(DocumentTab(_newDoc()));
+    final active = (data['active'] as int?) ?? 0;
+    _activeIndex = active.clamp(0, _tabs.length - 1);
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    _sessionTimer?.cancel();
     for (final d in documents) {
       d.removeListener(_relay);
       d.dispose();
