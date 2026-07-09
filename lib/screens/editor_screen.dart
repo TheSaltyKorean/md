@@ -124,11 +124,16 @@ class _EditorScreenState extends State<EditorScreen>
   /// Without persistence (a torn-off window), any unsaved work prompts.
   Future<bool> _prepareExit() async {
     final ws = context.read<WorkspaceController>();
-    final anyDirty = ws.documents.any((d) => d.isDirty);
+    // Unsaved work worth a fallback prompt includes not just dirty buffers but
+    // a clean tab with an unresolved external-change conflict: its old buffer
+    // survives only in the session file, so a failed flush there must not exit
+    // silently and drop the user's "Keep mine" choice.
+    final anyUnsaved =
+        ws.documents.any((d) => d.isDirty || d.hasExternalConflict);
     if (ws.sessionEnabled) {
       if (await ws.flushSession()) return true; // saved — hot exit
-      if (!anyDirty) return true; // write failed but nothing to lose
-    } else if (!anyDirty) {
+      if (!anyUnsaved) return true; // write failed but nothing to lose
+    } else if (!anyUnsaved) {
       return true;
     }
     if (!mounted) return true;
@@ -991,6 +996,7 @@ class _EditorScreenState extends State<EditorScreen>
   /// (portable, store, mobile, dev builds) goes to the download page.
   Future<void> _startUpdate(UpdateInfo info) async {
     final updates = context.read<UpdateController>();
+    final ws = context.read<WorkspaceController>();
     final kind = updates.installKind;
     final oneClick = kind.canOneClick;
     final proceed = await showDialog<bool>(
@@ -1110,6 +1116,13 @@ class _EditorScreenState extends State<EditorScreen>
         // Once it's running, release resources and exit; the launcher sees
         // the pid vanish and only then starts the installer, so file
         // replacement can never race shutdown.
+        //
+        // Re-flush the session first: the app stayed alive through the
+        // download, during which a file watcher could have auto-reloaded a
+        // clean tab or surfaced a new conflict. _prepareExit ran BEFORE the
+        // download, so without this those changes wouldn't be in session.json
+        // for the auto-relaunch to restore.
+        await ws.flushSession();
         await updates.launchInstaller(path, kind);
         await _releaseResources();
         exit(0);

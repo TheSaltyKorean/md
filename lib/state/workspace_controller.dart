@@ -95,11 +95,24 @@ class WorkspaceController extends ChangeNotifier {
   /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
   Timer? _sessionTimer;
+  bool _sessionAbandoned = false;
 
   /// Whether this workspace persists/restores its session. When false (a
-  /// torn-off window), closing with unsaved work still needs a discard prompt
-  /// — hot exit only applies when the session is actually saved.
-  bool get sessionEnabled => _sessionStore != null;
+  /// torn-off window, or a launch where [restoreSession] abandoned to a
+  /// pre-opened document), closing with unsaved work still needs a discard
+  /// prompt — hot exit only applies when the session is actually saved.
+  bool get sessionEnabled => _sessionStore != null && !_sessionAbandoned;
+
+  /// Stop this run from persisting the session. Used when [restoreSession]
+  /// finds a document was already opened (an instance-forwarded path, or a
+  /// buffered platform-channel open) and bails: that pre-opened document must
+  /// not overwrite the saved session's unsaved buffers that restore just
+  /// abandoned — the saved session survives untouched for the next launch,
+  /// and the pre-opened document is protected by the normal close prompt.
+  void _abandonSession() {
+    _sessionAbandoned = true;
+    _sessionTimer?.cancel();
+  }
 
   final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
@@ -382,8 +395,7 @@ class WorkspaceController extends ChangeNotifier {
   /// work silently. A no-op returning true when persistence is disabled.
   Future<bool> flushSession() async {
     _sessionTimer?.cancel();
-    final store = _sessionStore;
-    if (store == null) return true;
+    if (!sessionEnabled) return true;
     final json = jsonEncode(sessionSnapshot());
     // Run through the same _track chain as the debounced saves, so a forced
     // flush can't complete BEFORE an older queued save and then be
@@ -392,7 +404,7 @@ class WorkspaceController extends ChangeNotifier {
     var ok = true;
     await _track(() async {
       try {
-        await store.write(json);
+        await _sessionStore!.write(json);
       } catch (_) {
         ok = false;
       }
@@ -409,8 +421,13 @@ class WorkspaceController extends ChangeNotifier {
     if (store == null) return;
     // Only populate a *fresh* workspace. If a document was already opened
     // (an OS file-association open via the platform channel, or an instance
-    // forward), don't clobber it with the saved session.
-    if (documents.any((d) => !d.isPristine)) return;
+    // forward), don't clobber it with the saved session — and suppress
+    // persistence so that pre-opened document doesn't overwrite the saved
+    // session we're abandoning.
+    if (documents.any((d) => !d.isPristine)) {
+      _abandonSession();
+      return;
+    }
     Map<String, dynamic>? data;
     try {
       final raw = await store.read();
@@ -459,27 +476,41 @@ class WorkspaceController extends ChangeNotifier {
             // the file keeps its buffer, but marked unsaved so it isn't
             // treated as matching a now-missing file.
             if (!dirty) markDirty = true;
-          } else if (!dirty && !hadConflict) {
-            // Clean, unconflicted: adopt the CURRENT file (it may have changed
-            // while closed — there are no local edits to lose).
-            content = disk;
+            baseline = synced ?? content;
+          } else if (disk == content) {
+            // The current file already equals the buffer: nothing unsaved,
+            // nothing to reconcile. Restore as a clean tab in sync with disk —
+            // even if it was saved dirty/conflicted, another tool has since
+            // written exactly this text, so the tab must not reopen forever as
+            // unsaved.
+            markDirty = false;
             baseline = disk;
-          } else if (hadConflict) {
-            // A conflict was pending at shutdown. The pending external content
-            // IS whatever is on disk now (re-read fresh, never the stale saved
-            // copy); drop the conflict only if the file has caught up to this
-            // buffer. synced was polluted to the conflicting disk, so the
-            // buffer itself is the comparison point here.
-            baseline = synced ?? content;
-            if (disk != content) conflict = disk;
+          } else if (!dirty) {
+            // A CLEAN tab (with or without a prior conflict) whose file changed
+            // while closed. Mirror the live watcher / resolveIfSafe: auto-adopt
+            // only when auto-reload is on; otherwise surface a Reload/Keep-mine
+            // conflict so an auto-reload-off user can still keep their buffer.
+            // Either way the baseline tracks the current disk, matching the live
+            // invariant (so "Keep mine" won't re-fire on the next unchanged
+            // watcher event).
+            baseline = disk;
+            if (_autoReload) {
+              content = disk;
+            } else {
+              conflict = disk;
+            }
           } else {
-            // A normal dirty tab: a conflict exists iff the file changed from
-            // the (clean) baseline the buffer was edited against AND that
-            // change isn't already what the buffer holds — if the file was
-            // edited to match the buffer while closed, there's nothing to
-            // reconcile, so don't resurface a false conflict/dirty state.
-            baseline = synced ?? content;
-            if (disk != baseline && disk != content) conflict = disk;
+            // A DIRTY tab whose file differs from the buffer. Dirty tabs never
+            // auto-reload. Surface a conflict unless the file is unchanged from
+            // the (clean) edit baseline — that's normal dirty editing, not an
+            // external change. `synced` is polluted for a tab that already had
+            // a conflict, so such a tab always reconciles against fresh disk.
+            if (!hadConflict && disk == synced) {
+              baseline = synced;
+            } else {
+              baseline = disk;
+              conflict = disk;
+            }
           }
         }
 
@@ -500,9 +531,13 @@ class WorkspaceController extends ChangeNotifier {
     if (restored.isEmpty) return;
 
     // The disk reads above are async; a forwarded open-file request could
-    // have arrived meanwhile and added a real document. Re-check freshness
-    // so we don't clobber it.
-    if (documents.any((d) => !d.isPristine)) return;
+    // have arrived meanwhile and added a real document. Re-check freshness so
+    // we don't clobber it — and suppress persistence for the same reason as
+    // the pre-read check above.
+    if (documents.any((d) => !d.isPristine)) {
+      _abandonSession();
+      return;
+    }
 
     // Replace the initial blank tab(s).
     for (final t in _tabs) {

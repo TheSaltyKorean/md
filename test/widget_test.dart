@@ -950,7 +950,10 @@ void main() {
   });
 
   test('Restore keeps a conflict on a CLEAN doc (auto-reload off)', () async {
-    SharedPreferences.setMockInitialValues({});
+    // Auto-reload OFF: a clean tab whose file changed while closed must come
+    // back with the old buffer and a Reload/Keep-mine conflict (not silently
+    // adopt disk), mirroring the live watcher.
+    SharedPreferences.setMockInitialValues({'auto_reload': false});
     final prefs = await SharedPreferences.getInstance();
     final tmp = Directory.systemTemp.createTempSync('mdsessc2');
     addTearDown(() => tmp.deleteSync(recursive: true));
@@ -977,6 +980,98 @@ void main() {
     expect(d.currentMarkdown(), 'saved buffer'); // …with its buffer intact…
     expect(d.hasExternalConflict, isTrue); // …and the conflict preserved.
     expect(d.pendingExternalContent, 'newer disk');
+    // Baseline tracks the CURRENT disk: a later watcher event for that same
+    // disk content must not re-fire the conflict after "Keep mine".
+    d.keepMineAfterExternalChange();
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore adopts disk for a clean tab when auto-reload is ON', () async {
+    // Auto-reload ON: a clean tab silently picks up the file's current content
+    // (no conflict), matching the live auto-reload watcher path.
+    SharedPreferences.setMockInitialValues({'auto_reload': true});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessar');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/y.md')..writeAsStringSync('newer disk');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'stale buffer',
+            'dirty': false,
+            'mode': 'preview',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'newer disk'); // adopted current file
+    expect(d.hasExternalConflict, isFalse);
+    expect(d.isDirty, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore marks a dirty tab clean when disk already matches the buffer',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessclean');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // Saved dirty, but another tool wrote the file to exactly the buffer while
+    // closed: restore must return a CLEAN tab (no phantom dirty/close prompt).
+    final f = File('${tmp.path}/doc.md')..writeAsStringSync('my edits');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'old disk',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my edits');
+    expect(d.isDirty, isFalse); // clean — disk already has this text
+    expect(d.hasExternalConflict, isFalse);
+    ws.dispose();
+  });
+
+  test('Restore abandons to a pre-opened doc without clobbering the session',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': null, 'content': 'saved work', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final saved = store.data;
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // A document is already open (an instance-forward / early channel open)
+    // before restore runs — restore must bail AND suppress persistence.
+    ws.openDocument('a forwarded file', path: '/tmp/fwd.md');
+    await ws.restoreSession();
+    expect(ws.sessionEnabled, isFalse); // persistence suppressed for this run
+    expect(await ws.flushSession(), isTrue); // no-op success
+    expect(store.data, saved); // saved session untouched
     ws.dispose();
   });
 
