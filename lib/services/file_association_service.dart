@@ -76,9 +76,10 @@ class FileAssociationService {
   /// executable than the one running — classic case: a locally built copy
   /// registered the association, then the user installed the app, so
   /// double-clicking `.md` files keeps launching the stale build — re-point
-  /// the registration to this executable. Only an **installed** copy (under
-  /// Program Files) asserts ownership; ad-hoc dev builds never silently
-  /// steal the association back. Runs quietly (no Settings pane).
+  /// the registration to this executable. Only an **installed** copy (the
+  /// per-user `%LocalAppData%\Programs` location, or a legacy Program Files
+  /// one) asserts ownership; ad-hoc dev builds never silently steal the
+  /// association back. Runs quietly (no Settings pane).
   Future<void> repairRegistrationIfNeeded() async {
     if (kIsWeb || !Platform.isWindows) return;
     try {
@@ -88,9 +89,13 @@ class FileAssociationService {
         '/ve',
       ]);
       if (res.exitCode != 0) return; // never registered — nothing to repair
+      final localApps = Platform.environment['LocalAppData'];
       if (needsRepair(
         exe: Platform.resolvedExecutable,
         programDirs: [
+          // The per-user install root (since 1.0.9).
+          if (localApps != null && localApps.isNotEmpty) '$localApps\\Programs',
+          // Legacy per-machine installs.
           Platform.environment['ProgramFiles'],
           Platform.environment['ProgramFiles(x86)'],
         ],
@@ -102,8 +107,8 @@ class FileAssociationService {
   }
 
   /// Pure decision for [repairRegistrationIfNeeded]: repair only when this
-  /// executable lives under a Program Files directory (an installed copy)
-  /// and the registered open command doesn't already point at it.
+  /// executable lives under one of the install directories (an installed
+  /// copy) and the registered open command doesn't already point at it.
   @visibleForTesting
   static bool needsRepair({
     required String exe,

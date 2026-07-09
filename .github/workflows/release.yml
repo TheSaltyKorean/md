@@ -342,13 +342,16 @@ jobs:
           ## Install
 
           **Windows** — pick one: `markdown-studio-windows-x64.msi`
-          (standard Windows Installer: Program Files, Start Menu,
-          Add/Remove Programs, in-place upgrades; silent-deployable with
-          `msiexec /i … /qn`), or `markdown-studio-windows-x64-setup.exe`
-          (same result via Inno Setup, plus an optional desktop icon), or
-          the portable `markdown-studio-windows-x64-portable.zip` (extract
-          and run `markdown_studio.exe`). SmartScreen may warn on unsigned
-          builds: *More info → Run anyway*.
+          (Windows Installer, **per-user — no admin prompt**: installs to
+          `%LocalAppData%\Programs`, Start Menu, Add/Remove Programs,
+          in-place upgrades; silent-deployable with `msiexec /i … /qn`), or
+          `markdown-studio-windows-x64-setup.exe` (same result via Inno
+          Setup, plus an optional desktop icon), or the portable
+          `markdown-studio-windows-x64-portable.zip` (extract and run
+          `markdown_studio.exe`). SmartScreen may warn on unsigned builds:
+          *More info → Run anyway*. Upgrading from a pre-1.0.9 build (which
+          installed to Program Files)? Uninstall that one once first — it's
+          a different install location.
 
           **Linux** — easiest (Debian/Ubuntu):
           `sudo apt install ./markdown-studio-linux-amd64.deb` — desktop

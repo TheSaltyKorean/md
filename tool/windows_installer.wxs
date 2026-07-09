@@ -9,6 +9,12 @@
   The UpgradeCode is the product's permanent identity: it must NEVER change,
   so each release's MSI upgrades the previous install in place
   (MajorUpgrade) instead of installing side by side.
+
+  Scope is perUser: the app installs under %LocalAppData%\Programs, so
+  neither the first install nor any update needs admin/UAC, and the in-app
+  updater can upgrade silently in place. (Switched from perMachine in 1.0.9;
+  an existing per-machine copy in Program Files is a different install
+  context and must be uninstalled once by hand.)
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
@@ -16,7 +22,7 @@
            Manufacturer="Markdown Studio"
            Version="$(var.Version)"
            UpgradeCode="d4a5c1f2-7b3e-4a86-9d2c-1e8f0b6a7c53"
-           Scope="perMachine"
+           Scope="perUser"
            Compressed="yes">
 
     <MajorUpgrade DowngradeErrorMessage="A newer version of Markdown Studio is already installed." />
@@ -33,10 +39,13 @@
     <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
 
     <!-- The whole Flutter Release bundle (exe + data/ + DLLs), harvested
-         recursively at build time. -->
-    <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Markdown Studio">
-        <Files Include="$(var.SourceDir)\**" />
+         recursively at build time. Per-user location (%LocalAppData%\Programs\
+         Markdown Studio) so no elevation is ever needed. -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Markdown Studio">
+          <Files Include="$(var.SourceDir)\**" />
+        </Directory>
       </Directory>
     </StandardDirectory>
 

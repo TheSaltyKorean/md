@@ -365,6 +365,19 @@ void main() {
           registeredCommand: null,
         ),
         isFalse);
+
+    // The per-user install root (since 1.0.9) also counts as installed and
+    // reclaims a stale association.
+    const perUser = r'C:\Users\r\AppData\Local\Programs';
+    const perUserExe =
+        r'C:\Users\r\AppData\Local\Programs\Markdown Studio\markdown_studio.exe';
+    expect(
+        FileAssociationService.needsRepair(
+          exe: perUserExe,
+          programDirs: const [perUser, pf, pf86],
+          registeredCommand: '(Default)    REG_SZ    "$devExe" "%1"',
+        ),
+        isTrue);
   });
 
   test('Zoom controller steps, clamps, snaps, and persists', () async {
@@ -520,6 +533,7 @@ void main() {
 
   test('Install-kind detection routes each channel to its own updater', () {
     const env = {
+      'LocalAppData': r'C:\Users\r\AppData\Local',
       'ProgramFiles': r'C:\Program Files',
       'ProgramFiles(x86)': r'C:\Program Files (x86)',
     };
@@ -530,13 +544,20 @@ void main() {
             isWindows: true,
             isLinux: false,
             hasInnoUninstaller: inno);
-    const installed = r'C:\Program Files\Markdown Studio\markdown_studio.exe';
+    // Since 1.0.9 the per-user install lives under %LocalAppData%\Programs.
+    const installed = r'C:\Users\r\AppData\Local\Programs\Markdown Studio'
+        r'\markdown_studio.exe';
     expect(win(installed), InstallKind.msi);
     // A setup.exe (Inno) install lands in the SAME directory but leaves its
     // unins000.exe — it must get the setup.exe updater, never the MSI.
     expect(win(installed, inno: true), InstallKind.inno);
-    // A Store (MSIX) package also lives under Program Files — in
-    // WindowsApps — and must take no installer path at all.
+    // A legacy per-machine Program Files copy is NOT one-click: a per-user
+    // MSI can't upgrade it in place, so it routes to the download page for
+    // the one-time manual migration.
+    expect(win(r'C:\Program Files\Markdown Studio\markdown_studio.exe'),
+        InstallKind.other);
+    // A Store (MSIX) package lives under Program Files\WindowsApps and must
+    // take no installer path at all.
     expect(
         win(r'C:\Program Files\WindowsApps\12345.MarkdownStudio_1.0.5.0_x64'
             r'\markdown_studio.exe'),
@@ -556,25 +577,35 @@ void main() {
     expect(InstallKind.inno.canOneClick, isTrue);
   });
 
-  test('Windows launcher script waits for the exact pid, quotes paths', () {
+  test('Windows launcher waits for pid, installs silently, relaunches', () {
+    const exe = r'C:\Users\r\AppData\Local\Programs\Markdown Studio'
+        r'\markdown_studio.exe';
     final msi = UpdateController.windowsLauncherScript(
       waitForPid: 4242,
-      program: 'msiexec',
-      arguments: r'/i ""C:\Temp Dir\markdown-studio-1.0.7.msi""',
+      installerCommand:
+          r'msiexec /i "C:\Temp Dir\update.msi" /passive /norestart',
+      relaunchExe: exe,
     );
-    // Polls for OUR pid to be gone before anything launches.
+    // Waits for OUR pid to be gone before anything runs.
     expect(msi, contains('ProcessId = 4242'));
     expect(msi, contains('WScript.Sleep'));
-    // The path travels inside VBS-doubled quotes, spaces intact.
-    expect(msi, contains(r'""C:\Temp Dir\markdown-studio-1.0.7.msi""'));
-    expect(msi, contains('"msiexec"'));
+    // Runs the installer and WAITS for it (bWaitOnReturn = True), then
+    // relaunches — the whole update completes hands-off.
+    expect(msi,
+        contains(r'sh.Run "msiexec /i ""C:\Temp Dir\update.msi"" /passive'));
+    expect(msi, contains(', 1, True'));
+    // Relaunch line: the same-path exe, quoted, not waited on.
+    expect(msi, contains('sh.Run """$exe""", 1, False'));
 
     final inno = UpdateController.windowsLauncherScript(
       waitForPid: 7,
-      program: r'C:\Temp Dir\markdown-studio-1.0.7-setup.exe',
-      arguments: '',
+      installerCommand: r'"C:\Temp Dir\setup.exe" /SILENT /SUPPRESSMSGBOXES',
+      relaunchExe: exe,
     );
-    expect(inno, contains(r'C:\Temp Dir\markdown-studio-1.0.7-setup.exe'));
+    expect(
+        inno,
+        contains(
+            r'sh.Run """C:\Temp Dir\setup.exe"" /SILENT /SUPPRESSMSGBOXES'));
   });
 
   test('Update check finds newer releases and honors the toggle', () async {

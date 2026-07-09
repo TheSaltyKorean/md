@@ -111,10 +111,21 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
 - **Releases**: pushing a `v*` tag builds and publishes everything
   (`release.yml`); `workflow_dispatch` = dry run (no publish). Assets use
   stable versionless names so the README deep-links
-  `releases/latest/download/…`. Latest: **v1.0.4**.
+  `releases/latest/download/…`. Latest: **v1.0.8**.
 - **Windows**: MSI (WiX 5, permanent UpgradeCode — never change it),
   Inno setup.exe, portable zip. All unsigned; Store/winget are the trusted
   channels. WiX is pinned to 5.x (v6+ gates behind the OSMF EULA).
+  **Per-user install since 1.0.9** (`Scope="perUser"` / Inno
+  `PrivilegesRequired=lowest` → `%LocalAppData%\Programs\Markdown Studio`):
+  no admin/UAC on install or update, so the in-app updater installs
+  silently and in-place. A pre-1.0.9 per-machine Program Files copy is a
+  different install context — uninstall it once when moving to 1.0.9+.
+- **In-app updater** (since 1.0.5, fixed 1.0.7): quiet launch check against
+  the latest GitHub release; an available update shows a toolbar button +
+  launch snackbar. One click downloads the channel-matched installer
+  (`InstallKind` msi/inno/deb/other) to a private temp dir and runs it via
+  a generated wscript that waits for this process to exit, installs
+  silently, and relaunches. Portable/store/mobile → download page.
 - **winget**: initial submission for 1.0.1 is
   [microsoft/winget-pkgs#398219](https://github.com/microsoft/winget-pkgs/pull/398219)
   (CLA signed by the owner **as an individual**). Future releases

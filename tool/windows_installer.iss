@@ -2,9 +2,10 @@
 ; Compiled by the release workflow:
 ;   iscc /DAppVersion=1.0.1 /DSourceDir=..\build\windows\x64\runner\Release ^
 ;        /DOutputDir=..\dist tool\windows_installer.iss
-; Produces a classic setup.exe (Program Files install, Start-Menu entry,
-; uninstaller). A signed MSIX for the Microsoft Store is a separate path —
-; see the store-submission notes in README.md.
+; Produces a classic setup.exe (per-user install under %LocalAppData%,
+; Start-Menu entry, uninstaller). PrivilegesRequired=lowest means no admin
+; prompt, so the in-app updater can run it silently. A signed MSIX for the
+; Microsoft Store is a separate path — see the store-submission notes.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -22,9 +23,11 @@ AppName=Markdown Studio
 AppVersion={#AppVersion}
 AppPublisher=Markdown Studio
 AppPublisherURL=https://github.com/TheSaltyKorean/md
-DefaultDirName={autopf}\Markdown Studio
+DefaultDirName={localappdata}\Programs\Markdown Studio
 DefaultGroupName=Markdown Studio
 DisableProgramGroupPage=yes
+; Per-user install: no admin/UAC on install or update.
+PrivilegesRequired=lowest
 OutputDir={#OutputDir}
 OutputBaseFilename=markdown-studio-setup
 ArchitecturesAllowed=x64compatible
