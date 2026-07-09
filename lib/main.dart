@@ -40,14 +40,21 @@ Future<void> main(List<String> args) async {
   }
 
   final prefs = await SharedPreferences.getInstance();
-  // Only the primary window owns the session. A torn-off (`--new-window`)
-  // window is a separate process; if it also wrote the app-wide session.json,
-  // two windows would clobber each other's snapshot (last writer wins). Those
-  // windows run without session persistence — the primary remembers the tabs.
-  final isTornOffWindow =
-      forceNewWindow || _flagValue(args, '--handoff') != null;
+  final handoffPath = _flagValue(args, '--handoff');
+  final fileArgs = _fileArgs(args);
+  // The session (restore + persist) belongs only to a **plain** primary
+  // launch. It's disabled for:
+  //  - torn-off (`--new-window` / `--handoff`) windows — a separate process
+  //    that would clobber the app-wide session.json (last writer wins);
+  //  - a launch that names files (double-click a `.md`) — that should open
+  //    exactly those files, and must not overwrite the saved session's
+  //    unsaved buffers with only the requested file.
+  // The updater's silent relaunch passes no args, so it's a plain launch and
+  // restores everything. (Mobile has no argv, so mobile is always plain.)
+  final isTornOffWindow = forceNewWindow || handoffPath != null;
+  final plainLaunch = !isTornOffWindow && fileArgs.isEmpty;
   final workspace = WorkspaceController(prefs,
-      sessionStore: isTornOffWindow ? null : FileSessionStore());
+      sessionStore: plainLaunch ? FileSessionStore() : null);
 
   if (single.isSupported) {
     try {
@@ -59,25 +66,21 @@ Future<void> main(List<String> args) async {
     });
   }
 
-  // Restore the previous session FIRST (into the fresh workspace), then open
-  // whatever this launch requests on top of it. A handoff window is its own
-  // thing and never restores. This ordering means a double-clicked file (or a
-  // platform-channel open) adds to the restored tabs instead of replacing
-  // them — and the session is never overwritten with only the new file.
-  final handoffPath = _flagValue(args, '--handoff');
-  final fileArgs = _fileArgs(args);
   if (handoffPath != null) {
     await _openHandoff(handoffPath, workspace);
+  } else if (fileArgs.isNotEmpty) {
+    // Named files: open exactly those (session persistence is off, so the
+    // previously saved session survives untouched for the next plain launch).
+    await _openPaths(fileArgs, workspace);
   } else {
-    // A plain launch (incl. the updater's silent relaunch) reopens exactly
-    // the previous session; a file/channel launch adds the requested file.
+    // Plain launch (incl. the updater's silent relaunch): reopen the previous
+    // session, then let the platform channel focus a launch document on top.
     await workspace.restoreSession();
     // On Android/iOS/macOS, document opens arrive as intents/URLs rather than
     // argv — wire up the platform channel (may open the launch document).
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       await OpenFileChannel(workspace).init();
     }
-    if (fileArgs.isNotEmpty) await _openPaths(fileArgs, workspace);
   }
 
   runApp(

@@ -20,6 +20,7 @@ class _RestoredDoc {
     required this.markDirty,
     required this.mode,
     required this.baseline,
+    required this.conflict,
   });
 
   final String? path;
@@ -28,6 +29,7 @@ class _RestoredDoc {
   final bool markDirty;
   final String? mode;
   final String? baseline;
+  final String? conflict;
 }
 
 /// A tab in the workspace strip: an editable document or a print preview.
@@ -352,6 +354,10 @@ class WorkspaceController extends ChangeNotifier {
         // For a dirty file-backed tab, the disk content it was last in sync
         // with — so restore can tell whether the file changed while closed.
         if (d.isDirty && d.filePath != null) 'synced': d.syncedContent,
+        // An unresolved external-change conflict, so it survives the restart
+        // instead of being silently cleared (which would let a later Save
+        // overwrite the external change).
+        if (d.hasExternalConflict) 'conflict': d.pendingExternalContent,
       });
     }
     return {'version': 1, 'active': activeDoc, 'docs': docs};
@@ -370,12 +376,20 @@ class WorkspaceController extends ChangeNotifier {
     _track(() => store.write(json));
   }
 
-  /// Force an immediate session write and stop the debounce timer. Called on
-  /// shutdown (normal close or update relaunch); the queued write is drained
-  /// via [pendingWrites].
-  void flushSession() {
+  /// Force an immediate session write, awaiting the result, and stop the
+  /// debounce timer. Returns false if the write failed (disk full/unwritable)
+  /// so the caller can fall back to a discard prompt rather than lose unsaved
+  /// work silently. A no-op returning true when persistence is disabled.
+  Future<bool> flushSession() async {
     _sessionTimer?.cancel();
-    _saveSession();
+    final store = _sessionStore;
+    if (store == null) return true;
+    try {
+      await store.write(jsonEncode(sessionSnapshot()));
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Rebuild the tabs from a previously saved session. No-op when session
@@ -430,6 +444,8 @@ class WorkspaceController extends ChangeNotifier {
         // The disk baseline for a dirty tab, so loadMarkdown can flag a
         // conflict if the file changed while the app was closed.
         baseline: dirty ? entry['synced'] as String? : null,
+        // An external-change conflict that was already pending at shutdown.
+        conflict: entry['conflict'] as String?,
       ));
     }
     if (restored.isEmpty) return;
@@ -445,7 +461,8 @@ class WorkspaceController extends ChangeNotifier {
             path: r.path,
             displayName: r.name,
             markDirty: r.markDirty,
-            restoredBaseline: r.baseline);
+            restoredBaseline: r.baseline,
+            restoredConflict: r.conflict);
       for (final m in EditorMode.values) {
         if (m.name == r.mode) {
           doc.setMode(m);

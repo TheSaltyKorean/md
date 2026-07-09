@@ -45,7 +45,8 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> with WindowListener {
+class _EditorScreenState extends State<EditorScreen>
+    with WindowListener, WidgetsBindingObserver {
   DocumentController? _bannerDoc;
   bool _conflictShown = false;
   bool _dragging = false;
@@ -65,6 +66,10 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       // Intercept the window-close button so we can confirm unsaved changes.
       windowManager.setPreventClose(true);
     }
+    // Mobile has no window-close event: flush the session when the app is
+    // paused/backgrounded so edits aren't lost if it's then swiped away
+    // before the debounce fires.
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance
         .addPostFrameCallback((_) => _maybePromptAssociation());
     // Launch-time update check (single version request; menu-toggleable).
@@ -94,10 +99,40 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
   @override
   void dispose() {
     if (_isDesktop) windowManager.removeListener(this);
+    WidgetsBinding.instance.removeObserver(this);
     _bannerDoc?.removeListener(_onActiveDocChanged);
     _find.removeListener(_onFindChanged);
     _find.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Persist the session when the app leaves the foreground (mobile has no
+    // window-close hook), so a swipe-away right after an edit doesn't lose it.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      context.read<WorkspaceController>().flushSession();
+    }
+  }
+
+  /// Persist the session for a clean exit and decide whether to proceed.
+  /// Returns true to go ahead with the exit, false to abort it (the user
+  /// cancelled a fallback discard prompt). With persistence on, a successful
+  /// flush means hot exit (no prompt); a *failed* flush (disk full/unwritable)
+  /// falls back to the discard warning so unsaved work isn't lost silently.
+  /// Without persistence (a torn-off window), any unsaved work prompts.
+  Future<bool> _prepareExit() async {
+    final ws = context.read<WorkspaceController>();
+    final anyDirty = ws.documents.any((d) => d.isDirty);
+    if (ws.sessionEnabled) {
+      if (await ws.flushSession()) return true; // saved — hot exit
+      if (!anyDirty) return true; // write failed but nothing to lose
+    } else if (!anyDirty) {
+      return true;
+    }
+    if (!mounted) return true;
+    return _confirmDiscard(context, 'One or more open documents');
   }
 
   /// Open find (and optionally replace). Find operates on the raw Markdown
@@ -109,15 +144,7 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   @override
   void onWindowClose() async {
-    // Hot exit: when the session is persisted, closing restores everything on
-    // next launch, so no "discard unsaved changes?" prompt is needed. But a
-    // torn-off window (--new-window) has NO session persistence — there,
-    // closing with unsaved work would lose it silently, so still prompt.
-    final ws = context.read<WorkspaceController>();
-    if (!ws.sessionEnabled && ws.documents.any((d) => d.isDirty) && mounted) {
-      final ok = await _confirmDiscard(context, 'One or more open documents');
-      if (!ok) return; // keep the window open
-    }
+    if (!await _prepareExit()) return; // user cancelled a discard prompt
     await _shutdownAndExit();
   }
 
@@ -139,10 +166,9 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     final profiles = context.read<PrintProfileService>();
     final zoom = context.read<ZoomController>();
     final updates = context.read<UpdateController>();
-    // Write the final session snapshot now (open tabs + unsaved buffers) so
-    // the next launch — including the updater's silent relaunch — reopens
-    // exactly here. The queued write is drained below with the others.
-    ws.flushSession();
+    // The final session write already happened in _prepareExit (awaited, so
+    // its success gates a discard fallback). Here we just drain the other
+    // fire-and-forget preference writes.
     // Drain any preference write still in flight (UI callbacks fire-and-forget
     // setAutoReload / cycle / setDefault), so a setting changed right before
     // closing isn't lost. Bounded so a stuck write can't hang the close.
@@ -320,13 +346,19 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
     // actions collapse into the overflow menu so the app bar can't overflow.
     final isNarrow = MediaQuery.sizeOf(context).width < 720;
     return PopScope(
-      // Guard the Android back gesture when there are unsaved changes.
-      canPop: !anyDirty,
+      // With session persistence, Android back is hot exit — everything is
+      // restored next launch, so allow the pop and flush on the way out. Only
+      // a window without persistence guards unsaved changes with a prompt.
+      canPop: ws.sessionEnabled || !anyDirty,
       onPopInvokedWithResult: (didPop, result) async {
-        if (didPop) return;
+        if (didPop) {
+          // Popped (session-persisted or clean): save before teardown.
+          if (ws.sessionEnabled) await ws.flushSession();
+          return;
+        }
+        // Not popped (unsaved + no persistence): confirm, then exit — canPop
+        // stays false, so popping the route would just re-trigger this guard.
         final ok = await _confirmDiscard(context, 'One or more open documents');
-        // canPop stays false (docs still dirty), so popping the route would just
-        // re-trigger this guard. Exit the app explicitly instead.
         if (ok) await SystemNavigator.pop();
       },
       // Find shortcuts wrap the whole Scaffold (not just the body) so Ctrl/Cmd+F,
@@ -1008,17 +1040,12 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       return;
     }
 
-    // No discard prompt when the session persists (the app exits for the
-    // install but its tabs + unsaved buffers are flushed on shutdown and
-    // restored on the auto-relaunch). A torn-off window without persistence
-    // still prompts, or its unsaved work would be lost.
+    // The Windows install path exits the app, so persist the session first
+    // (it's restored on the auto-relaunch). _prepareExit hot-exits when the
+    // session saves and only prompts if it can't — same as a window close.
     final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
-    final ws = context.read<WorkspaceController>();
-    if (exitsForInstall &&
-        !ws.sessionEnabled &&
-        ws.documents.any((d) => d.isDirty)) {
-      final ok = await _confirmDiscard(context, 'One or more open documents');
-      if (!ok || !mounted) return;
+    if (exitsForInstall) {
+      if (!await _prepareExit() || !mounted) return;
     }
 
     final progress = ValueNotifier<double>(-1);

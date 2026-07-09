@@ -768,8 +768,7 @@ void main() {
     ws.documents[2].sourceController.text = 'draft notes';
     // Make the middle document the active one.
     ws.select(1);
-    ws.flushSession();
-    await ws.pendingWrites;
+    await ws.flushSession();
     expect(store.data, isNotNull);
     ws.dispose();
 
@@ -804,8 +803,7 @@ void main() {
 
     final ws = WorkspaceController(prefs, sessionStore: store);
     ws.openDocument('original', path: f.path); // clean, saved
-    ws.flushSession();
-    await ws.pendingWrites;
+    await ws.flushSession();
     ws.dispose();
 
     // The file changes on disk while the app is closed (git pull, sync…).
@@ -847,14 +845,54 @@ void main() {
     ws.dispose();
   });
 
+  test('Restore re-surfaces an external conflict pending at shutdown',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': '/tmp/x.md',
+            'name': null,
+            'content': 'my unsaved edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'external content',
+            'conflict': 'external content',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my unsaved edits');
+    expect(d.isDirty, isTrue);
+    // The unresolved conflict is restored, not silently dropped.
+    expect(d.hasExternalConflict, isTrue);
+    expect(d.pendingExternalContent, 'external content');
+    ws.dispose();
+  });
+
+  test('flushSession reports a write failure so the caller can warn', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws =
+        WorkspaceController(prefs, sessionStore: _ThrowingSessionStore());
+    ws.openDocument('unsaved', path: '/tmp/x.md');
+    expect(await ws.flushSession(), isFalse);
+    ws.dispose();
+  });
+
   test('A blank starter tab is not persisted as real work', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     final store = _FakeSessionStore();
     final ws = WorkspaceController(prefs, sessionStore: store);
     // Only the default pristine Untitled is open.
-    ws.flushSession();
-    await ws.pendingWrites;
+    await ws.flushSession();
     final snap = jsonDecode(store.data!) as Map<String, dynamic>;
     expect(snap['docs'], isEmpty); // nothing real to restore
     ws.dispose();
@@ -873,8 +911,7 @@ void main() {
     ws.openDocument('v1 on disk', path: f.path);
     ws.documents.last.setMode(EditorMode.split);
     ws.documents.last.sourceController.text = 'my unsaved edit';
-    ws.flushSession();
-    await ws.pendingWrites;
+    await ws.flushSession();
     ws.dispose();
 
     // The file is changed by another tool while the app is closed.
@@ -2078,4 +2115,17 @@ class _FakeSessionStore implements SessionStore {
 
   @override
   Future<void> clear() async => data = null;
+}
+
+/// A [SessionStore] whose writes always fail (disk full / unwritable), used to
+/// verify the flush-failure fallback.
+class _ThrowingSessionStore implements SessionStore {
+  @override
+  Future<String?> read() async => null;
+
+  @override
+  Future<void> write(String d) async => throw const FileSystemException('full');
+
+  @override
+  Future<void> clear() async {}
 }
