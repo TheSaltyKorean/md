@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -9,8 +10,8 @@ import 'package:url_launcher/url_launcher.dart';
 ///
 /// The whole render sits inside a [SelectionArea] so text can be highlighted
 /// and copied with the native context menu / keyboard shortcut across the
-/// entire document (not just one block at a time). Fenced code blocks also get
-/// an explicit copy button in their top-right corner.
+/// entire document. Fenced code blocks get a copy button; tables get a
+/// "Copy table" chip that copies spreadsheet-ready TSV.
 class PreviewView extends StatelessWidget {
   const PreviewView({
     super.key,
@@ -26,45 +27,48 @@ class PreviewView extends StatelessWidget {
   /// preview in sync with the source editor).
   final ScrollController? controller;
 
+  static Future<void> _launch(String href) async {
+    final uri = Uri.tryParse(href);
+    if (uri == null) return;
+    // Launch directly: canLaunchUrl can falsely return false on Android 11+
+    // due to package visibility, making links appear dead.
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {/* no handler available */}
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // Inject a "Copy table" marker above each table and collect each table's
-    // tab-separated text. The table itself still renders via the package
-    // (untouched); the marker becomes a small chip that copies spreadsheet-
-    // ready TSV — plain selection only yields run-together text that Excel
-    // pastes into a single cell.
-    final (transformed, tsvByIndex) = injectTableCopyMarkers(markdown);
+    final styleSheet = _styleSheet(theme);
     return SelectionArea(
       child: Markdown(
-        data: transformed,
+        data: markdown,
         controller: controller,
         // SelectionArea provides selection for the whole document; the
         // widget's own per-block SelectableText would nest inside it and
         // assert, so it stays off here.
         selectable: false,
         padding: padding,
+        // Parse tables to an `mdtable` element instead of `table` — the
+        // package hard-codes `table` rendering, so a `table` builder can't
+        // add the copy chip, but a renamed tag routes to our own renderer
+        // (which reuses the real parser's structure, so every GFM rule —
+        // column counts, entity decoding, code-fence exclusion — holds).
+        blockSyntaxes: [_CopyableTableSyntax()],
         // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
         // ourselves and render it underlined (matches the PDF export).
-        inlineSyntaxes: [_UnderlineSyntax(), _CopyTableSyntax()],
+        inlineSyntaxes: [_UnderlineSyntax()],
         builders: {
           'u': _UnderlineElementBuilder(),
           // Custom fenced-code-block rendering with a copy button. The
           // package still wraps the returned widget in codeblockDecoration.
           'pre': _CodeBlockBuilder(theme),
-          // The injected "Copy table" chip above each table.
-          'copytable': _CopyTableButtonBuilder(tsvByIndex),
+          'mdtable': _TableBuilder(styleSheet, _launch),
         },
-        styleSheet: _styleSheet(theme),
+        styleSheet: styleSheet,
         onTapLink: (text, href, title) async {
-          if (href == null) return;
-          final uri = Uri.tryParse(href);
-          if (uri == null) return;
-          // Launch directly: canLaunchUrl can falsely return false on
-          // Android 11+ due to package visibility, making links appear dead.
-          try {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          } catch (_) {/* no handler available */}
+          if (href != null) await _launch(href);
         },
       ),
     );
@@ -107,6 +111,8 @@ class PreviewView extends StatelessWidget {
     );
   }
 }
+
+// --- Code blocks ------------------------------------------------------------
 
 /// Renders a fenced code block (`<pre>`) with a copy button pinned to the
 /// top-right corner. The package wraps whatever this returns in the
@@ -210,138 +216,240 @@ class _CopyButtonState extends State<_CopyButton> {
   }
 }
 
-// --- Table copy (TSV for spreadsheets) --------------------------------------
+// --- Tables (copy as TSV) ---------------------------------------------------
 
-/// Private-use marker char that can't appear in real document text, used to
-/// splice the "Copy table" affordance into the markdown before each table.
-const String _tableMarkerChar = '\uE000';
+/// The GFM table syntax, but relabelled `table` → `mdtable` so [_TableBuilder]
+/// (rather than the package's hard-coded table handling) renders it. Uses the
+/// real parser, so table detection is exactly GFM's: correct column counts,
+/// decoded entities, and no false positives inside code blocks.
+class _CopyableTableSyntax extends md.TableSyntax {
+  // The package's block visitor handles `tr`/`th`/`td` assuming a `table`
+  // context it builds itself, so renaming only `table` would make it choke on
+  // the still-`tr` rows. Rename the WHOLE structure to inert `md…` tags; the
+  // cells' UnparsedContent still flows through the inline pass (so bold,
+  // links, entities parse), and [_MarkdownTable] reads the `md…` tags.
+  static const _rename = {
+    'table': 'mdtable',
+    'thead': 'mdthead',
+    'tbody': 'mdtbody',
+    'tr': 'mdtr',
+    'th': 'mdth',
+    'td': 'mdtd',
+  };
 
-/// Scans [markdown] for block-level GFM tables and returns a copy of it with a
-/// `Copy table` marker paragraph inserted above each one, plus a map from
-/// marker index to that table's tab-separated (TSV) text — what a spreadsheet
-/// needs to split the paste into cells.
-///
-/// A table is only marked when it's clearly its own block (preceded by a blank
-/// line or the document start) so the injection can never turn non-table text
-/// into a table. Anything it doesn't recognise simply gets no chip — the table
-/// still renders normally.
-@visibleForTesting
-(String, Map<int, String>) injectTableCopyMarkers(String markdown) {
-  final lines = markdown.split('\n');
-  final out = <String>[];
-  final tsv = <int, String>{};
-  var index = 0;
-  var i = 0;
-
-  bool isRow(String l) => l.contains('|');
-  bool isDelimiter(String l) {
-    final t = l.trim();
-    return t.contains('-') &&
-        RegExp(r'^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$').hasMatch(t);
+  md.Node _relabel(md.Node node) {
+    if (node is! md.Element) return node;
+    final tag = _rename[node.tag];
+    if (tag == null) return node; // inline cell content — leave untouched
+    return md.Element(tag, node.children?.map(_relabel).toList())
+      ..attributes.addAll(node.attributes);
   }
-
-  while (i < lines.length) {
-    final blockStart = i == 0 || lines[i - 1].trim().isEmpty;
-    if (blockStart &&
-        i + 1 < lines.length &&
-        isRow(lines[i]) &&
-        isDelimiter(lines[i + 1])) {
-      final tableLines = <String>[lines[i], lines[i + 1]];
-      var j = i + 2;
-      while (
-          j < lines.length && lines[j].trim().isNotEmpty && isRow(lines[j])) {
-        tableLines.add(lines[j]);
-        j++;
-      }
-      final rows = <List<String>>[];
-      for (var k = 0; k < tableLines.length; k++) {
-        if (k == 1) continue; // skip the |---|---| delimiter row
-        rows.add(_splitRow(tableLines[k]));
-      }
-      tsv[index] = rows.map((r) => r.join('\t')).join('\n');
-      // Separate the marker into its own paragraph above the table.
-      if (out.isNotEmpty && out.last.trim().isNotEmpty) out.add('');
-      out.add('$_tableMarkerChar$index$_tableMarkerChar');
-      out.add('');
-      out.addAll(tableLines);
-      index++;
-      i = j;
-    } else {
-      out.add(lines[i]);
-      i++;
-    }
-  }
-  return (out.join('\n'), tsv);
-}
-
-/// Split a `| a | b |` row into cell values: honour escaped `\|`, drop the
-/// outer pipes, and strip common inline markdown so the pasted value is plain
-/// text (e.g. `**Bold**` → `Bold`, `[x](url)` → `x`). Tabs/newlines inside a
-/// cell collapse to a space so they can't break the TSV grid.
-List<String> _splitRow(String row) {
-  final cells = <String>[];
-  final buf = StringBuffer();
-  final l = row.trim();
-  for (var k = 0; k < l.length; k++) {
-    final ch = l[k];
-    if (ch == r'\' && k + 1 < l.length && l[k + 1] == '|') {
-      buf.write('|');
-      k++;
-    } else if (ch == '|') {
-      cells.add(buf.toString());
-      buf.clear();
-    } else {
-      buf.write(ch);
-    }
-  }
-  cells.add(buf.toString());
-  // Drop empty first/last cells produced by the leading/trailing pipes.
-  if (cells.isNotEmpty && cells.first.trim().isEmpty) cells.removeAt(0);
-  if (cells.isNotEmpty && cells.last.trim().isEmpty) {
-    cells.removeLast();
-  }
-  return [for (final c in cells) _plainCell(c)];
-}
-
-String _plainCell(String cell) {
-  var s = cell.trim();
-  s = s.replaceAllMapped(
-      RegExp(r'\[([^\]]*)\]\([^)]*\)'), (m) => m[1] ?? ''); // links → text
-  s = s.replaceAll(RegExp(r'\*\*|__|\*|_|`|~~'), ''); // emphasis / code / del
-  s = s.replaceAll(RegExp(r'[\t\n]+'), ' ');
-  return s.trim();
-}
-
-/// Turns the injected `<index>` marker into a `copytable` element
-/// carrying the index the builder resolves to a TSV string.
-class _CopyTableSyntax extends md.InlineSyntax {
-  _CopyTableSyntax() : super('$_tableMarkerChar(\\d+)$_tableMarkerChar');
 
   @override
-  bool onMatch(md.InlineParser parser, Match match) {
-    parser.addNode(
-        md.Element.empty('copytable')..attributes['idx'] = match[1] ?? '');
-    return true;
+  md.Node? parse(md.BlockParser parser) {
+    final node = super.parse(parser);
+    if (node is md.Element && node.tag == 'table') return _relabel(node);
+    return node;
   }
 }
 
-/// Renders the "Copy table" chip for an injected marker.
-class _CopyTableButtonBuilder extends MarkdownElementBuilder {
-  _CopyTableButtonBuilder(this.tsvByIndex);
+/// Routes the parsed `mdtable` element to the [_MarkdownTable] renderer.
+class _TableBuilder extends MarkdownElementBuilder {
+  _TableBuilder(this.styleSheet, this.onTapLink);
 
-  final Map<int, String> tsvByIndex;
+  final MarkdownStyleSheet styleSheet;
+  final void Function(String href) onTapLink;
 
   @override
-  Widget? visitElementAfterWithContext(
+  bool isBlockElement() => true;
+
+  @override
+  Widget visitElementAfterWithContext(
     BuildContext context,
     md.Element element,
     TextStyle? preferredStyle,
     TextStyle? parentStyle,
-  ) {
-    final idx = int.tryParse(element.attributes['idx'] ?? '');
-    final tsv = idx == null ? null : tsvByIndex[idx];
-    if (tsv == null) return const SizedBox.shrink();
-    return _CopyTableChip(tsv: tsv);
+  ) =>
+      _MarkdownTable(
+          element: element, styleSheet: styleSheet, onTapLink: onTapLink);
+}
+
+/// Renders a parsed table faithfully (inline formatting, links, alignment)
+/// with a "Copy table" chip above it. Stateful so link tap recognizers can be
+/// disposed. The TSV is computed from the parser's normalised cells, so the
+/// clipboard always matches the rendered grid.
+class _MarkdownTable extends StatefulWidget {
+  const _MarkdownTable({
+    required this.element,
+    required this.styleSheet,
+    required this.onTapLink,
+  });
+
+  final md.Element element;
+  final MarkdownStyleSheet styleSheet;
+  final void Function(String href) onTapLink;
+
+  @override
+  State<_MarkdownTable> createState() => _MarkdownTableState();
+}
+
+class _MarkdownTableState extends State<_MarkdownTable> {
+  final List<TapGestureRecognizer> _recognizers = [];
+
+  @override
+  void dispose() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    super.dispose();
+  }
+
+  /// Rows as (cells, isHeader). Cells are the `mdth`/`mdtd` elements (the
+  /// relabelled `th`/`td` — see [_CopyableTableSyntax]).
+  List<(List<md.Element>, bool)> _rows() {
+    final rows = <(List<md.Element>, bool)>[];
+    for (final section in widget.element.children ?? const <md.Node>[]) {
+      if (section is! md.Element) continue;
+      final isHead = section.tag == 'mdthead';
+      for (final row in section.children ?? const <md.Node>[]) {
+        if (row is! md.Element || row.tag != 'mdtr') continue;
+        final cells = [
+          for (final c in row.children ?? const <md.Node>[])
+            if (c is md.Element) c
+        ];
+        rows.add((cells, isHead));
+      }
+    }
+    return rows;
+  }
+
+  String _cellText(md.Element? cell) =>
+      (cell?.textContent ?? '').replaceAll(RegExp(r'[\t\n]+'), ' ').trim();
+
+  TextAlign _align(md.Element cell) => switch (cell.attributes['align']) {
+        'center' => TextAlign.center,
+        'right' => TextAlign.right,
+        _ => TextAlign.left,
+      };
+
+  List<InlineSpan> _spans(List<md.Node>? nodes, TextStyle base) {
+    final cs = Theme.of(context).colorScheme;
+    final out = <InlineSpan>[];
+    for (final n in nodes ?? const <md.Node>[]) {
+      if (n is md.Text) {
+        out.add(TextSpan(text: n.text, style: base));
+        continue;
+      }
+      if (n is! md.Element) continue;
+      switch (n.tag) {
+        case 'strong':
+          out.addAll(
+              _spans(n.children, base.copyWith(fontWeight: FontWeight.bold)));
+        case 'em':
+          out.addAll(
+              _spans(n.children, base.copyWith(fontStyle: FontStyle.italic)));
+        case 'del':
+          out.addAll(_spans(n.children,
+              base.copyWith(decoration: TextDecoration.lineThrough)));
+        case 'u':
+          out.addAll(_spans(
+              n.children, base.copyWith(decoration: TextDecoration.underline)));
+        case 'code':
+          out.add(TextSpan(
+              text: n.textContent,
+              style: base.copyWith(
+                  fontFamily: 'monospace',
+                  backgroundColor: cs.surfaceContainerHighest)));
+        case 'br':
+          out.add(const TextSpan(text: '\n'));
+        case 'a':
+          final href = n.attributes['href'];
+          final linkStyle = base.copyWith(
+              color: cs.primary, decoration: TextDecoration.underline);
+          if (href == null) {
+            out.addAll(_spans(n.children, linkStyle));
+          } else {
+            final rec = TapGestureRecognizer()
+              ..onTap = () => widget.onTapLink(href);
+            _recognizers.add(rec);
+            out.add(TextSpan(
+                text: n.textContent, style: linkStyle, recognizer: rec));
+          }
+        default:
+          out.addAll(_spans(n.children, base));
+      }
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Recognizers are recreated each build; dispose the previous set first.
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+
+    final rows = _rows();
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final cols = rows.first.$1.length;
+    if (cols == 0) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
+    final base = DefaultTextStyle.of(context).style.copyWith(fontSize: 14);
+
+    // TSV from the parser's cells, normalised to the header column count so
+    // it always matches the rendered grid.
+    final tsv = rows.map((r) {
+      final cells = r.$1;
+      return [
+        for (var i = 0; i < cols; i++)
+          _cellText(i < cells.length ? cells[i] : null)
+      ].join('\t');
+    }).join('\n');
+
+    final tableRows = <TableRow>[
+      for (final (cells, isHeader) in rows)
+        TableRow(
+          decoration: isHeader
+              ? BoxDecoration(color: cs.surfaceContainerHighest)
+              : null,
+          children: [
+            for (var i = 0; i < cols; i++)
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                child: RichText(
+                  textAlign:
+                      i < cells.length ? _align(cells[i]) : TextAlign.left,
+                  text: TextSpan(
+                    children: i < cells.length
+                        ? _spans(
+                            cells[i].children,
+                            base.copyWith(
+                                fontWeight: isHeader ? FontWeight.bold : null))
+                        : const [],
+                  ),
+                ),
+              ),
+          ],
+        ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _CopyTableChip(tsv: tsv),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Table(
+            defaultColumnWidth: const IntrinsicColumnWidth(),
+            border: TableBorder.all(color: cs.outlineVariant),
+            children: tableRows,
+          ),
+        ),
+      ],
+    );
   }
 }
 
@@ -371,26 +479,25 @@ class _CopyTableChipState extends State<_CopyTableChip> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return SelectionContainer.disabled(
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Padding(
-          padding: const EdgeInsets.only(bottom: 4),
-          child: ActionChip(
-            visualDensity: VisualDensity.compact,
-            avatar: Icon(
-              _copied ? Icons.check_rounded : Icons.grid_on_rounded,
-              size: 16,
-              color: _copied ? Colors.green : cs.onSurfaceVariant,
-            ),
-            label: Text(_copied ? 'Copied' : 'Copy table'),
-            tooltip: 'Copy as tab-separated values (paste into a spreadsheet)',
-            onPressed: _copy,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: ActionChip(
+          visualDensity: VisualDensity.compact,
+          avatar: Icon(
+            _copied ? Icons.check_rounded : Icons.grid_on_rounded,
+            size: 16,
+            color: _copied ? Colors.green : cs.onSurfaceVariant,
           ),
+          label: Text(_copied ? 'Copied' : 'Copy table'),
+          tooltip: 'Copy as tab-separated values (paste into a spreadsheet)',
+          onPressed: _copy,
         ),
       ),
     );
   }
 }
+
+// --- Inline HTML underline --------------------------------------------------
 
 /// Parses `<u>…</u>` inline HTML into a `u` element for the preview renderer.
 class _UnderlineSyntax extends md.InlineSyntax {
