@@ -1093,6 +1093,62 @@ void main() {
     ws.dispose();
   });
 
+  testWidgets('A table shows a Copy table chip that copies TSV',
+      (tester) async {
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    // A table whose cells exercise the parser: bold header, inline code, a
+    // link, a literal underscore, and an HTML entity.
+    const md = 'x\n\n'
+        '| **Id** | Note |\n'
+        '| --- | --- |\n'
+        '| order_id | AT&amp;T `x` |\n'
+        '| [Bob](https://x.test) | ok |\n';
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PreviewView(markdown: md)),
+    ));
+    await tester.pumpAndSettle();
+
+    final chip = find.text('Copy table');
+    expect(chip, findsOneWidget);
+    await tester.tap(chip);
+    await tester.pump();
+
+    final copied = calls.firstWhere((c) => c.method == 'Clipboard.setData');
+    // TSV = plain cell values: bold stripped, underscore kept, entity decoded
+    // (AT&T not AT&amp;T), inline code as text, link as its label.
+    expect(
+        (copied.arguments as Map)['text'],
+        'Id\tNote\n'
+        'order_id\tAT&T x\n'
+        'Bob\tok');
+    expect(find.text('Copied'), findsOneWidget);
+    // Let the confirmation timer elapse so it doesn't outlive the test.
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(find.text('Copy table'), findsOneWidget);
+  });
+
+  testWidgets('A table-shaped example inside a code block gets no chip',
+      (tester) async {
+    const md = 'text\n\n```\n| not | a | table |\n'
+        '| --- | --- | --- |\n| x | y | z |\n```\n';
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PreviewView(markdown: md)),
+    ));
+    await tester.pumpAndSettle();
+    // The real parser keeps it as code — no table, no Copy table chip.
+    expect(find.text('Copy table'), findsNothing);
+  });
+
   test('Print profiles seed with built-ins', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
