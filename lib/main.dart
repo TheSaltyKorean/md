@@ -59,24 +59,25 @@ Future<void> main(List<String> args) async {
     });
   }
 
-  // On Android/iOS/macOS, document opens arrive as intents/URLs rather than
-  // argv — wire up the platform channel that receives them.
-  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
-    await OpenFileChannel(workspace).init();
-  }
-
-  // A torn-off tab is handed off via a temp JSON file carrying its (possibly
-  // unsaved) content, so edits aren't lost when it opens in the new window.
+  // Restore the previous session FIRST (into the fresh workspace), then open
+  // whatever this launch requests on top of it. A handoff window is its own
+  // thing and never restores. This ordering means a double-clicked file (or a
+  // platform-channel open) adds to the restored tabs instead of replacing
+  // them — and the session is never overwritten with only the new file.
   final handoffPath = _flagValue(args, '--handoff');
   final fileArgs = _fileArgs(args);
   if (handoffPath != null) {
     await _openHandoff(handoffPath, workspace);
-  } else if (fileArgs.isNotEmpty) {
-    await _openPaths(fileArgs, workspace);
   } else {
-    // A plain launch (including the updater's silent relaunch) reopens the
-    // previous session — tabs, unsaved buffers, and the active document.
+    // A plain launch (incl. the updater's silent relaunch) reopens exactly
+    // the previous session; a file/channel launch adds the requested file.
     await workspace.restoreSession();
+    // On Android/iOS/macOS, document opens arrive as intents/URLs rather than
+    // argv — wire up the platform channel (may open the launch document).
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
+      await OpenFileChannel(workspace).init();
+    }
+    if (fileArgs.isNotEmpty) await _openPaths(fileArgs, workspace);
   }
 
   runApp(

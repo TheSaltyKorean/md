@@ -828,8 +828,13 @@ void main() {
         'version': 1,
         'active': 0,
         'docs': [
-          {'path': null, 'name': null, 'content': 'saved', 'dirty': true,
-            'mode': 'raw'},
+          {
+            'path': null,
+            'name': null,
+            'content': 'saved',
+            'dirty': true,
+            'mode': 'raw'
+          },
         ],
       });
     final ws = WorkspaceController(prefs, sessionStore: store);
@@ -840,6 +845,50 @@ void main() {
     expect(ws.documents.length, 1);
     expect(ws.documents.first.currentMarkdown(), '# Opened via association');
     ws.dispose();
+  });
+
+  test('A blank starter tab is not persisted as real work', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // Only the default pristine Untitled is open.
+    ws.flushSession();
+    await ws.pendingWrites;
+    final snap = jsonDecode(store.data!) as Map<String, dynamic>;
+    expect(snap['docs'], isEmpty); // nothing real to restore
+    ws.dispose();
+  });
+
+  test('A dirty restored tab conflicts if its file changed while closed',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final tmp = Directory.systemTemp.createTempSync('mdsess3');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/doc.md')..writeAsStringSync('v1 on disk');
+
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    ws.openDocument('v1 on disk', path: f.path);
+    ws.documents.last.setMode(EditorMode.split);
+    ws.documents.last.sourceController.text = 'my unsaved edit';
+    ws.flushSession();
+    await ws.pendingWrites;
+    ws.dispose();
+
+    // The file is changed by another tool while the app is closed.
+    f.writeAsStringSync('v2 changed externally');
+
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    await ws2.restoreSession();
+    final d = ws2.documents.last;
+    expect(d.currentMarkdown(), 'my unsaved edit'); // buffer preserved
+    expect(d.isDirty, isTrue);
+    // The external change is surfaced as a conflict, not silently ignored.
+    expect(d.hasExternalConflict, isTrue);
+    expect(d.pendingExternalContent, 'v2 changed externally');
+    ws2.dispose();
   });
 
   test('Session restore is a no-op with no saved session', () async {

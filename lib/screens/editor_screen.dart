@@ -109,10 +109,15 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
 
   @override
   void onWindowClose() async {
-    // Hot exit: the whole session (open tabs + unsaved buffers) is persisted
-    // and restored on the next launch, so closing never loses work and needs
-    // no "discard unsaved changes?" prompt. Closing a single dirty *tab*
-    // still prompts (see _closeTab) — that removes content nothing restores.
+    // Hot exit: when the session is persisted, closing restores everything on
+    // next launch, so no "discard unsaved changes?" prompt is needed. But a
+    // torn-off window (--new-window) has NO session persistence — there,
+    // closing with unsaved work would lose it silently, so still prompt.
+    final ws = context.read<WorkspaceController>();
+    if (!ws.sessionEnabled && ws.documents.any((d) => d.isDirty) && mounted) {
+      final ok = await _confirmDiscard(context, 'One or more open documents');
+      if (!ok) return; // keep the window open
+    }
     await _shutdownAndExit();
   }
 
@@ -1003,10 +1008,18 @@ class _EditorScreenState extends State<EditorScreen> with WindowListener {
       return;
     }
 
-    // No discard prompt: the app exits for the install on Windows, but the
-    // session (open tabs + unsaved buffers) is flushed on shutdown and
-    // restored on the auto-relaunch, so nothing is lost.
+    // No discard prompt when the session persists (the app exits for the
+    // install but its tabs + unsaved buffers are flushed on shutdown and
+    // restored on the auto-relaunch). A torn-off window without persistence
+    // still prompts, or its unsaved work would be lost.
     final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
+    final ws = context.read<WorkspaceController>();
+    if (exitsForInstall &&
+        !ws.sessionEnabled &&
+        ws.documents.any((d) => d.isDirty)) {
+      final ok = await _confirmDiscard(context, 'One or more open documents');
+      if (!ok || !mounted) return;
+    }
 
     final progress = ValueNotifier<double>(-1);
     var cancelled = false;

@@ -91,6 +91,12 @@ class DocumentController extends ChangeNotifier {
 
   // --- External-change handling ----------------------------------------------
   String? _lastSyncedContent;
+
+  /// The disk content this document is last known to be in sync with (the
+  /// baseline external edits are compared against). Persisted for a dirty tab
+  /// so session restore can tell whether the file changed while closed.
+  String? get syncedContent => _lastSyncedContent;
+
   StreamSubscription<WatchEvent>? _watchSub;
 
   String? _pendingExternalContent;
@@ -161,6 +167,7 @@ class DocumentController extends ChangeNotifier {
     String? path,
     String? displayName,
     bool markDirty = false,
+    String? restoredBaseline,
   }) {
     _suppressDirty = true;
     // A fresh buffer replaces both representations, so nothing has been edited
@@ -183,7 +190,18 @@ class DocumentController extends ChangeNotifier {
           disk = File(path).readAsStringSync();
         } catch (_) {/* file may not exist */}
       }
-      _lastSyncedContent = disk ?? content;
+      if (restoredBaseline != null) {
+        // Restoring an unsaved buffer: the baseline is what the file held at
+        // shutdown. If the file changed on disk while the app was closed,
+        // surface it as an external conflict so a later Save can't silently
+        // clobber that change.
+        _lastSyncedContent = restoredBaseline;
+        if (disk != null && disk != restoredBaseline) {
+          _pendingExternalContent = disk;
+        }
+      } else {
+        _lastSyncedContent = disk ?? content;
+      }
     } else {
       _dirty = false;
       _lastSyncedContent = content;

@@ -19,6 +19,7 @@ class _RestoredDoc {
     required this.content,
     required this.markDirty,
     required this.mode,
+    required this.baseline,
   });
 
   final String? path;
@@ -26,6 +27,7 @@ class _RestoredDoc {
   final String content;
   final bool markDirty;
   final String? mode;
+  final String? baseline;
 }
 
 /// A tab in the workspace strip: an editable document or a print preview.
@@ -88,9 +90,14 @@ class WorkspaceController extends ChangeNotifier {
   final SharedPreferences _prefs;
 
   /// Where the open-tabs session is stored (null disables session
-  /// persistence — e.g. in tests that don't exercise it).
+  /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
   Timer? _sessionTimer;
+
+  /// Whether this workspace persists/restores its session. When false (a
+  /// torn-off window), closing with unsaved work still needs a discard prompt
+  /// — hot exit only applies when the session is actually saved.
+  bool get sessionEnabled => _sessionStore != null;
 
   final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
@@ -328,19 +335,24 @@ class WorkspaceController extends ChangeNotifier {
   Map<String, dynamic> sessionSnapshot() {
     final docs = <Map<String, dynamic>>[];
     var activeDoc = 0;
-    var i = 0;
     for (final tab in _tabs) {
       if (tab is! DocumentTab) continue;
-      if (identical(tab, _tabs[_activeIndex])) activeDoc = i;
       final d = tab.doc;
+      // A blank, never-touched Untitled is not real work: persisting it would
+      // resurrect it on next launch as a non-pristine tab that a real file
+      // open can no longer replace, leaving a stray empty tab behind.
+      if (d.isPristine) continue;
+      if (identical(tab, _tabs[_activeIndex])) activeDoc = docs.length;
       docs.add({
         'path': d.filePath,
         'name': d.displayName,
         'content': d.currentMarkdown(),
         'dirty': d.isDirty,
         'mode': d.mode.name,
+        // For a dirty file-backed tab, the disk content it was last in sync
+        // with — so restore can tell whether the file changed while closed.
+        if (d.isDirty && d.filePath != null) 'synced': d.syncedContent,
       });
-      i++;
     }
     return {'version': 1, 'active': activeDoc, 'docs': docs};
   }
@@ -415,6 +427,9 @@ class WorkspaceController extends ChangeNotifier {
         content: content,
         markDirty: markDirty,
         mode: entry['mode'] as String?,
+        // The disk baseline for a dirty tab, so loadMarkdown can flag a
+        // conflict if the file changed while the app was closed.
+        baseline: dirty ? entry['synced'] as String? : null,
       ));
     }
     if (restored.isEmpty) return;
@@ -427,7 +442,10 @@ class WorkspaceController extends ChangeNotifier {
     for (final r in restored) {
       final doc = _newDoc()
         ..loadMarkdown(r.content,
-            path: r.path, displayName: r.name, markDirty: r.markDirty);
+            path: r.path,
+            displayName: r.name,
+            markDirty: r.markDirty,
+            restoredBaseline: r.baseline);
       for (final m in EditorMode.values) {
         if (m.name == r.mode) {
           doc.setMode(m);
