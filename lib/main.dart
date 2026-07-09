@@ -40,8 +40,14 @@ Future<void> main(List<String> args) async {
   }
 
   final prefs = await SharedPreferences.getInstance();
-  final workspace =
-      WorkspaceController(prefs, sessionStore: FileSessionStore());
+  // Only the primary window owns the session. A torn-off (`--new-window`)
+  // window is a separate process; if it also wrote the app-wide session.json,
+  // two windows would clobber each other's snapshot (last writer wins). Those
+  // windows run without session persistence — the primary remembers the tabs.
+  final isTornOffWindow =
+      forceNewWindow || _flagValue(args, '--handoff') != null;
+  final workspace = WorkspaceController(prefs,
+      sessionStore: isTornOffWindow ? null : FileSessionStore());
 
   if (single.isSupported) {
     try {

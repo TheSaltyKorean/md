@@ -751,10 +751,14 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     final store = _FakeSessionStore();
+    final tmp = Directory.systemTemp.createTempSync('mdsess');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final one = File('${tmp.path}/one.md')..writeAsStringSync('# One');
+    final two = File('${tmp.path}/two.md')..writeAsStringSync('# Two');
 
     final ws = WorkspaceController(prefs, sessionStore: store);
-    ws.openDocument('# One', path: '/tmp/one.md');
-    ws.openDocument('# Two', path: '/tmp/two.md');
+    ws.openDocument('# One', path: one.path);
+    ws.openDocument('# Two', path: two.path);
     // Unsaved edit to a file-backed doc (editing needs a source mode).
     ws.documents[1].setMode(EditorMode.split);
     ws.documents[1].sourceController.text = '# Two edited';
@@ -788,6 +792,54 @@ void main() {
     // The active document is restored too.
     expect(ws2.activeDocument, same(ws2.documents[1]));
     ws2.dispose();
+  });
+
+  test('Restore reflects a clean file changed on disk while closed', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore();
+    final tmp = Directory.systemTemp.createTempSync('mdsess2');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/note.md')..writeAsStringSync('original');
+
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    ws.openDocument('original', path: f.path); // clean, saved
+    ws.flushSession();
+    await ws.pendingWrites;
+    ws.dispose();
+
+    // The file changes on disk while the app is closed (git pull, sync…).
+    f.writeAsStringSync('changed on disk');
+
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    await ws2.restoreSession();
+    // The clean tab shows the CURRENT file, not the stale saved buffer — so a
+    // later save can't silently clobber the on-disk change.
+    expect(ws2.documents.last.currentMarkdown(), 'changed on disk');
+    expect(ws2.documents.last.isDirty, isFalse);
+    ws2.dispose();
+  });
+
+  test('Restore is skipped when a document was already opened', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': null, 'name': null, 'content': 'saved', 'dirty': true,
+            'mode': 'raw'},
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // Simulate an OS file-association open before restore runs.
+    ws.openDocument('# Opened via association', path: '/tmp/assoc.md');
+    await ws.restoreSession();
+    // The just-opened document is kept; the saved session did not clobber it.
+    expect(ws.documents.length, 1);
+    expect(ws.documents.first.currentMarkdown(), '# Opened via association');
+    ws.dispose();
   });
 
   test('Session restore is a no-op with no saved session', () async {

@@ -68,6 +68,12 @@ class DocumentController extends ChangeNotifier {
   int _editorEpoch = 0;
   int get editorEpoch => _editorEpoch;
 
+  /// Ticks on every genuine content edit (source or WYSIWYG). Unlike the
+  /// dirty-flag notification — which fires only on the clean→dirty transition
+  /// — this fires for *every* edit, so a session-persistence listener can
+  /// re-arm its debounce on continued typing (not just the first keystroke).
+  final ValueNotifier<int> contentTick = ValueNotifier<int>(0);
+
   StreamSubscription<dynamic>? _txnSub;
   bool _suppressDirty = false;
 
@@ -117,6 +123,7 @@ class DocumentController extends ChangeNotifier {
       if (!_suppressDirty) {
         _wysiwygEdited = true;
         _markDirty();
+        contentTick.value++;
       }
     });
   }
@@ -130,7 +137,10 @@ class DocumentController extends ChangeNotifier {
     final textChanged = text != _lastSourceText;
     _lastSourceText = text;
     // Both source modes (split and raw) edit [sourceController] directly.
-    if (_mode.isSource && !_suppressDirty && textChanged) _markDirty();
+    if (_mode.isSource && !_suppressDirty && textChanged) {
+      _markDirty();
+      contentTick.value++;
+    }
   }
 
   void _markDirty() {
@@ -321,6 +331,7 @@ class DocumentController extends ChangeNotifier {
     _txnSub?.cancel();
     sourceController.removeListener(_onSourceChanged);
     sourceController.dispose();
+    contentTick.dispose();
     super.dispose();
   }
 }

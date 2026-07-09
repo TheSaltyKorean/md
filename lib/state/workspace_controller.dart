@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Offset;
@@ -8,6 +9,24 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/editor_mode.dart';
 import '../services/session_service.dart';
 import 'document_controller.dart';
+
+/// A document to restore, with its content resolved (disk read done) before
+/// the workspace is mutated. Internal to [WorkspaceController.restoreSession].
+class _RestoredDoc {
+  _RestoredDoc({
+    required this.path,
+    required this.name,
+    required this.content,
+    required this.markDirty,
+    required this.mode,
+  });
+
+  final String? path;
+  final String? name;
+  final String content;
+  final bool markDirty;
+  final String? mode;
+}
 
 /// A tab in the workspace strip: an editable document or a print preview.
 sealed class WorkspaceTab {}
@@ -117,7 +136,16 @@ class WorkspaceController extends ChangeNotifier {
   DocumentController _newDoc() {
     final doc = DocumentController(isAutoReloadEnabled: () => _autoReload);
     doc.addListener(_relay);
+    // Content edits don't re-fire the dirty notification once already dirty,
+    // so listen to the per-edit tick to keep the session debounce armed.
+    doc.contentTick.addListener(_scheduleSessionSave);
     return doc;
+  }
+
+  void _detachDoc(DocumentController doc) {
+    doc.removeListener(_relay);
+    doc.contentTick.removeListener(_scheduleSessionSave);
+    doc.dispose();
   }
 
   // Relay any open document's changes (e.g. dirty flag, title) so the tab strip
@@ -240,8 +268,7 @@ class WorkspaceController extends ChangeNotifier {
     if (index < 0 || index >= _tabs.length) return;
     final tab = _tabs.removeAt(index);
     if (tab is DocumentTab) {
-      tab.doc.removeListener(_relay);
-      tab.doc.dispose();
+      _detachDoc(tab.doc);
       // Orphan any preview of this document: don't retain the disposed
       // controller, and don't let a later pathless document adopt the tab.
       for (final t in _tabs) {
@@ -346,6 +373,10 @@ class WorkspaceController extends ChangeNotifier {
   Future<void> restoreSession() async {
     final store = _sessionStore;
     if (store == null) return;
+    // Only populate a *fresh* workspace. If a document was already opened
+    // (an OS file-association open via the platform channel, or an instance
+    // forward), don't clobber it with the saved session.
+    if (documents.any((d) => !d.isPristine)) return;
     Map<String, dynamic>? data;
     try {
       final raw = await store.read();
@@ -357,26 +388,48 @@ class WorkspaceController extends ChangeNotifier {
     final entries = (data['docs'] as List?) ?? const [];
     if (entries.isEmpty) return;
 
-    // Replace the initial blank tab(s).
-    for (final t in _tabs) {
-      if (t is DocumentTab) {
-        t.doc.removeListener(_relay);
-        t.doc.dispose();
-      }
-    }
-    _tabs.clear();
+    // Resolve each tab's content BEFORE mutating the workspace (the disk
+    // reads are async): a clean file-backed tab reflects the CURRENT file,
+    // which may have changed while closed — restoring the stale saved buffer
+    // as a clean baseline would let a later save silently clobber those
+    // changes with no conflict shown. Unsaved (dirty) tabs keep their buffer.
+    final restored = <_RestoredDoc>[];
     for (final entry in entries) {
       if (entry is! Map) continue;
+      final path = entry['path'] as String?;
+      final dirty = (entry['dirty'] as bool?) ?? false;
+      var content = (entry['content'] as String?) ?? '';
+      var markDirty = dirty;
+      if (!dirty && path != null) {
+        try {
+          content = await File(path).readAsString();
+        } catch (_) {
+          // File gone/unreadable: keep the saved buffer, but as *unsaved* so
+          // it isn't silently treated as matching a file that isn't there.
+          markDirty = true;
+        }
+      }
+      restored.add(_RestoredDoc(
+        path: path,
+        name: entry['name'] as String?,
+        content: content,
+        markDirty: markDirty,
+        mode: entry['mode'] as String?,
+      ));
+    }
+    if (restored.isEmpty) return;
+
+    // Replace the initial blank tab(s).
+    for (final t in _tabs) {
+      if (t is DocumentTab) _detachDoc(t.doc);
+    }
+    _tabs.clear();
+    for (final r in restored) {
       final doc = _newDoc()
-        ..loadMarkdown(
-          (entry['content'] as String?) ?? '',
-          path: entry['path'] as String?,
-          displayName: entry['name'] as String?,
-          markDirty: (entry['dirty'] as bool?) ?? false,
-        );
-      final modeName = entry['mode'] as String?;
+        ..loadMarkdown(r.content,
+            path: r.path, displayName: r.name, markDirty: r.markDirty);
       for (final m in EditorMode.values) {
-        if (m.name == modeName) {
+        if (m.name == r.mode) {
           doc.setMode(m);
           break;
         }
@@ -393,8 +446,7 @@ class WorkspaceController extends ChangeNotifier {
   void dispose() {
     _sessionTimer?.cancel();
     for (final d in documents) {
-      d.removeListener(_relay);
-      d.dispose();
+      _detachDoc(d);
     }
     super.dispose();
   }
