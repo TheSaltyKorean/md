@@ -745,6 +745,72 @@ void main() {
     expect(find.byType(IconButton), findsNothing);
   });
 
+  test('injectTableCopyMarkers builds TSV and marks block-level tables', () {
+    const md = 'Intro.\n\n'
+        '| Name | Role | **Level** |\n'
+        '| --- | --- | --- |\n'
+        '| Alice | Engineer | Senior |\n'
+        '| Bob | [Designer](https://x.test) | Mid |\n\n'
+        'After.';
+    final (transformed, tsv) = injectTableCopyMarkers(md);
+    expect(tsv.length, 1);
+    // Tab-separated, header included, delimiter row dropped, inline markdown
+    // (bold, link) reduced to plain values — pastes into a spreadsheet grid.
+    expect(
+        tsv[0],
+        'Name\tRole\tLevel\n'
+        'Alice\tEngineer\tSenior\n'
+        'Bob\tDesigner\tMid');
+    // A marker precedes the table; the table lines themselves are preserved.
+    expect(transformed, contains('0'));
+    expect(transformed, contains('| Alice | Engineer | Senior |'));
+  });
+
+  test('injectTableCopyMarkers leaves non-tables untouched', () {
+    // A stray pipe, and a pipe row that is not a block-level table (no blank
+    // line before, no delimiter) — neither should be marked or altered.
+    for (final md in [
+      'Just a paragraph with a | pipe but no table.',
+      'text\n| a | b |\nmore text',
+    ]) {
+      final (transformed, tsv) = injectTableCopyMarkers(md);
+      expect(tsv, isEmpty);
+      expect(transformed, md);
+    }
+  });
+
+  testWidgets('A table shows a Copy table chip that copies TSV',
+      (tester) async {
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        calls.add(call);
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    const md = 'x\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n';
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PreviewView(markdown: md)),
+    ));
+    await tester.pumpAndSettle();
+
+    final chip = find.text('Copy table');
+    expect(chip, findsOneWidget);
+    await tester.tap(chip);
+    await tester.pump();
+
+    final copied = calls.firstWhere((c) => c.method == 'Clipboard.setData');
+    expect((copied.arguments as Map)['text'], 'A\tB\n1\t2');
+    expect(find.text('Copied'), findsOneWidget);
+    // Let the confirmation timer elapse so it doesn't outlive the test.
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(find.text('Copy table'), findsOneWidget);
+  });
+
   test('Print profiles seed with built-ins', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();

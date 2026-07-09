@@ -29,9 +29,15 @@ class PreviewView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Inject a "Copy table" marker above each table and collect each table's
+    // tab-separated text. The table itself still renders via the package
+    // (untouched); the marker becomes a small chip that copies spreadsheet-
+    // ready TSV — plain selection only yields run-together text that Excel
+    // pastes into a single cell.
+    final (transformed, tsvByIndex) = injectTableCopyMarkers(markdown);
     return SelectionArea(
       child: Markdown(
-        data: markdown,
+        data: transformed,
         controller: controller,
         // SelectionArea provides selection for the whole document; the
         // widget's own per-block SelectableText would nest inside it and
@@ -40,12 +46,14 @@ class PreviewView extends StatelessWidget {
         padding: padding,
         // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
         // ourselves and render it underlined (matches the PDF export).
-        inlineSyntaxes: [_UnderlineSyntax()],
+        inlineSyntaxes: [_UnderlineSyntax(), _CopyTableSyntax()],
         builders: {
           'u': _UnderlineElementBuilder(),
           // Custom fenced-code-block rendering with a copy button. The
           // package still wraps the returned widget in codeblockDecoration.
           'pre': _CodeBlockBuilder(theme),
+          // The injected "Copy table" chip above each table.
+          'copytable': _CopyTableButtonBuilder(tsvByIndex),
         },
         styleSheet: _styleSheet(theme),
         onTapLink: (text, href, title) async {
@@ -197,6 +205,188 @@ class _CopyButtonState extends State<_CopyButton> {
           color: _copied ? Colors.green : cs.onSurfaceVariant,
         ),
         onPressed: _copy,
+      ),
+    );
+  }
+}
+
+// --- Table copy (TSV for spreadsheets) --------------------------------------
+
+/// Private-use marker char that can't appear in real document text, used to
+/// splice the "Copy table" affordance into the markdown before each table.
+const String _tableMarkerChar = '\uE000';
+
+/// Scans [markdown] for block-level GFM tables and returns a copy of it with a
+/// `Copy table` marker paragraph inserted above each one, plus a map from
+/// marker index to that table's tab-separated (TSV) text — what a spreadsheet
+/// needs to split the paste into cells.
+///
+/// A table is only marked when it's clearly its own block (preceded by a blank
+/// line or the document start) so the injection can never turn non-table text
+/// into a table. Anything it doesn't recognise simply gets no chip — the table
+/// still renders normally.
+@visibleForTesting
+(String, Map<int, String>) injectTableCopyMarkers(String markdown) {
+  final lines = markdown.split('\n');
+  final out = <String>[];
+  final tsv = <int, String>{};
+  var index = 0;
+  var i = 0;
+
+  bool isRow(String l) => l.contains('|');
+  bool isDelimiter(String l) {
+    final t = l.trim();
+    return t.contains('-') &&
+        RegExp(r'^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$').hasMatch(t);
+  }
+
+  while (i < lines.length) {
+    final blockStart = i == 0 || lines[i - 1].trim().isEmpty;
+    if (blockStart &&
+        i + 1 < lines.length &&
+        isRow(lines[i]) &&
+        isDelimiter(lines[i + 1])) {
+      final tableLines = <String>[lines[i], lines[i + 1]];
+      var j = i + 2;
+      while (
+          j < lines.length && lines[j].trim().isNotEmpty && isRow(lines[j])) {
+        tableLines.add(lines[j]);
+        j++;
+      }
+      final rows = <List<String>>[];
+      for (var k = 0; k < tableLines.length; k++) {
+        if (k == 1) continue; // skip the |---|---| delimiter row
+        rows.add(_splitRow(tableLines[k]));
+      }
+      tsv[index] = rows.map((r) => r.join('\t')).join('\n');
+      // Separate the marker into its own paragraph above the table.
+      if (out.isNotEmpty && out.last.trim().isNotEmpty) out.add('');
+      out.add('$_tableMarkerChar$index$_tableMarkerChar');
+      out.add('');
+      out.addAll(tableLines);
+      index++;
+      i = j;
+    } else {
+      out.add(lines[i]);
+      i++;
+    }
+  }
+  return (out.join('\n'), tsv);
+}
+
+/// Split a `| a | b |` row into cell values: honour escaped `\|`, drop the
+/// outer pipes, and strip common inline markdown so the pasted value is plain
+/// text (e.g. `**Bold**` → `Bold`, `[x](url)` → `x`). Tabs/newlines inside a
+/// cell collapse to a space so they can't break the TSV grid.
+List<String> _splitRow(String row) {
+  final cells = <String>[];
+  final buf = StringBuffer();
+  final l = row.trim();
+  for (var k = 0; k < l.length; k++) {
+    final ch = l[k];
+    if (ch == r'\' && k + 1 < l.length && l[k + 1] == '|') {
+      buf.write('|');
+      k++;
+    } else if (ch == '|') {
+      cells.add(buf.toString());
+      buf.clear();
+    } else {
+      buf.write(ch);
+    }
+  }
+  cells.add(buf.toString());
+  // Drop empty first/last cells produced by the leading/trailing pipes.
+  if (cells.isNotEmpty && cells.first.trim().isEmpty) cells.removeAt(0);
+  if (cells.isNotEmpty && cells.last.trim().isEmpty) {
+    cells.removeLast();
+  }
+  return [for (final c in cells) _plainCell(c)];
+}
+
+String _plainCell(String cell) {
+  var s = cell.trim();
+  s = s.replaceAllMapped(
+      RegExp(r'\[([^\]]*)\]\([^)]*\)'), (m) => m[1] ?? ''); // links → text
+  s = s.replaceAll(RegExp(r'\*\*|__|\*|_|`|~~'), ''); // emphasis / code / del
+  s = s.replaceAll(RegExp(r'[\t\n]+'), ' ');
+  return s.trim();
+}
+
+/// Turns the injected `<index>` marker into a `copytable` element
+/// carrying the index the builder resolves to a TSV string.
+class _CopyTableSyntax extends md.InlineSyntax {
+  _CopyTableSyntax() : super('$_tableMarkerChar(\\d+)$_tableMarkerChar');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(
+        md.Element.empty('copytable')..attributes['idx'] = match[1] ?? '');
+    return true;
+  }
+}
+
+/// Renders the "Copy table" chip for an injected marker.
+class _CopyTableButtonBuilder extends MarkdownElementBuilder {
+  _CopyTableButtonBuilder(this.tsvByIndex);
+
+  final Map<int, String> tsvByIndex;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final idx = int.tryParse(element.attributes['idx'] ?? '');
+    final tsv = idx == null ? null : tsvByIndex[idx];
+    if (tsv == null) return const SizedBox.shrink();
+    return _CopyTableChip(tsv: tsv);
+  }
+}
+
+/// A small labelled "Copy table" chip that copies tab-separated text (pastes
+/// into Excel / Sheets as separate cells) and confirms with a check.
+class _CopyTableChip extends StatefulWidget {
+  const _CopyTableChip({required this.tsv});
+
+  final String tsv;
+
+  @override
+  State<_CopyTableChip> createState() => _CopyTableChipState();
+}
+
+class _CopyTableChipState extends State<_CopyTableChip> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.tsv));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SelectionContainer.disabled(
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: ActionChip(
+            visualDensity: VisualDensity.compact,
+            avatar: Icon(
+              _copied ? Icons.check_rounded : Icons.grid_on_rounded,
+              size: 16,
+              color: _copied ? Colors.green : cs.onSurfaceVariant,
+            ),
+            label: Text(_copied ? 'Copied' : 'Copy table'),
+            tooltip: 'Copy as tab-separated values (paste into a spreadsheet)',
+            onPressed: _copy,
+          ),
+        ),
       ),
     );
   }
