@@ -95,22 +95,11 @@ class WorkspaceController extends ChangeNotifier {
   /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
   Timer? _sessionTimer;
-  bool _sessionSuspended = false;
 
   /// Whether this workspace persists/restores its session. When false (a
-  /// torn-off window, or a run that opened a launch document — see
-  /// [suspendSession]), closing with unsaved work still needs a discard
-  /// prompt: hot exit only applies when the session is actually saved.
-  bool get sessionEnabled => _sessionStore != null && !_sessionSuspended;
-
-  /// Turn off session persistence for the rest of this run. Used when a launch
-  /// document was opened via the platform channel (a "quick open this file"
-  /// launch, like a desktop file argument), so this run doesn't overwrite the
-  /// saved session's tabs with only the requested file.
-  void suspendSession() {
-    _sessionSuspended = true;
-    _sessionTimer?.cancel();
-  }
+  /// torn-off window), closing with unsaved work still needs a discard prompt
+  /// — hot exit only applies when the session is actually saved.
+  bool get sessionEnabled => _sessionStore != null;
 
   final List<WorkspaceTab> _tabs = [];
   int _activeIndex = 0;
@@ -394,7 +383,7 @@ class WorkspaceController extends ChangeNotifier {
   Future<bool> flushSession() async {
     _sessionTimer?.cancel();
     final store = _sessionStore;
-    if (store == null || _sessionSuspended) return true;
+    if (store == null) return true;
     final json = jsonEncode(sessionSnapshot());
     // Run through the same _track chain as the debounced saves, so a forced
     // flush can't complete BEFORE an older queued save and then be
@@ -485,9 +474,12 @@ class WorkspaceController extends ChangeNotifier {
             if (disk != content) conflict = disk;
           } else {
             // A normal dirty tab: a conflict exists iff the file changed from
-            // the (clean) baseline the buffer was edited against.
+            // the (clean) baseline the buffer was edited against AND that
+            // change isn't already what the buffer holds — if the file was
+            // edited to match the buffer while closed, there's nothing to
+            // reconcile, so don't resurface a false conflict/dirty state.
             baseline = synced ?? content;
-            if (disk != baseline) conflict = disk;
+            if (disk != baseline && disk != content) conflict = disk;
           }
         }
 
@@ -535,7 +527,12 @@ class WorkspaceController extends ChangeNotifier {
       _tabs.add(DocumentTab(doc));
     }
     if (_tabs.isEmpty) _tabs.add(DocumentTab(_newDoc()));
-    final active = (data['active'] as int?) ?? 0;
+    // Type-guard the active index too (a corrupt/forward-version session could
+    // hold a non-int here): this runs after the tabs are rebuilt and outside
+    // the corrupt-session try, so a bad cast would crash launch instead of
+    // falling back to tab 0.
+    final activeRaw = data['active'];
+    final active = activeRaw is int ? activeRaw : 0;
     _activeIndex = active.clamp(0, _tabs.length - 1);
     notifyListeners();
   }

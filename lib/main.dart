@@ -73,23 +73,18 @@ Future<void> main(List<String> args) async {
     // previously saved session survives untouched for the next plain launch).
     await _openPaths(fileArgs, workspace);
   } else {
-    // Plain launch (incl. the updater's silent relaunch). On
-    // Android/iOS/macOS a launch document arrives via the platform channel,
-    // not argv — init it FIRST so, if the app was launched to open a file,
-    // that document is present before restore, whose freshness guard then
-    // leaves it alone. With no launch document, restore reopens the session.
+    // Plain launch (incl. the updater's silent relaunch). Restore the saved
+    // session FIRST, then pull any launch document from the platform channel
+    // (Android/iOS/macOS deliver document-open via a channel, not argv). The
+    // launch doc is ADDED as an active tab alongside the restored tabs — never
+    // replacing them — and session persistence stays on, so a mobile
+    // swipe-away (which only flushes the session, it can't prompt) still
+    // protects edits to the quick-opened document. Desktop argv launches are
+    // handled separately above (session off, close prompt as the backstop).
+    await workspace.restoreSession();
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS)) {
       await OpenFileChannel(workspace).init();
-      // If the channel opened a launch document, this run is really a
-      // "quick open this file" launch (argv-equivalent). Suspend session
-      // persistence so the exit/edit flush writes only-that-file over the
-      // saved session; the previous session stays intact for the next plain
-      // launch — matching the desktop file-argument behavior above.
-      if (workspace.documents.any((d) => !d.isPristine)) {
-        workspace.suspendSession();
-      }
     }
-    await workspace.restoreSession();
   }
 
   runApp(

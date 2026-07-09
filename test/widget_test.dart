@@ -1014,19 +1014,57 @@ void main() {
     ws.dispose();
   });
 
-  test('suspendSession stops persistence and reports disabled', () async {
+  test('A non-int active index degrades to tab 0, not a launch crash',
+      () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
-    final store = _FakeSessionStore();
+    // A corrupt/forward-version session where active is a string must not throw
+    // (restoreSession is awaited before runApp — a crash here blocks launch).
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 'oops',
+        'docs': [
+          {'path': null, 'content': 'a', 'dirty': true, 'mode': 'raw'},
+          {'path': null, 'content': 'b', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
     final ws = WorkspaceController(prefs, sessionStore: store);
-    expect(ws.sessionEnabled, isTrue);
-    ws.openDocument('a launch document', path: '/tmp/launch.md');
-    // Simulate a mobile launch-document open: suspend, then any flush is a
-    // no-op that leaves the previously saved session untouched.
-    ws.suspendSession();
-    expect(ws.sessionEnabled, isFalse);
-    expect(await ws.flushSession(), isTrue); // no-op success
-    expect(store.data, isNull); // nothing written over the saved session
+    await ws.restoreSession();
+    expect(ws.documents.length, 2); // both tabs restored…
+    expect(ws.activeIndex, 0); // …and active fell back to tab 0
+    ws.dispose();
+  });
+
+  test('A dirty tab does NOT conflict if the file already matches the buffer',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessnc');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // While closed, another tool saved the file to exactly the unsaved buffer,
+    // so there is nothing to reconcile — no false conflict should resurface.
+    final f = File('${tmp.path}/doc.md')..writeAsStringSync('my edits');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': f.path,
+            'name': null,
+            'content': 'my edits',
+            'dirty': true,
+            'mode': 'split',
+            'synced': 'old disk',
+          },
+        ],
+      });
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    await ws.restoreSession();
+    final d = ws.documents.last;
+    expect(d.currentMarkdown(), 'my edits');
+    expect(d.hasExternalConflict, isFalse);
     ws.dispose();
   });
 
