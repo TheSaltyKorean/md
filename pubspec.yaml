@@ -87,6 +87,39 @@ dev_dependencies:
   # Microsoft Store packaging (dart run msix:create --store); identity values
   # are overridden in CI from the MSIX_* secrets — see docs/RELEASING.md.
   msix: ^3.16.9
+  # App-icon generation (dart run flutter_launcher_icons). Build-time only —
+  # the source PNGs in assets/icon are not bundled into the app.
+  flutter_launcher_icons: ^0.14.4
+
+# App launcher icons. Regenerate after changing assets/icon/* with:
+#   dart run flutter_launcher_icons
+# Android uses an adaptive icon (gradient background layer + white mark
+# foreground layer); every other platform masks the full-bleed icon.png.
+# After regenerating, redo two things the tool gets wrong: rebuild the
+# multi-size Windows .ico (see the windows: note below), and reset the iOS
+# ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS build settings
+# back to YES in ios/Runner.xcodeproj/project.pbxproj (the tool mis-sets them
+# to "AppIcon"; the icon is selected via ASSETCATALOG_COMPILER_APPICON_NAME).
+flutter_launcher_icons:
+  image_path: "assets/icon/icon.png"
+  android: true
+  adaptive_icon_background: "assets/icon/icon_background.png"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  ios: true
+  remove_alpha_ios: true
+  macos:
+    generate: true
+    image_path: "assets/icon/icon.png"
+  # Windows is generated OUTSIDE this tool: flutter_launcher_icons emits a
+  # single-size .ico, but Windows title bars / Explorer / context menus / the
+  # MSI installer request 16-48px directly and would downscale a lone 256px
+  # image. windows/runner/resources/app_icon.ico is instead a multi-size .ico
+  # built from assets/icon/icon.png with:
+  #   magick assets/icon/icon.png -background none \
+  #     -define icon:auto-resize=256,128,64,48,32,24,16 \
+  #     windows/runner/resources/app_icon.ico
+  windows:
+    generate: false
 
 flutter:
   uses-material-design: true
