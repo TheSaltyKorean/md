@@ -162,10 +162,7 @@ class _EditorScreenState extends State<EditorScreen>
 
   void _onPinchDown(PointerDownEvent e) {
     _pointers[e.pointer] = e.position;
-    if (_pointers.length == 2) {
-      _pinchStartDistance = _pinchDistance();
-      _pinchStartFactor = context.read<ZoomController>().factor;
-    }
+    _rebaselinePinch();
   }
 
   void _onPinchMove(PointerMoveEvent e) {
@@ -184,13 +181,25 @@ class _EditorScreenState extends State<EditorScreen>
 
   void _onPinchEnd(int pointer) {
     _pointers.remove(pointer);
-    // Re-baseline when a finger lifts so a lingering finger doesn't jump the
-    // zoom; a fresh two-finger touch starts a new pinch.
-    if (_pointers.length < 2) _pinchStartDistance = null;
+    _rebaselinePinch();
+  }
+
+  /// Recompute the pinch baseline whenever the pointer set changes. Any change
+  /// while exactly two fingers are down (including a third finger touching then
+  /// one of the original pair lifting) re-anchors dist/zoom to the CURRENT
+  /// pair, so the next move can't apply a ratio against a stale baseline and
+  /// jump the zoom. With any other count there's no active pinch.
+  void _rebaselinePinch() {
+    if (_pointers.length == 2) {
+      _pinchStartDistance = _pinchDistance();
+      _pinchStartFactor = context.read<ZoomController>().factor;
+    } else {
+      _pinchStartDistance = null;
+    }
   }
 
   double? _pinchDistance() {
-    if (_pointers.length < 2) return null;
+    if (_pointers.length != 2) return null;
     final p = _pointers.values.toList();
     return (p[0] - p[1]).distance;
   }
