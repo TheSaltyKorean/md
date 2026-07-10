@@ -2,7 +2,7 @@
     <!-- Needed to fetch Google Fonts for branded PDF printing/export. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="markdown_studio"
+        android:label="Markdown Studio"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

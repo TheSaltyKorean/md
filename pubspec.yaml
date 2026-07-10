@@ -87,6 +87,28 @@ dev_dependencies:
   # Microsoft Store packaging (dart run msix:create --store); identity values
   # are overridden in CI from the MSIX_* secrets — see docs/RELEASING.md.
   msix: ^3.16.9
+  # App-icon generation (dart run flutter_launcher_icons). Build-time only —
+  # the source PNGs in assets/icon are not bundled into the app.
+  flutter_launcher_icons: ^0.14.4
+
+# App launcher icons. Regenerate after changing assets/icon/* with:
+#   dart run flutter_launcher_icons
+# Android uses an adaptive icon (gradient background layer + white mark
+# foreground layer); every other platform masks the full-bleed icon.png.
+flutter_launcher_icons:
+  image_path: "assets/icon/icon.png"
+  android: true
+  adaptive_icon_background: "assets/icon/icon_background.png"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  ios: true
+  remove_alpha_ios: true
+  macos:
+    generate: true
+    image_path: "assets/icon/icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    icon_size: 256
 
 flutter:
   uses-material-design: true
