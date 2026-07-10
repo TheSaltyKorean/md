@@ -51,6 +51,15 @@ class _EditorScreenState extends State<EditorScreen>
   bool _conflictShown = false;
   bool _dragging = false;
 
+  // --- Pinch-to-zoom (touch) --------------------------------------------------
+  // Tracked via a Listener (which observes pointers without claiming the
+  // gesture arena) so a two-finger pinch drives the document zoom while a
+  // one-finger drag still scrolls the view untouched. Works for every view,
+  // including the print preview (the same ZoomController scales its surface).
+  final Map<int, Offset> _pointers = {};
+  double? _pinchStartDistance;
+  double _pinchStartFactor = 1.0;
+
   /// Shared find & replace state; the bar itself lives inside the mounted source
   /// view (see [_body]).
   final FindController _find = FindController();
@@ -145,6 +154,45 @@ class _EditorScreenState extends State<EditorScreen>
   void _openFind(DocumentController doc, {bool replace = false}) {
     if (!doc.mode.isSource) doc.setMode(EditorMode.raw);
     replace ? _find.openReplace() : _find.openFind();
+  }
+
+  // --- Pinch-to-zoom pointer bookkeeping --------------------------------------
+  // Driven from a Listener (observe-only, never claims the gesture arena), so a
+  // one-finger drag keeps scrolling while a two-finger pinch scales the zoom.
+
+  void _onPinchDown(PointerDownEvent e) {
+    _pointers[e.pointer] = e.position;
+    if (_pointers.length == 2) {
+      _pinchStartDistance = _pinchDistance();
+      _pinchStartFactor = context.read<ZoomController>().factor;
+    }
+  }
+
+  void _onPinchMove(PointerMoveEvent e) {
+    if (!_pointers.containsKey(e.pointer)) return;
+    _pointers[e.pointer] = e.position;
+    final start = _pinchStartDistance;
+    if (_pointers.length == 2 && start != null && start > 0) {
+      final dist = _pinchDistance();
+      if (dist != null) {
+        context
+            .read<ZoomController>()
+            .zoomTo(_pinchStartFactor * (dist / start));
+      }
+    }
+  }
+
+  void _onPinchEnd(int pointer) {
+    _pointers.remove(pointer);
+    // Re-baseline when a finger lifts so a lingering finger doesn't jump the
+    // zoom; a fresh two-finger touch starts a new pinch.
+    if (_pointers.length < 2) _pinchStartDistance = null;
+  }
+
+  double? _pinchDistance() {
+    if (_pointers.length < 2) return null;
+    final p = _pointers.values.toList();
+    return (p[0] - p[1]).distance;
   }
 
   @override
@@ -425,14 +473,32 @@ class _EditorScreenState extends State<EditorScreen>
                 onClose: _closeTab,
                 onTabDragEnd: _onTabDragEnd,
               ),
-              actions: _actions(context, ws, active, theme, isNarrow),
-              // On narrow (phone) layouts the mode selector gets its own bar; on
-              // wide layouts it lives in the actions row. The format toolbar is no
-              // longer docked here — it floats over the body (see below).
-              bottom: isNarrow && active != null
+              // On phone widths the tab strip owns the whole top row; the action
+              // icons drop to their own second row (below), then the mode
+              // selector. On wide layouts the icons and mode toggle live in the
+              // top actions row. The format toolbar floats over the body.
+              actions:
+                  isNarrow ? null : _actions(context, ws, active, theme, false),
+              bottom: isNarrow
                   ? PreferredSize(
-                      preferredSize: const Size.fromHeight(48),
-                      child: _ModeBar(doc: active),
+                      preferredSize:
+                          Size.fromHeight(48 + (active != null ? 48 : 0)),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            height: 48,
+                            child: Row(
+                              children: [
+                                const Spacer(),
+                                ..._actions(context, ws, active, theme, true),
+                                const SizedBox(width: 4),
+                              ],
+                            ),
+                          ),
+                          if (active != null) _ModeBar(doc: active),
+                        ],
+                      ),
                     )
                   : null,
             ),
@@ -440,9 +506,9 @@ class _EditorScreenState extends State<EditorScreen>
               onDragEntered: (_) => setState(() => _dragging = true),
               onDragExited: (_) => setState(() => _dragging = false),
               onDragDone: (detail) => _onFilesDropped(detail, ws),
-              // Ctrl/Cmd + mouse wheel zooms, like a browser. A raw Listener
-              // observes without consuming, so the view may also scroll a
-              // little on layouts where the wheel reaches a scrollable — an
+              // Ctrl/Cmd + mouse wheel zooms, like a browser; a two-finger
+              // pinch zooms on touch. A raw Listener observes without
+              // consuming, so a one-finger drag still scrolls normally — an
               // accepted trade-off for not swallowing normal scrolling.
               child: Listener(
                 onPointerSignal: (event) {
@@ -452,6 +518,10 @@ class _EditorScreenState extends State<EditorScreen>
                   if (event.scrollDelta.dy == 0) return;
                   event.scrollDelta.dy < 0 ? zoom.zoomIn() : zoom.zoomOut();
                 },
+                onPointerDown: _onPinchDown,
+                onPointerMove: _onPinchMove,
+                onPointerUp: (e) => _onPinchEnd(e.pointer),
+                onPointerCancel: (e) => _onPinchEnd(e.pointer),
                 child: LayoutBuilder(
                   builder: (context, constraints) => Stack(
                     children: [

@@ -551,6 +551,94 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('Two-finger pinch zooms; one-finger drag does not',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({'assoc_prompt_done': true});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+        ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+        ChangeNotifierProvider(
+            create: (_) =>
+                UpdateController(prefs, fetchLatestTag: () async => null)),
+        ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
+        ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
+        Provider(create: (_) => FileAssociationService(prefs)),
+      ],
+      child: const MarkdownStudioApp(),
+    ));
+    await tester.pumpAndSettle();
+
+    final zoom = Provider.of<ZoomController>(
+        tester.element(find.byType(MarkdownStudioApp)),
+        listen: false);
+    expect(zoom.factor, 1.0);
+
+    // Two fingers 100px apart, spread to 150px → 1.5x zoom.
+    final center = tester.getCenter(find.byType(PreviewView));
+    final f1 = await tester.startGesture(center - const Offset(50, 0));
+    final f2 = await tester.startGesture(center + const Offset(50, 0));
+    await tester.pump();
+    await f1.moveBy(const Offset(-25, 0));
+    await f2.moveBy(const Offset(25, 0));
+    await tester.pump();
+    await f1.up();
+    await f2.up();
+    await tester.pumpAndSettle();
+    expect(zoom.factor, moreOrLessEquals(1.5));
+
+    // A one-finger drag must NOT zoom (the Listener observes without claiming
+    // the gesture, so scrolling is unaffected).
+    zoom.reset();
+    await tester.pumpAndSettle();
+    final drag = await tester.startGesture(center);
+    await drag.moveBy(const Offset(0, -80));
+    await drag.up();
+    await tester.pumpAndSettle();
+    expect(zoom.factor, 1.0);
+  });
+
+  testWidgets('Phone layout drops the action icons to a second row',
+      (tester) async {
+    // Narrow width triggers the stacked layout: the tab strip owns the top
+    // row and the icons move below it.
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SharedPreferences.setMockInitialValues({'assoc_prompt_done': true});
+    final prefs = await SharedPreferences.getInstance();
+
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeController(prefs)),
+        ChangeNotifierProvider(create: (_) => ZoomController(prefs)),
+        ChangeNotifierProvider(
+            create: (_) =>
+                UpdateController(prefs, fetchLatestTag: () async => null)),
+        ChangeNotifierProvider(create: (_) => PrintProfileService(prefs)),
+        ChangeNotifierProvider(create: (_) => WorkspaceController(prefs)),
+        Provider(create: (_) => FileAssociationService(prefs)),
+      ],
+      child: const MarkdownStudioApp(),
+    ));
+    await tester.pumpAndSettle();
+
+    // The Save icon is present and sits BELOW the top app-bar row (it's on the
+    // second row now, not crammed next to the tabs).
+    final save = find.byTooltip('Save');
+    expect(save, findsOneWidget);
+    // Below the standard top app-bar row (kToolbarHeight = 56): it's on the
+    // second row, not next to the tabs.
+    expect(tester.getCenter(save).dy, greaterThan(56.0));
+  });
+
   test('Update version comparison is strict and parse-safe', () {
     expect(UpdateController.isNewer('1.0.5', '1.0.4'), isTrue);
     expect(UpdateController.isNewer('1.1.0', '1.0.9'), isTrue);

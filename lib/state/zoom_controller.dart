@@ -49,6 +49,10 @@ class ZoomController extends ChangeNotifier {
   void zoomOut() => _set(_factor - step);
   void reset() => _set(1.0);
 
+  /// Set the zoom to an arbitrary [factor] (clamped and snapped to the step
+  /// grid). Used by pinch-to-zoom, which yields a continuous scale.
+  void zoomTo(double factor) => _set(factor);
+
   /// Clamp to range and round to the step grid so repeated +/- pairs return
   /// exactly to 100% (raw doubles would drift: 1.0 + 0.1 - 0.1 != 1.0).
   static double _snap(double v) =>
