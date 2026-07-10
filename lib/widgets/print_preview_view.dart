@@ -305,7 +305,6 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     List<PrintProfile> profiles,
     PrintProfileService profilesService,
     ColorScheme cs,
-    ZoomController zoom,
   ) {
     final isDefault = _selectedId == profilesService.defaultId;
     final hasPath = widget.docPath != null;
@@ -414,30 +413,6 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
               : _previewFormat.landscape;
           _previewEpoch++;
         }),
-      ),
-      // Zoom the preview surface. This is the app-wide zoom (Ctrl +/- and
-      // Ctrl+wheel drive the same level on desktop); surfacing explicit buttons
-      // here gives touch devices — which have no keyboard or mouse wheel — a
-      // discoverable way to zoom the preview. It never changes what prints.
-      IconButton(
-        tooltip: 'Zoom out',
-        icon: const Icon(Icons.zoom_out_rounded),
-        onPressed: zoom.canZoomOut ? zoom.zoomOut : null,
-      ),
-      TextButton(
-        // The % doubles as a reset (tap to return to 100%), matching the
-        // document zoom chip in the app bar.
-        onPressed: zoom.isDefault ? null : zoom.reset,
-        style: TextButton.styleFrom(
-          minimumSize: const Size(44, 36),
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-        ),
-        child: Text(zoom.label),
-      ),
-      IconButton(
-        tooltip: 'Zoom in',
-        icon: const Icon(Icons.zoom_in_rounded),
-        onPressed: zoom.canZoomIn ? zoom.zoomIn : null,
       ),
       // --- Group 2: output actions (moved up from the preview's bottom bar so
       // all the controls live in one place). ---
@@ -620,14 +595,46 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                     final actions = Row(
                       mainAxisSize: MainAxisSize.min,
                       children: _profileActions(
-                          selected, profiles, profilesService, cs, zoom),
+                          selected, profiles, profilesService, cs),
                     );
-                    // Enough room for the dropdown plus the icon cluster at
-                    // natural width? Then expand the dropdown; otherwise let
-                    // the icons scroll. Sized for the full action set (incl.
-                    // the zoom controls) so mid-width windows scroll rather
-                    // than overflow.
-                    const comfortable = 960.0;
+                    // Preview zoom is PINNED at the far right, outside the
+                    // scrollable action row: on narrow (phone) widths the
+                    // actions scroll (reverse-anchored on the output buttons),
+                    // and a zoom cluster buried mid-row would start off-screen —
+                    // defeating the point of a discoverable touch affordance.
+                    // Kept always-visible here, it also stays at a consistent
+                    // right-edge spot on wide layouts. Never changes what prints.
+                    final zoomCluster = Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Zoom out',
+                          icon: const Icon(Icons.zoom_out_rounded),
+                          onPressed: zoom.canZoomOut ? zoom.zoomOut : null,
+                        ),
+                        TextButton(
+                          // The % doubles as a reset (tap → 100%), like the
+                          // document zoom chip in the app bar.
+                          onPressed: zoom.isDefault ? null : zoom.reset,
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(40, 36),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                          ),
+                          child: Text(zoom.label),
+                        ),
+                        IconButton(
+                          tooltip: 'Zoom in',
+                          icon: const Icon(Icons.zoom_in_rounded),
+                          onPressed: zoom.canZoomIn ? zoom.zoomIn : null,
+                        ),
+                      ],
+                    );
+                    // Enough room for the dropdown, the natural-width action
+                    // row AND the pinned zoom cluster? Then show the actions
+                    // inline; otherwise let them scroll. Sized to include the
+                    // always-present zoom cluster so mid-width windows scroll
+                    // rather than overflow.
+                    const comfortable = 950.0;
                     return Row(
                       children: [
                         Expanded(child: dropdown),
@@ -642,6 +649,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                               child: actions,
                             ),
                           ),
+                        zoomCluster,
                       ],
                     );
                   },

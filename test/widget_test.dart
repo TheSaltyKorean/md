@@ -325,6 +325,37 @@ void main() {
     expect(service.assignedId('/tmp/e.md'), 'work');
   });
 
+  testWidgets('Preview zoom controls are reachable (tappable) at phone width',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final service = PrintProfileService(prefs);
+    final zoom = ZoomController(prefs);
+    // Phone portrait: the action row scrolls, but the zoom cluster is pinned
+    // outside that scroll so it must be on-screen and hittable without any
+    // horizontal scrolling of the toolbar.
+    await tester.binding.setSurfaceSize(const Size(400, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider<PrintProfileService>.value(value: service),
+        ChangeNotifierProvider<ZoomController>.value(value: zoom),
+      ],
+      child: const MaterialApp(
+        home: Scaffold(
+          body: PrintPreviewView(markdown: '# Hi', title: 'a', docPath: null),
+        ),
+      ),
+    ));
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byTooltip('Zoom in'), findsOneWidget);
+    // A default tap warns (and won't register) if the button is off-screen or
+    // obscured — so a real factor bump proves the pinned control is reachable.
+    await tester.tap(find.byTooltip('Zoom in'));
+    await tester.pump();
+    expect(zoom.factor, greaterThan(1.0));
+  });
+
   test('Association repair: installed copies reclaim, dev builds never', () {
     const pf = r'C:\Program Files';
     const pf86 = r'C:\Program Files (x86)';
