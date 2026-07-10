@@ -650,10 +650,10 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Phone layout drops the action icons to a second row',
+  testWidgets('Phone layout: mode toggle and icons share the second row',
       (tester) async {
     // Narrow width triggers the stacked layout: the tab strip owns the top
-    // row and the icons move below it.
+    // row; the mode toggle and action icons share the second row.
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -676,13 +676,19 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // The Save icon is present and sits BELOW the top app-bar row (it's on the
-    // second row now, not crammed next to the tabs).
+    // The Save icon sits BELOW the top app-bar row (second row, not crammed
+    // next to the tabs). kToolbarHeight = 56.
     final save = find.byTooltip('Save');
     expect(save, findsOneWidget);
-    // Below the standard top app-bar row (kToolbarHeight = 56): it's on the
-    // second row, not next to the tabs.
     expect(tester.getCenter(save).dy, greaterThan(56.0));
+
+    // The mode toggle shares that same row as the icons — same vertical
+    // centre, not stacked on a separate line. Locate it by its 'Raw' segment
+    // tooltip (a mode label that doesn't collide with other chrome).
+    final mode = find.byTooltip('Raw');
+    expect(mode, findsOneWidget);
+    expect(tester.getCenter(mode).dy,
+        moreOrLessEquals(tester.getCenter(save).dy, epsilon: 2.0));
   });
 
   test('Update version comparison is strict and parse-safe', () {

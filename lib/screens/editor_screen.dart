@@ -482,31 +482,49 @@ class _EditorScreenState extends State<EditorScreen>
                 onClose: _closeTab,
                 onTabDragEnd: _onTabDragEnd,
               ),
-              // On phone widths the tab strip owns the whole top row; the action
-              // icons drop to their own second row (below), then the mode
-              // selector. On wide layouts the icons and mode toggle live in the
-              // top actions row. The format toolbar floats over the body.
+              // On phone widths the tab strip owns the whole top row; the mode
+              // selector and the action icons then share a single second row
+              // (mode on the left, icons on the right). On wide layouts they
+              // live in the top actions row. The format toolbar floats over the
+              // body.
               actions:
                   isNarrow ? null : _actions(context, ws, active, theme, false),
               bottom: isNarrow
                   ? PreferredSize(
-                      preferredSize:
-                          Size.fromHeight(48 + (active != null ? 48 : 0)),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            height: 48,
-                            child: Row(
-                              children: [
-                                const Spacer(),
-                                ..._actions(context, ws, active, theme, true),
-                                const SizedBox(width: 4),
-                              ],
-                            ),
+                      preferredSize: const Size.fromHeight(48),
+                      child: Container(
+                        height: 48,
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .outlineVariant),
                           ),
-                          if (active != null) _ModeBar(doc: active),
-                        ],
+                        ),
+                        child: Row(
+                          children: [
+                            if (active != null)
+                              // Mode toggle on the left; scrolls horizontally if
+                              // it can't fit next to the icons on a narrow phone.
+                              Expanded(
+                                child: Container(
+                                  alignment: Alignment.centerLeft,
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 8),
+                                  child: SingleChildScrollView(
+                                    scrollDirection: Axis.horizontal,
+                                    child:
+                                        Center(child: _ModeToggle(doc: active)),
+                                  ),
+                                ),
+                              )
+                            else
+                              const Spacer(),
+                            ..._actions(context, ws, active, theme, true),
+                            const SizedBox(width: 4),
+                          ],
+                        ),
                       ),
                     )
                   : null,
@@ -1302,31 +1320,6 @@ class _ModeToggle extends StatelessWidget {
       ],
       selected: {doc.mode},
       onSelectionChanged: (s) => doc.setMode(s.first),
-    );
-  }
-}
-
-/// View-mode selector shown on its own bar on narrow (phone) layouts.
-class _ModeBar extends StatelessWidget {
-  const _ModeBar({required this.doc});
-
-  final DocumentController doc;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      height: 48,
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      alignment: Alignment.centerLeft,
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: cs.outlineVariant)),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Center(child: _ModeToggle(doc: doc)),
-      ),
     );
   }
 }
