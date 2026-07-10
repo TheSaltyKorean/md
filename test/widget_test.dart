@@ -205,6 +205,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     final service = PrintProfileService(prefs);
+    // Wide enough that the full toolbar (incl. the zoom controls) lays out
+    // without scrolling, so the pin button is on-screen for the tap below.
+    await tester.binding.setSurfaceSize(const Size(1200, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
 
     Future<void> pump(String? docPath) => tester.pumpWidget(MultiProvider(
           providers: [

@@ -7,8 +7,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// The factor scales the *document* text in every view mode (WYSIWYG via
 /// AppFlowy's `EditorStyle.textScaleFactor`, the source/preview panes via a
 /// `MediaQuery` text scaler) — app chrome (tabs, toolbar, menus) stays at
-/// 100%. Print previews are untouched: `PdfPreview` has its own pinch/scroll
-/// zoom, and zooming must never change what prints.
+/// 100%. In a print preview the same factor scales the on-screen page surface
+/// (see PrintPreviewView), which also exposes explicit zoom buttons so touch
+/// devices can drive it; `PdfPreview`'s own pinch zoom still works on top, and
+/// zooming never changes what actually prints.
 class ZoomController extends ChangeNotifier {
   ZoomController(this._prefs) {
     final saved = _prefs.getDouble(_prefsKey);

@@ -305,6 +305,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     List<PrintProfile> profiles,
     PrintProfileService profilesService,
     ColorScheme cs,
+    ZoomController zoom,
   ) {
     final isDefault = _selectedId == profilesService.defaultId;
     final hasPath = widget.docPath != null;
@@ -413,6 +414,30 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
               : _previewFormat.landscape;
           _previewEpoch++;
         }),
+      ),
+      // Zoom the preview surface. This is the app-wide zoom (Ctrl +/- and
+      // Ctrl+wheel drive the same level on desktop); surfacing explicit buttons
+      // here gives touch devices — which have no keyboard or mouse wheel — a
+      // discoverable way to zoom the preview. It never changes what prints.
+      IconButton(
+        tooltip: 'Zoom out',
+        icon: const Icon(Icons.zoom_out_rounded),
+        onPressed: zoom.canZoomOut ? zoom.zoomOut : null,
+      ),
+      TextButton(
+        // The % doubles as a reset (tap to return to 100%), matching the
+        // document zoom chip in the app bar.
+        onPressed: zoom.isDefault ? null : zoom.reset,
+        style: TextButton.styleFrom(
+          minimumSize: const Size(44, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+        ),
+        child: Text(zoom.label),
+      ),
+      IconButton(
+        tooltip: 'Zoom in',
+        icon: const Icon(Icons.zoom_in_rounded),
+        onPressed: zoom.canZoomIn ? zoom.zoomIn : null,
       ),
       // --- Group 2: output actions (moved up from the preview's bottom bar so
       // all the controls live in one place). ---
@@ -543,6 +568,9 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     }
     final selected = profilesService.byId(_selectedId);
     final cs = Theme.of(context).colorScheme;
+    // Watch zoom so the toolbar's %/enabled state updates as the level changes
+    // (the preview surface below already watches it to re-raster).
+    final zoom = context.watch<ZoomController>();
 
     // No Scaffold/AppBar of its own: this view fills a workspace tab, so the
     // tab strip provides the title and the close affordance.
@@ -592,12 +620,14 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                     final actions = Row(
                       mainAxisSize: MainAxisSize.min,
                       children: _profileActions(
-                          selected, profiles, profilesService, cs),
+                          selected, profiles, profilesService, cs, zoom),
                     );
                     // Enough room for the dropdown plus the icon cluster at
                     // natural width? Then expand the dropdown; otherwise let
-                    // the icons scroll.
-                    const comfortable = 800.0;
+                    // the icons scroll. Sized for the full action set (incl.
+                    // the zoom controls) so mid-width windows scroll rather
+                    // than overflow.
+                    const comfortable = 960.0;
                     return Row(
                       children: [
                         Expanded(child: dropdown),
