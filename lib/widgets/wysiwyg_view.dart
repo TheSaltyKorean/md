@@ -2,6 +2,7 @@ import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
 
 import '../state/document_controller.dart';
+import 'wysiwyg_copy.dart';
 
 /// Hosts the AppFlowy block-style WYSIWYG editor. The editor is keyed on the
 /// controller's [DocumentController.editorEpoch] so it rebuilds cleanly when the
@@ -48,6 +49,9 @@ class WysiwygView extends StatelessWidget {
           editorState: controller.editorState,
           editorStyle: editorStyle,
           shrinkWrap: false,
+          // Replace the built-in plain-text copy with one that also puts rich
+          // HTML on the clipboard, so paste keeps formatting (see wysiwyg_copy).
+          commandShortcutEvents: wysiwygCommandShortcutEvents(),
         ),
       ),
     );
