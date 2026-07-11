@@ -39,6 +39,7 @@ import 'package:markdown_studio/services/update_service.dart';
 import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/services/session_service.dart';
+import 'package:markdown_studio/widgets/wysiwyg_copy.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
 import 'package:markdown_studio/widgets/find_controller.dart';
@@ -1797,6 +1798,39 @@ void main() {
     expect(ws.willRestoreOnRelaunch, isTrue); // has a relaunch store…
     expect(await ws.persistSessionForRelaunch(), isFalse); // …but write fails
     ws.dispose();
+  });
+
+  test('WYSIWYG copy renders the selection as Markdown and HTML', () {
+    final editorState = EditorState(document: markdownToDocument('a **b** c'));
+    final len = editorState.getNodeAtPath([0])!.delta!.length;
+    editorState.selection = Selection(
+      start: Position(path: [0], offset: 0),
+      end: Position(path: [0], offset: len),
+    );
+    final formats = wysiwygSelectionFormats(editorState)!;
+    // Plain-text flavor keeps the Markdown source…
+    expect(formats.markdown.trim(), 'a **b** c');
+    // …and the rich flavor carries the bold as HTML.
+    final html = formats.html.toLowerCase();
+    expect(html, contains('b'));
+    expect(html, anyOf(contains('<strong>'), contains('<b>')));
+  });
+
+  test('WYSIWYG copy slices a partial selection', () {
+    final editorState =
+        EditorState(document: markdownToDocument('Hello world'));
+    editorState.selection = Selection(
+      start: Position(path: [0], offset: 0),
+      end: Position(path: [0], offset: 5), // just "Hello"
+    );
+    expect(wysiwygSelectionFormats(editorState)!.markdown.trim(), 'Hello');
+  });
+
+  test('WYSIWYG copy returns null when nothing is selected', () {
+    final editorState = EditorState(document: markdownToDocument('text'));
+    expect(wysiwygSelectionFormats(editorState), isNull); // no selection
+    editorState.selection = Selection.collapsed(Position(path: [0], offset: 2));
+    expect(wysiwygSelectionFormats(editorState), isNull); // collapsed
   });
 
   test('FileSessionStore round-trips through the real filesystem', () async {

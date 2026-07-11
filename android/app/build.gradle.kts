@@ -43,7 +43,10 @@ android {
         applicationId = "com.markdownstudio.markdown_studio"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // super_native_extensions (rich clipboard) requires API 23+, above
+        // Flutter's default floor. Raising it drops only Android 5.x (API
+        // 21–22); the app has no Play listing yet, so nothing in place breaks.
+        minSdk = maxOf(flutter.minSdkVersion, 23)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
