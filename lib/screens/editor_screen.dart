@@ -380,10 +380,13 @@ class _EditorScreenState extends State<EditorScreen>
     final active = ws.activeDocument;
 
     // Find mounts inside a source view or in Preview (which highlights matches
-    // in place). If the active view supports neither (switched to Edit, or
-    // moved to a tab that is), close find so no invisible state lingers.
+    // in place). Preview supports plain find only — replace edits the source —
+    // so it's not findable while the replace bar is open. If the active view
+    // supports neither (switched to Edit, replace open over Preview, or moved to
+    // a tab that is), close find so no invisible state lingers.
     bool findable(EditorMode? m) =>
-        m != null && (m.isSource || m == EditorMode.preview);
+        m != null &&
+        (m.isSource || (m == EditorMode.preview && !_find.replaceVisible));
     if (_find.visible && !findable(active?.mode)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final doc = mounted ? ws.activeDocument : null;

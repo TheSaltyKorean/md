@@ -14,6 +14,7 @@ import 'package:flutter/material.dart'
         Scaffold,
         SelectionArea,
         Text,
+        TextDecoration,
         TextField;
 import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, SystemChannels;
@@ -1058,6 +1059,42 @@ void main() {
     expect(company.style?.background, isNotNull);
     final shall = tester.widget<Text>(find.text(' shall'));
     expect(shall.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find matches across a soft line break', (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // Hard-wrapped paragraph: the soft break renders as a space.
+          markdown: 'the Company\nshall pay',
+          highlightQuery: 'Company shall',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(count, 1);
+    // The highlighted run renders on one line (soft break normalised to space).
+    final frag = tester.widget<Text>(find.text('Company shall'));
+    expect(frag.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find keeps underline on highlighted <u> text',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'see <u>Important</u> here',
+          highlightQuery: 'Important',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final frag = tester.widget<Text>(find.text('Important'));
+    expect(frag.style?.background, isNotNull);
+    // The <u> underline must survive under the highlight.
+    expect(frag.style?.decoration, TextDecoration.underline);
   });
 
   testWidgets('Preview find does not match a phrase across block boundaries',

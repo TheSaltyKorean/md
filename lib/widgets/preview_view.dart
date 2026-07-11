@@ -530,50 +530,58 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
     // query spanning inline markup ("the Company" over `the **Company**`) is
     // matched on the visible text rather than per md.Text node. Inline tags keep
     // the same stream; block tags start a new one so matches can't cross blocks.
-    // Each run records (text node, its start offset in the stream, enclosing
-    // link href) — the href keeps a highlighted link fragment tappable.
+    // A soft line break inside a paragraph renders as a space, so it's stored as
+    // one in the stream (length-preserving, keeping run offsets aligned) — the
+    // visible phrase "Company shall" over `the Company\nshall` still matches.
+    // Each run records (text node, start offset, enclosing link href, whether
+    // it's inside <u>): href keeps a highlighted link tappable, underline lets
+    // the highlight carry the <u> style the mark would otherwise drop.
     final streams = <int, StringBuffer>{};
-    final runs = <int, List<(md.Text, int, String?)>>{};
+    final runs = <int, List<(md.Text, int, String?, bool)>>{};
     var block = 0;
-    void collect(List<md.Node> nodes, int blockId, String? href) {
+    void collect(
+        List<md.Node> nodes, int blockId, String? href, bool underline) {
       for (final n in nodes) {
         if (n is md.Text) {
           final buf = streams.putIfAbsent(blockId, StringBuffer.new);
-          runs.putIfAbsent(blockId, () => []).add((n, buf.length, href));
-          buf.write(n.text);
+          runs
+              .putIfAbsent(blockId, () => [])
+              .add((n, buf.length, href, underline));
+          buf.write(n.text.replaceAll('\n', ' '));
         } else if (n is md.Element) {
           final children = n.children;
           // Code renders its text directly (never highlighted); skip its text.
           if (children == null || n.tag == 'code' || n.tag == 'pre') continue;
           final childHref =
               n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
+          final childU = underline || n.tag == 'u';
           _kInlineTags.contains(n.tag)
-              ? collect(children, blockId, childHref) // same rendered line
-              : collect(children, ++block, childHref); // new block → break
+              ? collect(children, blockId, childHref, childU) // same line
+              : collect(children, ++block, childHref, childU); // new block
         }
       }
     }
 
-    collect(ast, block, null);
+    collect(ast, block, null, false);
 
     // Match each block's stream in document order (ascending block id) and map
     // every match onto the runs it overlaps. A match spanning several runs
     // shares one data-i so navigation counts it as a single hit.
-    final splits = <md.Text, List<(int, int, int, String?)>>{};
+    final splits = <md.Text, List<(int, int, int, String?, bool)>>{};
     var counter = 0;
     for (final id in streams.keys.toList()..sort()) {
       final text = streams[id]!.toString();
       for (final m in re.allMatches(text)) {
         if (m.end == m.start) continue;
         final dataI = counter++;
-        for (final (node, start, href) in runs[id]!) {
+        for (final (node, start, href, underline) in runs[id]!) {
           final runEnd = start + node.text.length;
           final s = m.start > start ? m.start : start;
           final e = m.end < runEnd ? m.end : runEnd;
           if (s < e) {
             splits
                 .putIfAbsent(node, () => [])
-                .add((s - start, e - start, dataI, href));
+                .add((s - start, e - start, dataI, href, underline));
           }
         }
       }
@@ -595,11 +603,15 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
           segs.sort((a, b) => a.$1.compareTo(b.$1));
           final text = n.text;
           var last = 0;
-          for (final (start, end, dataI, href) in segs) {
+          for (final (start, end, dataI, href, underline) in segs) {
             if (start > last) out.add(md.Text(text.substring(last, start)));
-            final mark = md.Element.text('mark', text.substring(start, end))
+            // Normalise soft breaks in the marked run too, so the mark renders
+            // on one line like the surrounding paragraph.
+            final mark = md.Element.text(
+                'mark', text.substring(start, end).replaceAll('\n', ' '))
               ..attributes['data-i'] = '$dataI';
             if (href != null) mark.attributes['data-href'] = href;
+            if (underline) mark.attributes['data-u'] = '1';
             if (anchored.add(dataI)) mark.attributes['data-anchor'] = '1';
             out.add(mark);
             last = end;
@@ -712,10 +724,15 @@ class _HighlightElementBuilder extends MarkdownElementBuilder {
   ) {
     final isCurrent =
         int.tryParse(element.attributes['data-i'] ?? '') == current;
+    // A match inside <u> loses the underline (its text child became this mark),
+    // so re-apply it here; bold/italic survive via parentStyle already.
+    final underline = element.attributes['data-u'] == '1';
     Widget widget = Text(
       element.textContent,
       style: (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(
-          background: Paint()..color = isCurrent ? currentColor : matchColor),
+        background: Paint()..color = isCurrent ? currentColor : matchColor,
+        decoration: underline ? TextDecoration.underline : null,
+      ),
     );
     // Rebuilding the run as a plain widget drops the link recognizer the
     // package attached to the surrounding label, so re-add the tap here.
