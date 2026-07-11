@@ -1571,6 +1571,234 @@ void main() {
     ws.dispose();
   });
 
+  test(
+      'Update relaunch restores the file-args window without clobbering the '
+      'persistent session', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessrelaunch');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // The persistent session from a previous plain launch — note its unsaved
+    // buffer, protected by hot exit; it must survive a file-args update.
+    final old = File('${tmp.path}/old.md')..writeAsStringSync('# Old on disk');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': old.path,
+            'content': '# Old edited (unsaved)',
+            'dirty': true,
+            'mode': 'raw',
+            'synced': '# Old on disk',
+          },
+        ],
+      });
+    final protected = store.data;
+    final relaunch = _FakeSessionStore();
+
+    // This run was launched by double-clicking current.md: a store, but
+    // auto-persist OFF so ordinary editing can't clobber the saved session.
+    final current = File('${tmp.path}/current.md')
+      ..writeAsStringSync('# Current');
+    final ws = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: relaunch, autoPersist: false);
+    ws.openDocument('# Current', path: current.path);
+    expect(ws.sessionEnabled, isFalse); // no auto-save this run…
+    expect(ws.willRestoreOnRelaunch, isTrue); // …but it CAN snapshot for update
+
+    // A normal flush (window close) must not touch the persistent session.
+    await ws.flushSession();
+    expect(store.data, protected);
+
+    // The update snapshots to the SEPARATE relaunch store; session.json intact.
+    expect(await ws.persistSessionForRelaunch(), isTrue);
+    expect(store.data, protected); // persistent session STILL protected
+    expect(relaunch.data, isNotNull); // one-shot snapshot written
+    ws.dispose();
+
+    // The arg-less relaunch (plain launch) CONSUMES the one-shot snapshot,
+    // restoring current.md — and clears it so it can't resurface.
+    final ws2 = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: relaunch);
+    await ws2.restoreSession();
+    expect(ws2.documents.length, 1);
+    expect(ws2.documents.single.filePath, current.path);
+    expect(relaunch.data, isNull); // consumed
+    // Consuming the snapshot turned auto-persist OFF, so this continued window
+    // won't overwrite the protected persistent session.
+    expect(ws2.sessionEnabled, isFalse);
+    ws2.dispose();
+
+    // A later plain launch (no pending snapshot) restores the protected
+    // session — proving the file-args update never clobbered it.
+    final ws3 = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: _FakeSessionStore());
+    await ws3.restoreSession();
+    expect(ws3.documents.single.filePath, old.path);
+    expect(ws3.documents.single.currentMarkdown(), '# Old edited (unsaved)');
+    expect(ws3.documents.single.isDirty, isTrue);
+    ws3.dispose();
+  });
+
+  test('A torn-off window (no stores) cannot persist for a relaunch', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    // Torn-off: no session store, no relaunch store, auto-persist off.
+    final ws = WorkspaceController(prefs, autoPersist: false);
+    expect(ws.willRestoreOnRelaunch, isFalse);
+    // Nothing to write to — the caller falls back to its discard prompt.
+    expect(await ws.persistSessionForRelaunch(), isFalse);
+    ws.dispose();
+  });
+
+  test('An abandoned session is not restorable and is never overwritten',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': null, 'content': 'saved work', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final saved = store.data;
+    final relaunch = _FakeSessionStore();
+    final ws = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: relaunch);
+    // A forwarded doc arrived before restore → restore abandons and protects
+    // the saved session.
+    ws.openDocument('a forwarded file', path: '/tmp/fwd.md');
+    await ws.restoreSession();
+    // An update started from here must NOT snapshot (it would overwrite the
+    // deliberately protected session on a later plain launch)…
+    expect(ws.willRestoreOnRelaunch, isFalse);
+    expect(await ws.persistSessionForRelaunch(), isFalse);
+    expect(store.data, saved); // …the saved session is untouched…
+    expect(relaunch.data, isNull); // …and no one-shot snapshot was written.
+    ws.dispose();
+  });
+
+  test('A corrupt relaunch snapshot is discarded and the session restored',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsesscorrupt');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/real.md')..writeAsStringSync('# Real');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': f.path, 'content': '# Real', 'dirty': false, 'mode': 'raw'},
+        ],
+      });
+    final relaunch = _FakeSessionStore()..data = 'not valid json {{{';
+    final ws = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: relaunch);
+    await ws.restoreSession();
+    // Fell back to the persistent session (no blank, non-persisting window)…
+    expect(ws.documents.single.filePath, f.path);
+    expect(ws.sessionEnabled, isTrue); // …auto-persist stayed ON…
+    expect(relaunch.data, isNull); // …and the corrupt snapshot was discarded.
+    ws.dispose();
+  });
+
+  test('A relaunch snapshot with only malformed entries falls back to session',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessmalformed');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/real.md')..writeAsStringSync('# Real');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': f.path, 'content': '# Real', 'dirty': false, 'mode': 'raw'},
+        ],
+      });
+    // A non-empty docs array whose only entry is malformed (non-string path):
+    // it must not be consumed as a valid relaunch, but fall back to the session.
+    final relaunch = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': 123, 'content': 'x'},
+        ],
+      });
+    final ws = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: relaunch);
+    await ws.restoreSession();
+    expect(ws.documents.single.filePath, f.path); // fell back to the session…
+    expect(ws.sessionEnabled, isTrue); // …auto-persist stayed ON…
+    expect(relaunch.data, isNull); // …and the bad snapshot was discarded.
+    ws.dispose();
+  });
+
+  test('An aborted relaunch restore keeps the snapshot for next launch',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final relaunch = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': null,
+            'content': 'update tabs',
+            'dirty': true,
+            'mode': 'raw'
+          },
+        ],
+      });
+    final snapshot = relaunch.data;
+    final ws = WorkspaceController(prefs,
+        sessionStore: _FakeSessionStore(), relaunchStore: relaunch);
+    // A forwarded doc arrived before restore → it abandons rather than clobber.
+    ws.openDocument('forwarded', path: '/tmp/fwd.md');
+    await ws.restoreSession();
+    // The one-shot snapshot is preserved (not consumed), so a later launch can
+    // still restore it.
+    expect(relaunch.data, snapshot);
+    ws.dispose();
+  });
+
+  test('clearRelaunchSnapshot discards a pending one-shot snapshot', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final relaunch = _FakeSessionStore()..data = 'pending';
+    final ws = WorkspaceController(prefs,
+        sessionStore: _FakeSessionStore(),
+        relaunchStore: relaunch,
+        autoPersist: false);
+    await ws.clearRelaunchSnapshot();
+    expect(relaunch.data, isNull);
+    ws.dispose();
+  });
+
+  test('persistSessionForRelaunch reports a failed one-shot write', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    // A file-args launch whose relaunch store can't write (disk full): the
+    // snapshot fails, so the update flow aborts rather than relaunch stale.
+    final ws = WorkspaceController(prefs,
+        sessionStore: _FakeSessionStore(),
+        relaunchStore: _ThrowingSessionStore(),
+        autoPersist: false);
+    ws.openDocument('# X', path: '/tmp/x.md');
+    expect(ws.willRestoreOnRelaunch, isTrue); // has a relaunch store…
+    expect(await ws.persistSessionForRelaunch(), isFalse); // …but write fails
+    ws.dispose();
+  });
+
   test('FileSessionStore round-trips through the real filesystem', () async {
     final dir = Directory.systemTemp.createTempSync('mdfss');
     addTearDown(() => dir.deleteSync(recursive: true));

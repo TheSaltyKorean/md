@@ -53,8 +53,25 @@ Future<void> main(List<String> args) async {
   // restores everything. (Mobile has no argv, so mobile is always plain.)
   final isTornOffWindow = forceNewWindow || handoffPath != null;
   final plainLaunch = !isTornOffWindow && fileArgs.isEmpty;
-  final workspace = WorkspaceController(prefs,
-      sessionStore: plainLaunch ? FileSessionStore() : null);
+  // A plain launch owns the auto-session (restore + debounced save). Non-torn-off
+  // windows also get a SEPARATE one-shot relaunch store: a file-args launch keeps
+  // auto-persist OFF (so normal editing doesn't clobber the saved session), and
+  // an in-app update snapshots the open tabs into relaunch.json — leaving the
+  // persistent session untouched — so the relaunch restores what was open, not
+  // an unrelated old session. Torn-off windows get no stores.
+  final relaunchStore =
+      isTornOffWindow ? null : FileSessionStore(filename: 'relaunch.json');
+  // A plain launch starts auto-persisting; restoreSession turns that OFF only if
+  // it actually consumes a valid one-shot relaunch snapshot (this arg-less
+  // launch then continues a file-args window that just updated, so it must not
+  // overwrite the protected persistent session). Deciding there — not from a
+  // naive read here — means a corrupt snapshot can't strand a blank window.
+  final workspace = WorkspaceController(
+    prefs,
+    sessionStore: isTornOffWindow ? null : FileSessionStore(),
+    relaunchStore: relaunchStore,
+    autoPersist: plainLaunch,
+  );
 
   if (single.isSupported) {
     try {
@@ -71,6 +88,10 @@ Future<void> main(List<String> args) async {
   } else if (fileArgs.isNotEmpty) {
     // Named files: open exactly those (session persistence is off, so the
     // previously saved session survives untouched for the next plain launch).
+    // Discard any pending one-shot relaunch snapshot first: this launch won't
+    // consume it, so leaving it would let a later arg-less launch resurrect
+    // stale update-time tabs — it must stay truly one-shot.
+    await workspace.clearRelaunchSnapshot();
     await _openPaths(fileArgs, workspace);
   } else {
     // Plain launch (incl. the updater's silent relaunch). Restore the saved

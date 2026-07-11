@@ -16,20 +16,27 @@ abstract class SessionStore {
   Future<void> clear();
 }
 
-/// A [SessionStore] backed by `session.json` in the app-support directory.
+/// A [SessionStore] backed by a JSON file in the app-support directory. The
+/// persistent workspace session uses `session.json`; the one-shot update
+/// relaunch snapshot uses a separate `relaunch.json` so it never overwrites the
+/// protected session (see [WorkspaceController.persistSessionForRelaunch]).
 class FileSessionStore implements SessionStore {
   /// [directory] overrides the storage location (used by tests); production
-  /// uses the platform app-support directory.
-  FileSessionStore({Directory? directory}) : _directory = directory;
+  /// uses the platform app-support directory. [filename] selects which store
+  /// (defaults to the persistent session).
+  FileSessionStore({Directory? directory, String filename = 'session.json'})
+      : _directory = directory,
+        _filename = filename;
 
   final Directory? _directory;
+  final String _filename;
   File? _cached;
 
   Future<File> _file() async {
     final existing = _cached;
     if (existing != null) return existing;
     final dir = _directory ?? await getApplicationSupportDirectory();
-    return _cached = File(p.join(dir.path, 'session.json'));
+    return _cached = File(p.join(dir.path, _filename));
   }
 
   @override

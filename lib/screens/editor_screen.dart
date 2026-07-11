@@ -1124,6 +1124,14 @@ class _EditorScreenState extends State<EditorScreen>
     final ws = context.read<WorkspaceController>();
     final kind = updates.installKind;
     final oneClick = kind.canOneClick;
+    // Only the MSI/Inno path exits and auto-relaunches, snapshotting the tabs
+    // right before it — so a file-args window is restored there. The deb /
+    // download-page paths keep running (or don't exit) and rely on the
+    // auto-session, so they only restore when that's actually on (a plain
+    // launch). Promise restore in the dialog accordingly.
+    final autoRelaunch = kind == InstallKind.msi || kind == InstallKind.inno;
+    final willRestore =
+        autoRelaunch ? ws.willRestoreOnRelaunch : ws.sessionEnabled;
     final proceed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -1143,17 +1151,14 @@ class _EditorScreenState extends State<EditorScreen>
                   'Your install type updates from the download page — the '
                       'right installer is one click there.',
               } +
-              // Only a plain (session-backed) window is restored across the
-              // relaunch. A window opened directly from a file has no session,
-              // so promising hot-restore here would be false — it reopens to
-              // the previously saved session instead, so tell the user to save
-              // first.
-              (ws.sessionEnabled
+              // Promise restore only when this update path actually brings the
+              // current tabs back (see [willRestore]); otherwise tell the user
+              // to save, since it would reopen to the previously saved session.
+              (willRestore
                   ? ' Your open tabs and unsaved changes are restored when you '
                       'reopen.'
-                  : ' This window was opened directly from a file, so after the '
-                      'update it reopens to your previously saved session — '
-                      'save any unsaved changes here first.'),
+                  : ' After the update it reopens to your previously saved '
+                      'session, so save any unsaved changes here first.'),
         ),
         actions: [
           TextButton(
@@ -1179,11 +1184,13 @@ class _EditorScreenState extends State<EditorScreen>
       return;
     }
 
-    // The Windows install path exits the app, so persist the session first
-    // (it's restored on the auto-relaunch). _prepareExit hot-exits when the
-    // session saves and only prompts if it can't — same as a window close.
-    final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
-    if (exitsForInstall) {
+    // The Windows install path exits and auto-relaunches. A restorable window
+    // (plain or file-args) loses nothing — its tabs are snapshotted right
+    // before the relaunch — so it needs no early prompt. Only a torn-off window
+    // can't be restored, so confirm any unsaved work will be discarded before
+    // we spend time downloading.
+    final exitsForInstall = autoRelaunch;
+    if (exitsForInstall && !ws.willRestoreOnRelaunch) {
       if (!await _prepareExit() || !mounted) return;
     }
 
@@ -1245,26 +1252,49 @@ class _EditorScreenState extends State<EditorScreen>
       if (cancelled) return;
       closeProgress();
       if (exitsForInstall) {
-        // Spawn first, release second: the wscript launcher only WAITS for
-        // this process id, so starting it before teardown is safe — and if
-        // the spawn throws, nothing has been released yet and the editor
-        // stays fully functional (socket, watchers) for the error path.
-        // Re-run the exit prep now that the download is done: the app stayed
-        // alive through it, during which a file watcher could have
-        // auto-reloaded a clean tab or surfaced a new conflict. _prepareExit
-        // ran BEFORE the download, so re-flush to capture those — and if that
-        // write now fails (e.g. the installer filled the disk), _prepareExit
-        // falls back to the discard prompt and we abort rather than relaunch
-        // onto a stale session.
-        if (!await _prepareExit() || !mounted) return;
-        // Once the installer is running, release resources and exit; the
-        // launcher only WAITS for this pid, so starting it before teardown is
-        // safe, and it starts the install only after the pid vanishes — file
-        // replacement can never race shutdown.
-        await updates.launchInstaller(path, kind);
+        // Snapshot the CURRENT tabs now that the download is done — the app
+        // stayed alive through it, during which a watcher could have
+        // auto-reloaded a clean tab or surfaced a conflict, so capture the
+        // latest state. A restorable window snapshots (a file-args launch to
+        // the one-shot relaunch store, a plain launch by flushing its session).
+        if (ws.willRestoreOnRelaunch) {
+          // If the snapshot can't be written (disk full), we can't keep the
+          // "your tabs are restored" promise, so abort rather than relaunch
+          // onto a stale session — even when nothing is dirty (a clean-tab
+          // window wouldn't be caught by the discard prompt).
+          if (!await ws.persistSessionForRelaunch()) {
+            messenger.showSnackBar(const SnackBar(
+                content: Text('Could not save your open tabs for the update — '
+                    'free up disk space and try again.')));
+            return;
+          }
+          if (!mounted) return;
+        } else if (!await _prepareExit() || !mounted) {
+          // Not restorable (torn-off): confirm discarding any unsaved work.
+          return;
+        }
+        // Spawn first, release second: the wscript launcher only WAITS for this
+        // process id, so starting it before teardown is safe, and it starts the
+        // install only after the pid vanishes — file replacement can never race
+        // shutdown. If the spawn throws, nothing has been released yet and the
+        // editor stays fully functional (socket, watchers) for the error path.
+        try {
+          await updates.launchInstaller(path, kind);
+        } catch (_) {
+          // The installer helper failed to spawn: roll back the one-shot
+          // relaunch snapshot so a later manual launch doesn't resurrect these
+          // update-time tabs, then let the outer catch surface the error.
+          await ws.clearRelaunchSnapshot();
+          rethrow;
+        }
         await _releaseResources();
         exit(0);
       } else {
+        // The .deb / download-page paths keep running, so DON'T snapshot here:
+        // a mid-update snapshot would freeze the session while later edits and
+        // discards go untracked (a file-args launch has auto-persist off),
+        // resurrecting stale state on the next launch. These paths rely on the
+        // auto-session (a plain launch), matched by the dialog's restore copy.
         await updates.launchInstaller(path, kind);
         messenger.showSnackBar(SnackBar(
             content: Text('Installer opened — ${info.version} takes over '

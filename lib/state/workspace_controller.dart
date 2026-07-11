@@ -71,8 +71,19 @@ class PrintPreviewTab extends WorkspaceTab {
 /// and the global auto-reload setting. Each document tab is its own
 /// [DocumentController].
 class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this._prefs, {SessionStore? sessionStore})
-      : _sessionStore = sessionStore {
+  /// [autoPersist] controls the automatic (debounced) session save and hot
+  /// exit. A file-args launch (double-click a `.md`) passes a store with
+  /// [autoPersist] `false`: normal editing must NOT overwrite the saved
+  /// session, but the store is still there so [persistSessionForRelaunch] can
+  /// snapshot the current tabs before an update relaunch (otherwise the
+  /// arg-less relaunch would restore a stale, unrelated session).
+  WorkspaceController(this._prefs,
+      {SessionStore? sessionStore,
+      SessionStore? relaunchStore,
+      bool autoPersist = true})
+      : _sessionStore = sessionStore,
+        _relaunchStore = relaunchStore,
+        _autoPersist = autoPersist {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
     final tx = _prefs.getDouble(_toolbarXKey);
     final ty = _prefs.getDouble(_toolbarYKey);
@@ -81,7 +92,9 @@ class WorkspaceController extends ChangeNotifier {
     _activeIndex = 0;
     // Persist the session (debounced) whenever tabs, the active tab, or any
     // open document changes, so a restart/update reopens where we left off.
-    if (_sessionStore != null) addListener(_scheduleSessionSave);
+    if (_sessionStore != null && _autoPersist) {
+      addListener(_scheduleSessionSave);
+    }
   }
 
   static const _autoReloadKey = 'auto_reload';
@@ -94,14 +107,40 @@ class WorkspaceController extends ChangeNotifier {
   /// Where the open-tabs session is stored (null disables session
   /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
+
+  /// A SEPARATE one-shot store (`relaunch.json`) for the update-relaunch
+  /// snapshot on a file-args launch — kept apart from [_sessionStore] so
+  /// snapshotting the current tabs for an update never overwrites the protected
+  /// session (which may hold a prior plain launch's hot-exit unsaved buffers).
+  /// Consumed (and cleared) by the next [restoreSession].
+  final SessionStore? _relaunchStore;
+
+  /// Whether the automatic debounced save + hot exit are active. False on a
+  /// file-args launch, whose store exists only for [persistSessionForRelaunch].
+  /// Turned off mid-restore when a one-shot relaunch snapshot is consumed (this
+  /// arg-less launch is continuing that non-persisting file-args window, so it
+  /// must not overwrite the protected persistent session).
+  bool _autoPersist;
   Timer? _sessionTimer;
   bool _sessionAbandoned = false;
 
   /// Whether this workspace persists/restores its session. When false (a
-  /// torn-off window, or a launch where [restoreSession] abandoned to a
-  /// pre-opened document), closing with unsaved work still needs a discard
-  /// prompt — hot exit only applies when the session is actually saved.
-  bool get sessionEnabled => _sessionStore != null && !_sessionAbandoned;
+  /// torn-off window, a file-args launch, or a launch where [restoreSession]
+  /// abandoned to a pre-opened document), closing with unsaved work still needs
+  /// a discard prompt — hot exit only applies when the session is actually
+  /// saved automatically.
+  bool get sessionEnabled =>
+      _sessionStore != null && _autoPersist && !_sessionAbandoned;
+
+  /// Whether an update's relaunch can bring this window's tabs back. True when
+  /// the snapshot [persistSessionForRelaunch] needs has somewhere to go and the
+  /// session isn't abandoned: a plain launch flushes the persistent session, a
+  /// file-args launch writes the one-shot relaunch store. False for a torn-off
+  /// window (no stores), and for an abandoned session (a forwarded/pre-opened
+  /// doc) whose saved session is deliberately protected.
+  bool get willRestoreOnRelaunch =>
+      !_sessionAbandoned &&
+      (_autoPersist ? _sessionStore != null : _relaunchStore != null);
 
   /// Stop this run from persisting the session. Used when [restoreSession]
   /// finds a document was already opened (an instance-forwarded path, or a
@@ -111,6 +150,16 @@ class WorkspaceController extends ChangeNotifier {
   /// and the pre-opened document is protected by the normal close prompt.
   void _abandonSession() {
     _sessionAbandoned = true;
+    _sessionTimer?.cancel();
+  }
+
+  /// Stop auto-persisting after consuming a one-shot relaunch snapshot: the
+  /// arg-less launch is continuing a file-args window, so it must not overwrite
+  /// the protected persistent session. Cancels any pending debounced save; once
+  /// [_autoPersist] is false, [_scheduleSessionSave] no-ops (via
+  /// [sessionEnabled]) even though the listeners stay attached.
+  void _disableAutoPersist() {
+    _autoPersist = false;
     _sessionTimer?.cancel();
   }
 
@@ -412,13 +461,59 @@ class WorkspaceController extends ChangeNotifier {
     return ok;
   }
 
+  /// Snapshot the CURRENT tabs so an update's arg-less silent relaunch restores
+  /// exactly what's open now — otherwise a file-args launch (auto-session off)
+  /// would relaunch onto the last *plain*-launch session: an unrelated file.
+  ///
+  /// - Plain launch: the live session IS the persistent one, so just flush it.
+  /// - File-args launch: write a ONE-SHOT snapshot to the separate relaunch
+  ///   store, leaving the persistent session (and any hot-exit unsaved buffers
+  ///   it protects) untouched. [restoreSession] consumes it next launch.
+  ///
+  /// Returns false when the snapshot can't be taken (no store, an abandoned
+  /// session, or a failed write), so the caller can abort/fall back rather than
+  /// relaunch onto a stale session.
+  Future<bool> persistSessionForRelaunch() async {
+    if (_sessionAbandoned) return false;
+    // Plain launch: the persistent session is the live one — flush it and let
+    // the arg-less relaunch restore it normally.
+    if (_autoPersist) return flushSession();
+    final store = _relaunchStore;
+    if (store == null) return false;
+    _sessionTimer?.cancel();
+    final json = jsonEncode(sessionSnapshot());
+    var ok = true;
+    await _track(() async {
+      try {
+        await store.write(json);
+      } catch (_) {
+        ok = false;
+      }
+    });
+    return ok;
+  }
+
+  /// Discard a one-shot relaunch snapshot — used to roll back when the installer
+  /// fails to launch, so a later manual launch doesn't resurrect the stale
+  /// update-time tabs.
+  Future<void> clearRelaunchSnapshot() async {
+    final store = _relaunchStore;
+    if (store == null) return;
+    await _track(() async {
+      try {
+        await store.clear();
+      } catch (_) {/* best effort */}
+    });
+  }
+
   /// Rebuild the tabs from a previously saved session. No-op when session
   /// persistence is disabled, there is no saved session, or it's empty — the
   /// initial blank document is left in place. Restored documents keep their
   /// unsaved buffer, dirty state, and view mode.
   Future<void> restoreSession() async {
     final store = _sessionStore;
-    if (store == null) return;
+    final relaunch = _relaunchStore;
+    if (store == null && relaunch == null) return;
     // Only populate a *fresh* workspace. If a document was already opened
     // (an OS file-association open via the platform channel, or an instance
     // forward), don't clobber it with the saved session — and suppress
@@ -428,26 +523,79 @@ class WorkspaceController extends ChangeNotifier {
       _abandonSession();
       return;
     }
-    Map<String, dynamic>? data;
+
+    // A one-shot relaunch snapshot (a file-args window that just updated) takes
+    // precedence — but it's only honoured once at least one of its tabs
+    // actually restores. A corrupt/empty/all-malformed snapshot is discarded
+    // and we fall back to the persistent session, rather than strand a blank,
+    // non-persisting window that retries the bad snapshot every launch.
+    if (relaunch != null) {
+      final data = await _readSnapshot(relaunch);
+      if (data != null) {
+        final restored = await _resolveEntries(data);
+        if (restored.isNotEmpty) {
+          // A forwarded doc may have arrived during the async reads — don't
+          // clobber it, and KEEP the snapshot (don't clear) so a retry can use
+          // it next launch.
+          if (documents.any((d) => !d.isPristine)) {
+            _abandonSession();
+            return;
+          }
+          _applyRestored(restored, data);
+          // Continuing a non-persisting window: stop auto-saving so it can't
+          // overwrite the protected persistent session, and consume the
+          // one-shot snapshot now that the restore has committed.
+          _disableAutoPersist();
+          await relaunch.clear();
+          notifyListeners();
+          return;
+        }
+      }
+      // Corrupt, empty, or all-malformed snapshot: discard it so it can't
+      // linger or retry, then fall back to the persistent session. (Absent is a
+      // harmless no-op.)
+      await relaunch.clear();
+    }
+
+    // Fall back to the persistent session.
+    if (store == null) return;
+    final data = await _readSnapshot(store);
+    if (data == null) return;
+    final restored = await _resolveEntries(data);
+    if (restored.isEmpty) return;
+    if (documents.any((d) => !d.isPristine)) {
+      _abandonSession();
+      return;
+    }
+    _applyRestored(restored, data);
+    notifyListeners();
+  }
+
+  /// Read + decode a snapshot store, returning the map only when it's a
+  /// well-formed object with a non-empty `docs` list (else null: absent,
+  /// corrupt, or empty).
+  Future<Map<String, dynamic>?> _readSnapshot(SessionStore store) async {
     try {
       final raw = await store.read();
-      if (raw == null) return;
-      data = jsonDecode(raw) as Map<String, dynamic>;
+      if (raw == null) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+      final docs = decoded['docs'];
+      if (docs is! List || docs.isEmpty) return null;
+      return decoded;
     } catch (_) {
-      return; // absent or corrupt — keep the fresh blank document
+      return null; // absent or corrupt — keep the fresh blank document
     }
-    // `docs` may be missing or (in a corrupt/forward-incompatible file) not a
-    // list — guard the type instead of casting so a bad value degrades to an
-    // empty restore rather than throwing.
+  }
+
+  /// Resolve each persisted tab against the CURRENT file on disk (deciding its
+  /// content, baseline, and conflict) BEFORE the workspace is mutated — the
+  /// SINGLE place that reads the file, so loadMarkdown applies that decision
+  /// verbatim (see fromRestore) rather than re-reading and possibly disagreeing.
+  /// Malformed entries are skipped, so the result may be empty.
+  Future<List<_RestoredDoc>> _resolveEntries(Map<String, dynamic> data) async {
     final docsRaw = data['docs'];
     final entries = docsRaw is List ? docsRaw : const [];
-    if (entries.isEmpty) return;
-
-    // Resolve each tab BEFORE mutating the workspace (the disk reads are
-    // async). This is the SINGLE place that reads the current file and decides
-    // each restored tab's content, baseline, and conflict — loadMarkdown then
-    // applies that decision verbatim (see fromRestore) rather than re-reading
-    // disk itself, so the two can't disagree.
     final restored = <_RestoredDoc>[];
     for (final entry in entries) {
       if (entry is! Map) continue;
@@ -528,18 +676,12 @@ class WorkspaceController extends ChangeNotifier {
         // skip it rather than aborting the whole restore.
       }
     }
-    if (restored.isEmpty) return;
+    return restored;
+  }
 
-    // The disk reads above are async; a forwarded open-file request could
-    // have arrived meanwhile and added a real document. Re-check freshness so
-    // we don't clobber it — and suppress persistence for the same reason as
-    // the pre-read check above.
-    if (documents.any((d) => !d.isPristine)) {
-      _abandonSession();
-      return;
-    }
-
-    // Replace the initial blank tab(s).
+  /// Replace the tabs with the resolved documents and select the saved active
+  /// tab. The caller notifies listeners after any snapshot bookkeeping.
+  void _applyRestored(List<_RestoredDoc> restored, Map<String, dynamic> data) {
     for (final t in _tabs) {
       if (t is DocumentTab) _detachDoc(t.doc);
     }
@@ -563,13 +705,11 @@ class WorkspaceController extends ChangeNotifier {
     }
     if (_tabs.isEmpty) _tabs.add(DocumentTab(_newDoc()));
     // Type-guard the active index too (a corrupt/forward-version session could
-    // hold a non-int here): this runs after the tabs are rebuilt and outside
-    // the corrupt-session try, so a bad cast would crash launch instead of
-    // falling back to tab 0.
+    // hold a non-int here): a bad cast would crash launch instead of falling
+    // back to tab 0.
     final activeRaw = data['active'];
     final active = activeRaw is int ? activeRaw : 0;
     _activeIndex = active.clamp(0, _tabs.length - 1);
-    notifyListeners();
   }
 
   @override
