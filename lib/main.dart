@@ -61,16 +61,16 @@ Future<void> main(List<String> args) async {
   // an unrelated old session. Torn-off windows get no stores.
   final relaunchStore =
       isTornOffWindow ? null : FileSessionStore(filename: 'relaunch.json');
-  // A pending relaunch snapshot means this arg-less launch continues a file-args
-  // window that just updated: restore it (consumed below) with auto-persist OFF,
-  // so it doesn't overwrite the protected persistent session either.
-  final hasPendingRelaunch =
-      plainLaunch && (await relaunchStore?.read()) != null;
+  // A plain launch starts auto-persisting; restoreSession turns that OFF only if
+  // it actually consumes a valid one-shot relaunch snapshot (this arg-less
+  // launch then continues a file-args window that just updated, so it must not
+  // overwrite the protected persistent session). Deciding there — not from a
+  // naive read here — means a corrupt snapshot can't strand a blank window.
   final workspace = WorkspaceController(
     prefs,
     sessionStore: isTornOffWindow ? null : FileSessionStore(),
     relaunchStore: relaunchStore,
-    autoPersist: plainLaunch && !hasPendingRelaunch,
+    autoPersist: plainLaunch,
   );
 
   if (single.isSupported) {
@@ -88,6 +88,10 @@ Future<void> main(List<String> args) async {
   } else if (fileArgs.isNotEmpty) {
     // Named files: open exactly those (session persistence is off, so the
     // previously saved session survives untouched for the next plain launch).
+    // Discard any pending one-shot relaunch snapshot first: this launch won't
+    // consume it, so leaving it would let a later arg-less launch resurrect
+    // stale update-time tabs — it must stay truly one-shot.
+    await workspace.clearRelaunchSnapshot();
     await _openPaths(fileArgs, workspace);
   } else {
     // Plain launch (incl. the updater's silent relaunch). Restore the saved

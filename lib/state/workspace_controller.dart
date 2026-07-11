@@ -117,7 +117,10 @@ class WorkspaceController extends ChangeNotifier {
 
   /// Whether the automatic debounced save + hot exit are active. False on a
   /// file-args launch, whose store exists only for [persistSessionForRelaunch].
-  final bool _autoPersist;
+  /// Turned off mid-restore when a one-shot relaunch snapshot is consumed (this
+  /// arg-less launch is continuing that non-persisting file-args window, so it
+  /// must not overwrite the protected persistent session).
+  bool _autoPersist;
   Timer? _sessionTimer;
   bool _sessionAbandoned = false;
 
@@ -147,6 +150,16 @@ class WorkspaceController extends ChangeNotifier {
   /// and the pre-opened document is protected by the normal close prompt.
   void _abandonSession() {
     _sessionAbandoned = true;
+    _sessionTimer?.cancel();
+  }
+
+  /// Stop auto-persisting after consuming a one-shot relaunch snapshot: the
+  /// arg-less launch is continuing a file-args window, so it must not overwrite
+  /// the protected persistent session. Cancels any pending debounced save; once
+  /// [_autoPersist] is false, [_scheduleSessionSave] no-ops (via
+  /// [sessionEnabled]) even though the listeners stay attached.
+  void _disableAutoPersist() {
+    _autoPersist = false;
     _sessionTimer?.cancel();
   }
 
@@ -510,22 +523,47 @@ class WorkspaceController extends ChangeNotifier {
       _abandonSession();
       return;
     }
+    // A one-shot relaunch snapshot (from a file-args window that just updated)
+    // takes precedence: it restores the window that updated, not the untouched
+    // persistent session. It's only CONSUMED once the restore actually commits
+    // (below) — so an aborted restore keeps it for the next launch — and only a
+    // VALID snapshot is honoured; a corrupt/empty one is discarded and we fall
+    // back to the persistent session rather than leave a blank, non-persisting
+    // window.
+    var fromRelaunch = false;
     Map<String, dynamic>? data;
-    try {
-      // A one-shot relaunch snapshot (from a file-args window that just
-      // updated) takes precedence and is CONSUMED, so it restores the window
-      // that updated — not the untouched persistent session — and can never
-      // resurface on a later launch.
-      String? raw;
-      if (relaunch != null) {
-        raw = await relaunch.read();
-        if (raw != null) await relaunch.clear();
+    if (relaunch != null) {
+      final raw = await relaunch.read();
+      if (raw != null) {
+        try {
+          final decoded = jsonDecode(raw);
+          final docs = decoded is Map<String, dynamic> ? decoded['docs'] : null;
+          if (docs is List && docs.isNotEmpty) {
+            data = decoded as Map<String, dynamic>;
+            fromRelaunch = true;
+            // Continuing a non-persisting window — stop auto-saving now, before
+            // applying tabs, so it never overwrites the persistent session.
+            _disableAutoPersist();
+          } else {
+            await relaunch
+                .clear(); // junk snapshot — don't block future launches
+          }
+        } catch (_) {
+          await relaunch.clear(); // corrupt snapshot — discard and fall back
+        }
       }
-      raw ??= store != null ? await store.read() : null;
-      if (raw == null) return;
-      data = jsonDecode(raw) as Map<String, dynamic>;
-    } catch (_) {
-      return; // absent or corrupt — keep the fresh blank document
+    }
+    if (data == null) {
+      if (store == null) return;
+      try {
+        final raw = await store.read();
+        if (raw == null) return;
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map<String, dynamic>) return;
+        data = decoded;
+      } catch (_) {
+        return; // absent or corrupt — keep the fresh blank document
+      }
     }
     // `docs` may be missing or (in a corrupt/forward-incompatible file) not a
     // list — guard the type instead of casting so a bad value degrades to an
@@ -660,6 +698,10 @@ class WorkspaceController extends ChangeNotifier {
     final activeRaw = data['active'];
     final active = activeRaw is int ? activeRaw : 0;
     _activeIndex = active.clamp(0, _tabs.length - 1);
+    // The restore has committed, so a one-shot relaunch snapshot can now be
+    // consumed — clearing earlier would drop it if an abandon path above
+    // returned first.
+    if (fromRelaunch) await _relaunchStore?.clear();
     notifyListeners();
   }
 
