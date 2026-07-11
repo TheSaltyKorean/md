@@ -712,7 +712,14 @@ class _EditorScreenState extends State<EditorScreen>
             PopupMenuItem(
                 value: 'find',
                 enabled: active != null,
-                child: const Text('Find / Replace')),
+                child: const Text('Find')),
+            // Replace edits the source, so this routes through Raw — a mouse/
+            // touch path to Replace that also works from Preview (which offers
+            // find only).
+            PopupMenuItem(
+                value: 'replace',
+                enabled: active != null,
+                child: const Text('Replace…')),
             PopupMenuItem(
                 value: 'save',
                 enabled: active != null,
@@ -750,7 +757,7 @@ class _EditorScreenState extends State<EditorScreen>
         onPressed: () => _open(context, ws),
       ),
       IconButton(
-        tooltip: 'Find / Replace (Ctrl+F)',
+        tooltip: 'Find (Ctrl+F)',
         icon: const Icon(Icons.search_rounded),
         onPressed: active == null ? null : () => _openFind(active),
       ),
@@ -1043,6 +1050,9 @@ class _EditorScreenState extends State<EditorScreen>
         break;
       case 'find':
         if (active != null) _openFind(active);
+        break;
+      case 'replace':
+        if (active != null) _openFind(active, replace: true);
         break;
       case 'save':
         if (active != null) _save(context, active);

@@ -1080,6 +1080,43 @@ void main() {
     expect(frag.style?.background, isNotNull);
   });
 
+  testWidgets('Preview find collapses indentation after a soft break',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // Continuation line is indented; the renderer shows one space.
+          markdown: 'the Company\n    shall pay',
+          highlightQuery: 'Company shall',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(count, 1);
+    expect(tester.widget<Text>(find.text('Company shall')).style?.background,
+        isNotNull);
+  });
+
+  testWidgets('Preview find does not match across skipped inline code',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // Renders "foocodebar", but code sits between foo and bar.
+          markdown: 'foo`code`bar',
+          highlightQuery: 'foobar',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // The rendered text foo…bar is not really contiguous, so no false match.
+    expect(count, 0);
+  });
+
   testWidgets('Preview find keeps underline on highlighted <u> text',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

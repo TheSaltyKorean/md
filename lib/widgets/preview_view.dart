@@ -440,6 +440,13 @@ class _UnderlineElementBuilder extends MarkdownElementBuilder {
 /// separately (its text is never highlighted).
 const _kInlineTags = {'em', 'strong', 'a', 'del', 'u', 'mark'};
 
+/// A soft line break (and any whitespace hugging it) renders as a single space,
+/// so the match stream normalises it the same way — otherwise the visible
+/// phrase "Company shall" over a hard-wrapped `the Company\n  shall` wouldn't
+/// match. Trailing 2+ spaces before a newline are a hard break (a `br` element,
+/// not text), so they never reach here.
+final _kSoftBreak = RegExp(r'[ \t]*\n[ \t]*');
+
 class _HighlightedMarkdown extends StatefulWidget {
   const _HighlightedMarkdown({
     required this.markdown,
@@ -536,28 +543,43 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
     // Each run records (text node, start offset, enclosing link href, whether
     // it's inside <u>): href keeps a highlighted link tappable, underline lets
     // the highlight carry the <u> style the mark would otherwise drop.
+    // Each run also stores its NORMALISED text (soft breaks collapsed) so
+    // stream offsets and the marks spliced back in agree with what's rendered.
     final streams = <int, StringBuffer>{};
-    final runs = <int, List<(md.Text, int, String?, bool)>>{};
+    final runs = <int, List<(md.Text, int, String, String?, bool)>>{};
     var block = 0;
     void collect(
         List<md.Node> nodes, int blockId, String? href, bool underline) {
+      // [b] advances mid-list when a skipped inline element (code/image/line
+      // break) sits between text runs, so the runs on either side land in
+      // different streams and can't match as if they were contiguous.
+      var b = blockId;
       for (final n in nodes) {
         if (n is md.Text) {
-          final buf = streams.putIfAbsent(blockId, StringBuffer.new);
+          final nt = n.text.replaceAll(_kSoftBreak, ' ');
+          final buf = streams.putIfAbsent(b, StringBuffer.new);
           runs
-              .putIfAbsent(blockId, () => [])
-              .add((n, buf.length, href, underline));
-          buf.write(n.text.replaceAll('\n', ' '));
+              .putIfAbsent(b, () => [])
+              .add((n, buf.length, nt, href, underline));
+          buf.write(nt);
         } else if (n is md.Element) {
           final children = n.children;
-          // Code renders its text directly (never highlighted); skip its text.
-          if (children == null || n.tag == 'code' || n.tag == 'pre') continue;
+          // code/image/<br>/pre render (or break the line) between text but are
+          // never highlighted; start a new stream so a search can't join the
+          // text on either side (e.g. "foobar" over `foo`+`code`+`bar`).
+          if (children == null || n.tag == 'code' || n.tag == 'pre') {
+            b = ++block;
+            continue;
+          }
           final childHref =
               n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
           final childU = underline || n.tag == 'u';
-          _kInlineTags.contains(n.tag)
-              ? collect(children, blockId, childHref, childU) // same line
-              : collect(children, ++block, childHref, childU); // new block
+          if (_kInlineTags.contains(n.tag)) {
+            collect(children, b, childHref, childU); // same rendered line
+          } else {
+            collect(children, ++block, childHref, childU); // nested block
+            b = ++block; // text after a nested block breaks too
+          }
         }
       }
     }
@@ -574,8 +596,8 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
       for (final m in re.allMatches(text)) {
         if (m.end == m.start) continue;
         final dataI = counter++;
-        for (final (node, start, href, underline) in runs[id]!) {
-          final runEnd = start + node.text.length;
+        for (final (node, start, nt, href, underline) in runs[id]!) {
+          final runEnd = start + nt.length;
           final s = m.start > start ? m.start : start;
           final e = m.end < runEnd ? m.end : runEnd;
           if (s < e) {
@@ -601,14 +623,14 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
             continue;
           }
           segs.sort((a, b) => a.$1.compareTo(b.$1));
-          final text = n.text;
+          // Slice from the SAME normalised text the offsets were computed
+          // against, so the marks land on the right characters and render on
+          // one line like the surrounding paragraph.
+          final text = n.text.replaceAll(_kSoftBreak, ' ');
           var last = 0;
           for (final (start, end, dataI, href, underline) in segs) {
             if (start > last) out.add(md.Text(text.substring(last, start)));
-            // Normalise soft breaks in the marked run too, so the mark renders
-            // on one line like the surrounding paragraph.
-            final mark = md.Element.text(
-                'mark', text.substring(start, end).replaceAll('\n', ' '))
+            final mark = md.Element.text('mark', text.substring(start, end))
               ..attributes['data-i'] = '$dataI';
             if (href != null) mark.attributes['data-href'] = href;
             if (underline) mark.attributes['data-u'] = '1';
