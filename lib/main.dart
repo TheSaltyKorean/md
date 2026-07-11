@@ -53,15 +53,24 @@ Future<void> main(List<String> args) async {
   // restores everything. (Mobile has no argv, so mobile is always plain.)
   final isTornOffWindow = forceNewWindow || handoffPath != null;
   final plainLaunch = !isTornOffWindow && fileArgs.isEmpty;
-  // A plain launch owns the auto-session (restore + debounced save). A file-args
-  // launch still gets a store — but with auto-persist OFF, so normal editing
-  // doesn't clobber the saved session — purely so an in-app update can snapshot
-  // the open file for the relaunch (persistSessionForRelaunch), instead of the
-  // relaunch restoring an unrelated old session. Torn-off windows get no store.
+  // A plain launch owns the auto-session (restore + debounced save). Non-torn-off
+  // windows also get a SEPARATE one-shot relaunch store: a file-args launch keeps
+  // auto-persist OFF (so normal editing doesn't clobber the saved session), and
+  // an in-app update snapshots the open tabs into relaunch.json — leaving the
+  // persistent session untouched — so the relaunch restores what was open, not
+  // an unrelated old session. Torn-off windows get no stores.
+  final relaunchStore =
+      isTornOffWindow ? null : FileSessionStore(filename: 'relaunch.json');
+  // A pending relaunch snapshot means this arg-less launch continues a file-args
+  // window that just updated: restore it (consumed below) with auto-persist OFF,
+  // so it doesn't overwrite the protected persistent session either.
+  final hasPendingRelaunch =
+      plainLaunch && (await relaunchStore?.read()) != null;
   final workspace = WorkspaceController(
     prefs,
     sessionStore: isTornOffWindow ? null : FileSessionStore(),
-    autoPersist: plainLaunch,
+    relaunchStore: relaunchStore,
+    autoPersist: plainLaunch && !hasPendingRelaunch,
   );
 
   if (single.isSupported) {

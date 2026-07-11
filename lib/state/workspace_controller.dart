@@ -78,8 +78,11 @@ class WorkspaceController extends ChangeNotifier {
   /// snapshot the current tabs before an update relaunch (otherwise the
   /// arg-less relaunch would restore a stale, unrelated session).
   WorkspaceController(this._prefs,
-      {SessionStore? sessionStore, bool autoPersist = true})
+      {SessionStore? sessionStore,
+      SessionStore? relaunchStore,
+      bool autoPersist = true})
       : _sessionStore = sessionStore,
+        _relaunchStore = relaunchStore,
         _autoPersist = autoPersist {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
     final tx = _prefs.getDouble(_toolbarXKey);
@@ -105,6 +108,13 @@ class WorkspaceController extends ChangeNotifier {
   /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
 
+  /// A SEPARATE one-shot store (`relaunch.json`) for the update-relaunch
+  /// snapshot on a file-args launch — kept apart from [_sessionStore] so
+  /// snapshotting the current tabs for an update never overwrites the protected
+  /// session (which may hold a prior plain launch's hot-exit unsaved buffers).
+  /// Consumed (and cleared) by the next [restoreSession].
+  final SessionStore? _relaunchStore;
+
   /// Whether the automatic debounced save + hot exit are active. False on a
   /// file-args launch, whose store exists only for [persistSessionForRelaunch].
   final bool _autoPersist;
@@ -120,13 +130,14 @@ class WorkspaceController extends ChangeNotifier {
       _sessionStore != null && _autoPersist && !_sessionAbandoned;
 
   /// Whether an update's relaunch can bring this window's tabs back. True when
-  /// a session store exists and the session isn't abandoned — a plain launch
-  /// (auto-session) OR a file-args launch (auto-session off, but
-  /// [persistSessionForRelaunch] snapshots the tabs just before the relaunch).
-  /// False for a torn-off window (no store), and for an abandoned session (a
-  /// pre-opened/forwarded doc): there the saved session is deliberately
-  /// protected and must not be overwritten with the pre-opened document.
-  bool get willRestoreOnRelaunch => _sessionStore != null && !_sessionAbandoned;
+  /// the snapshot [persistSessionForRelaunch] needs has somewhere to go and the
+  /// session isn't abandoned: a plain launch flushes the persistent session, a
+  /// file-args launch writes the one-shot relaunch store. False for a torn-off
+  /// window (no stores), and for an abandoned session (a forwarded/pre-opened
+  /// doc) whose saved session is deliberately protected.
+  bool get willRestoreOnRelaunch =>
+      !_sessionAbandoned &&
+      (_autoPersist ? _sessionStore != null : _relaunchStore != null);
 
   /// Stop this run from persisting the session. Used when [restoreSession]
   /// finds a document was already opened (an instance-forwarded path, or a
@@ -437,18 +448,25 @@ class WorkspaceController extends ChangeNotifier {
     return ok;
   }
 
-  /// Snapshot the CURRENT tabs to the session store unconditionally — ignoring
-  /// the [sessionEnabled] gate — so an update's arg-less silent relaunch
-  /// restores exactly what's open now. Without this, a file-args launch (whose
-  /// auto-session is off) would relaunch onto the last *plain*-launch session:
-  /// an unrelated file. Returns false when there is no store to write to (a
-  /// torn-off window, or a test/window with session fully disabled), so the
-  /// caller can fall back to its normal exit prep.
+  /// Snapshot the CURRENT tabs so an update's arg-less silent relaunch restores
+  /// exactly what's open now — otherwise a file-args launch (auto-session off)
+  /// would relaunch onto the last *plain*-launch session: an unrelated file.
+  ///
+  /// - Plain launch: the live session IS the persistent one, so just flush it.
+  /// - File-args launch: write a ONE-SHOT snapshot to the separate relaunch
+  ///   store, leaving the persistent session (and any hot-exit unsaved buffers
+  ///   it protects) untouched. [restoreSession] consumes it next launch.
+  ///
+  /// Returns false when the snapshot can't be taken (no store, an abandoned
+  /// session, or a failed write), so the caller can abort/fall back rather than
+  /// relaunch onto a stale session.
   Future<bool> persistSessionForRelaunch() async {
-    final store = _sessionStore;
-    // No store (torn-off), or an abandoned session whose saved data is
-    // deliberately protected (a forwarded/pre-opened doc must not overwrite it).
-    if (store == null || _sessionAbandoned) return false;
+    if (_sessionAbandoned) return false;
+    // Plain launch: the persistent session is the live one — flush it and let
+    // the arg-less relaunch restore it normally.
+    if (_autoPersist) return flushSession();
+    final store = _relaunchStore;
+    if (store == null) return false;
     _sessionTimer?.cancel();
     final json = jsonEncode(sessionSnapshot());
     var ok = true;
@@ -462,13 +480,27 @@ class WorkspaceController extends ChangeNotifier {
     return ok;
   }
 
+  /// Discard a one-shot relaunch snapshot — used to roll back when the installer
+  /// fails to launch, so a later manual launch doesn't resurrect the stale
+  /// update-time tabs.
+  Future<void> clearRelaunchSnapshot() async {
+    final store = _relaunchStore;
+    if (store == null) return;
+    await _track(() async {
+      try {
+        await store.clear();
+      } catch (_) {/* best effort */}
+    });
+  }
+
   /// Rebuild the tabs from a previously saved session. No-op when session
   /// persistence is disabled, there is no saved session, or it's empty — the
   /// initial blank document is left in place. Restored documents keep their
   /// unsaved buffer, dirty state, and view mode.
   Future<void> restoreSession() async {
     final store = _sessionStore;
-    if (store == null) return;
+    final relaunch = _relaunchStore;
+    if (store == null && relaunch == null) return;
     // Only populate a *fresh* workspace. If a document was already opened
     // (an OS file-association open via the platform channel, or an instance
     // forward), don't clobber it with the saved session — and suppress
@@ -480,7 +512,16 @@ class WorkspaceController extends ChangeNotifier {
     }
     Map<String, dynamic>? data;
     try {
-      final raw = await store.read();
+      // A one-shot relaunch snapshot (from a file-args window that just
+      // updated) takes precedence and is CONSUMED, so it restores the window
+      // that updated — not the untouched persistent session — and can never
+      // resurface on a later launch.
+      String? raw;
+      if (relaunch != null) {
+        raw = await relaunch.read();
+        if (raw != null) await relaunch.clear();
+      }
+      raw ??= store != null ? await store.read() : null;
       if (raw == null) return;
       data = jsonDecode(raw) as Map<String, dynamic>;
     } catch (_) {

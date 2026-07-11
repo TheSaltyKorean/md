@@ -1255,17 +1255,22 @@ class _EditorScreenState extends State<EditorScreen>
         // Snapshot the CURRENT tabs now that the download is done — the app
         // stayed alive through it, during which a watcher could have
         // auto-reloaded a clean tab or surfaced a conflict, so capture the
-        // latest state. This writes even on a file-args launch (auto-session
-        // off), so the arg-less relaunch restores exactly what's open instead
-        // of a stale, unrelated session. If the snapshot can't be written
-        // (disk full) or this window can't be restored (torn-off / abandoned),
-        // fall back to the discard confirmation rather than relaunch onto a
-        // stale session and silently lose unsaved buffers.
-        final persisted =
-            ws.willRestoreOnRelaunch && await ws.persistSessionForRelaunch();
-        if (!persisted) {
-          if (!await _prepareExit() || !mounted) return;
-        } else if (!mounted) {
+        // latest state. A restorable window snapshots (a file-args launch to
+        // the one-shot relaunch store, a plain launch by flushing its session).
+        if (ws.willRestoreOnRelaunch) {
+          // If the snapshot can't be written (disk full), we can't keep the
+          // "your tabs are restored" promise, so abort rather than relaunch
+          // onto a stale session — even when nothing is dirty (a clean-tab
+          // window wouldn't be caught by the discard prompt).
+          if (!await ws.persistSessionForRelaunch()) {
+            messenger.showSnackBar(const SnackBar(
+                content: Text('Could not save your open tabs for the update — '
+                    'free up disk space and try again.')));
+            return;
+          }
+          if (!mounted) return;
+        } else if (!await _prepareExit() || !mounted) {
+          // Not restorable (torn-off): confirm discarding any unsaved work.
           return;
         }
         // Spawn first, release second: the wscript launcher only WAITS for this
@@ -1273,7 +1278,15 @@ class _EditorScreenState extends State<EditorScreen>
         // install only after the pid vanishes — file replacement can never race
         // shutdown. If the spawn throws, nothing has been released yet and the
         // editor stays fully functional (socket, watchers) for the error path.
-        await updates.launchInstaller(path, kind);
+        try {
+          await updates.launchInstaller(path, kind);
+        } catch (_) {
+          // The installer helper failed to spawn: roll back the one-shot
+          // relaunch snapshot so a later manual launch doesn't resurrect these
+          // update-time tabs, then let the outer catch surface the error.
+          await ws.clearRelaunchSnapshot();
+          rethrow;
+        }
         await _releaseResources();
         exit(0);
       } else {
