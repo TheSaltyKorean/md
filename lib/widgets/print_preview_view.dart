@@ -684,60 +684,69 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                     dpr /
                     _previewFormat.width *
                     PdfPageFormat.inch;
-            return Center(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: constraints.maxWidth * factor,
-                  height: constraints.maxHeight,
-                  child: PdfPreview(
-                    // The profile-service revision keys the raster too:
-                    // with a stable build tear-off, an edit made in another
-                    // tab must still refresh this tab's cached pages.
-                    key: ValueKey('preview-$_selectedId-$_previewEpoch-'
-                        '${context.watch<PrintProfileService>().revision}'),
-                    dpi: zoomDpi,
-                    shouldRepaint: needsReraster,
-                    // A refresh or profile switch remounts the preview; start it at
-                    // the page size/orientation the user was previewing so their
-                    // selection carries across (and Print/Save keep matching it).
-                    initialPageFormat: _previewFormat,
-                    // A stable method tear-off: PdfPreview re-rasterizes whenever
-                    // the build callback's identity changes, and an inline closure
-                    // gets a new identity on every rebuild — a zoom step (which only
-                    // changes maxPageWidth) must not regenerate the PDF. Profile
-                    // switches re-render via the ValueKey remount above.
-                    build: _buildForFormat,
-                    // Page size/orientation moved into the toolbar row above (the
-                    // preview's own bottom bar would ride the zoomed surface
-                    // off-screen).
-                    canChangePageFormat: false,
-                    canChangeOrientation: false,
-                    // Print/Share live in the profile row above now, so hide the
-                    // preview's own print/share buttons (keep page-size/orientation).
-                    allowPrinting: false,
-                    allowSharing: false,
-                    pdfFileName: '${widget.title}.pdf',
-                    loadingWidget:
-                        const Center(child: CircularProgressIndicator()),
-                    // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
-                    // printers are flaky on repeat jobs (the spooler can refuse the
-                    // second one until you switch printers and back). When a print
-                    // fails, point the user at the reliable in-app export instead.
-                    onPrintError: (ctx, error) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Printing failed. To make a PDF, use the “Save as PDF” '
-                            'icon above — it exports directly with selectable text.',
-                          ),
-                        ),
-                      );
-                    },
+            final preview = PdfPreview(
+              // The profile-service revision keys the raster too:
+              // with a stable build tear-off, an edit made in another
+              // tab must still refresh this tab's cached pages.
+              key: ValueKey('preview-$_selectedId-$_previewEpoch-'
+                  '${context.watch<PrintProfileService>().revision}'),
+              dpi: zoomDpi,
+              shouldRepaint: needsReraster,
+              // A refresh or profile switch remounts the preview; start it at
+              // the page size/orientation the user was previewing so their
+              // selection carries across (and Print/Save keep matching it).
+              initialPageFormat: _previewFormat,
+              // A stable method tear-off: PdfPreview re-rasterizes whenever
+              // the build callback's identity changes, and an inline closure
+              // gets a new identity on every rebuild — a zoom step (which only
+              // changes maxPageWidth) must not regenerate the PDF. Profile
+              // switches re-render via the ValueKey remount above.
+              build: _buildForFormat,
+              // Page size/orientation moved into the toolbar row above (the
+              // preview's own bottom bar would ride the zoomed surface
+              // off-screen).
+              canChangePageFormat: false,
+              canChangeOrientation: false,
+              // Print/Share live in the profile row above now, so hide the
+              // preview's own print/share buttons (keep page-size/orientation).
+              allowPrinting: false,
+              allowSharing: false,
+              pdfFileName: '${widget.title}.pdf',
+              loadingWidget: const Center(child: CircularProgressIndicator()),
+              // The Windows "Microsoft Print to PDF" / "Adobe PDF" virtual
+              // printers are flaky on repeat jobs (the spooler can refuse the
+              // second one until you switch printers and back). When a print
+              // fails, point the user at the reliable in-app export instead.
+              onPrintError: (ctx, error) {
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'Printing failed. To make a PDF, use the “Save as PDF” '
+                      'icon above — it exports directly with selectable text.',
+                    ),
                   ),
-                ),
-              ),
+                );
+              },
             );
+            final sized = SizedBox(
+              width: constraints.maxWidth * factor,
+              height: constraints.maxHeight,
+              child: preview,
+            );
+            // Only zoomed IN (factor > 1) is the surface wider than the
+            // viewport and needs a horizontal pan-scroll. At/under 100% a
+            // centred, width-constrained box keeps zoom-out actually shrinking
+            // the page — WITHOUT the horizontal Scrollable, which would
+            // otherwise swallow the desktop mouse-wheel and block vertical
+            // page scrolling.
+            return factor > 1.0
+                ? Center(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: sized,
+                    ),
+                  )
+                : Center(child: sized);
           }),
         ),
       ],

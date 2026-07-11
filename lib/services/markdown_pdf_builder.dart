@@ -1347,8 +1347,44 @@ class MarkdownPdfBuilder {
     );
   }
 
+  /// Matches an inline-HTML `<span>`/`<div>` tag — the fill-in blanks/labels the
+  /// builder renders as fixed-width widgets. Restricted to those two tag names
+  /// (and requiring the full `<…>` shape) so plain text like `x<y` or a generic
+  /// type such as `List<T>` / `Map<K,V>` is NOT mistaken for HTML, which would
+  /// drop the whole table back to intrinsic sizing and reintroduce the label
+  /// collapse this change fixes.
+  static final RegExp _htmlWidgetTag =
+      RegExp(r'<\/?(?:span|div)\b[^<>]*>', caseSensitive: false);
+
+  /// Whether any node in [nodes], at any depth, is an inline-code element.
+  /// Inline code can nest under emphasis or a link (e.g. `**`code`**` is
+  /// strong > code) and is rendered literally wherever it sits, so the check is
+  /// recursive. Images are handled separately (only DIRECT `img` children are
+  /// drawn by the table renderer — a linked/nested image is dropped by
+  /// `_inline`, so it must not force intrinsic sizing).
+  static bool _hasInlineCode(Iterable<md.Node> nodes) {
+    for (final n in nodes) {
+      if (n is md.Element) {
+        if (n.tag == 'code') return true;
+        if (_hasInlineCode(n.children ?? const <md.Node>[])) return true;
+      }
+    }
+    return false;
+  }
+
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
+    // Longest cell text seen per column index — drives content-weighted column
+    // widths so a short-label column keeps room while a long-text column takes
+    // the lion's share (instead of the default intrinsic sizing collapsing a
+    // column below one word).
+    final colMaxLen = <int, int>{};
+    // A table is "complex" if any cell renders non-plain content: an image or
+    // inline code (md elements), or inline HTML (raw text). Those carry their
+    // own intrinsic width (a fixed-width fill-in, an image, a literal code
+    // snippet), which the plain-text flex weighting can't measure — so a
+    // complex table keeps the pdf package's default intrinsic column sizing.
+    var isComplex = false;
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
       final isHead = section.tag == 'thead';
@@ -1420,6 +1456,21 @@ class MarkdownPdfBuilder {
             }
           }
           flushRun();
+          // cells.length is the 0-based column index of the cell about to be
+          // added (non-element nodes are skipped above, so it stays in step).
+          final colIdx = cells.length;
+          final len = cell.textContent.trim().length;
+          colMaxLen.update(colIdx, (v) => v > len ? v : len,
+              ifAbsent: () => len);
+          // Keep intrinsic sizing when a cell renders content the text-length
+          // proxy can't measure: a DIRECT image (what the renderer draws),
+          // inline code at any depth, or an inline-HTML span/div fill-in widget.
+          if (!isComplex &&
+              (children.whereType<md.Element>().any((e) => e.tag == 'img') ||
+                  _hasInlineCode(children) ||
+                  _htmlWidgetTag.hasMatch(cell.textContent))) {
+            isComplex = true;
+          }
           cells.add(
             pw.Padding(
               padding:
@@ -1442,10 +1493,29 @@ class MarkdownPdfBuilder {
       }
     }
 
+    // A plain-text table distributes the page width by flex weighted on each
+    // column's longest text, clamped to [8, 40]: the floor keeps a short column
+    // from collapsing below a readable minimum, the ceiling stops one very long
+    // column from starving the others. This fills the page width (like the
+    // on-screen preview) instead of the default IntrinsicColumnWidth, which
+    // wrapped e.g. "Contractor" to "Co / ntra / cto / r" in a key/value table.
+    // A complex table (images / inline code / inline HTML — none of which the
+    // text-length weight can measure) keeps the package's intrinsic sizing,
+    // which measures those fixed-width widgets correctly.
+    final columnWidths = isComplex
+        ? const <int, pw.TableColumnWidth>{}
+        : <int, pw.TableColumnWidth>{
+            for (final e in colMaxLen.entries)
+              e.key: pw.FlexColumnWidth(e.value.clamp(8, 40).toDouble()),
+          };
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 8),
       child: pw.Table(
         border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+        columnWidths: columnWidths,
+        defaultColumnWidth: isComplex
+            ? const pw.IntrinsicColumnWidth()
+            : const pw.FlexColumnWidth(8),
         children: rows,
       ),
     );
