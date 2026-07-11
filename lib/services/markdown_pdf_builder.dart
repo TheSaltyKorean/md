@@ -1349,6 +1349,11 @@ class MarkdownPdfBuilder {
 
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
+    // Longest cell text seen per column index — drives content-weighted column
+    // widths so a short-label column keeps room while a long-text column takes
+    // the lion's share (instead of the default intrinsic sizing collapsing a
+    // column below one word).
+    final colMaxLen = <int, int>{};
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
       final isHead = section.tag == 'thead';
@@ -1420,6 +1425,11 @@ class MarkdownPdfBuilder {
             }
           }
           flushRun();
+          // cells.length is the 0-based column index of the cell about to be
+          // added (non-element nodes are skipped above, so it stays in step).
+          final colIdx = cells.length;
+          final cellLen = cell.textContent.trim().length;
+          if ((colMaxLen[colIdx] ?? 0) < cellLen) colMaxLen[colIdx] = cellLen;
           cells.add(
             pw.Padding(
               padding:
@@ -1442,10 +1452,22 @@ class MarkdownPdfBuilder {
       }
     }
 
+    // Distribute the page width by flex weighted on each column's longest
+    // text, clamped to [8, 40]: the floor keeps a short column from collapsing
+    // below a readable minimum, and the ceiling stops one very long column
+    // from starving the others. This fills the page width (like the on-screen
+    // preview) instead of the default IntrinsicColumnWidth, which wrapped e.g.
+    // "Contractor" to "Co / ntra / cto / r" in a key/value table.
+    final columnWidths = <int, pw.TableColumnWidth>{
+      for (final e in colMaxLen.entries)
+        e.key: pw.FlexColumnWidth(e.value.clamp(8, 40).toDouble()),
+    };
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 8),
       child: pw.Table(
         border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+        columnWidths: columnWidths,
+        defaultColumnWidth: const pw.FlexColumnWidth(8),
         children: rows,
       ),
     );
