@@ -728,25 +728,25 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                 );
               },
             );
-            // Only wrap the preview in the horizontal pan-scroll when zoomed
-            // IN (factor > 1), where the surface is wider than the viewport and
-            // needs horizontal panning. At 100% — or zoomed OUT, where the
-            // surface is narrower — that extra horizontal Scrollable would
-            // otherwise intercept the desktop mouse-wheel and block vertical
-            // scrolling. At factor <= 1 PdfPreview is rendered directly and
-            // scrolls itself.
-            return factor <= 1.0
-                ? preview
-                : Center(
+            final sized = SizedBox(
+              width: constraints.maxWidth * factor,
+              height: constraints.maxHeight,
+              child: preview,
+            );
+            // Only zoomed IN (factor > 1) is the surface wider than the
+            // viewport and needs a horizontal pan-scroll. At/under 100% a
+            // centred, width-constrained box keeps zoom-out actually shrinking
+            // the page — WITHOUT the horizontal Scrollable, which would
+            // otherwise swallow the desktop mouse-wheel and block vertical
+            // page scrolling.
+            return factor > 1.0
+                ? Center(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: SizedBox(
-                        width: constraints.maxWidth * factor,
-                        height: constraints.maxHeight,
-                        child: preview,
-                      ),
+                      child: sized,
                     ),
-                  );
+                  )
+                : Center(child: sized);
           }),
         ),
       ],

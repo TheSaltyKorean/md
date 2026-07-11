@@ -1347,6 +1347,19 @@ class MarkdownPdfBuilder {
     );
   }
 
+  /// Inline-HTML tags the builder renders itself (fill-in spans/divs, simple
+  /// emphasis) — stripped when measuring a cell's *visible* text length so the
+  /// raw markup isn't mistaken for long text.
+  static final RegExp _inlineHtmlTag = RegExp(
+      r'</?(?:span|div|u|br|b|i|strong|em)\b[^>]*>',
+      caseSensitive: false);
+
+  /// A cell that opens an inline-HTML span/div is a fixed-width fill-in widget
+  /// (they arrive as raw text, not md elements) — its column keeps intrinsic
+  /// width so the widget is measured, not squeezed.
+  static final RegExp _inlineHtmlWidget =
+      RegExp(r'<(?:span|div)\b', caseSensitive: false);
+
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
     // Longest cell text seen per column index — drives content-weighted column
@@ -1433,13 +1446,23 @@ class MarkdownPdfBuilder {
           // cells.length is the 0-based column index of the cell about to be
           // added (non-element nodes are skipped above, so it stays in step).
           final colIdx = cells.length;
-          final cellLen = cell.textContent.trim().length;
-          if ((colMaxLen[colIdx] ?? 0) < cellLen) colMaxLen[colIdx] = cellLen;
-          // A cell with no text but element content (fill-in span, image) is
-          // visual-only: flag the column so it keeps intrinsic width.
-          if (cellLen == 0 && children.whereType<md.Element>().isNotEmpty) {
-            colHasVisual[colIdx] = true;
-          }
+          final raw = cell.textContent;
+          // Visible length ignores inline-HTML markup: a fill-in span renders
+          // as a fixed-width widget later, so its raw `<span style=…>` text must
+          // not be counted as a long text value (which would steal the width).
+          final visibleLen = raw.replaceAll(_inlineHtmlTag, '').trim().length;
+          // Record EVERY column (even at length 0) so it appears in
+          // columnWidths — a purely visual column would otherwise be omitted
+          // and fall back to the flex default and get squeezed.
+          colMaxLen.update(colIdx, (v) => v > visibleLen ? v : visibleLen,
+              ifAbsent: () => visibleLen);
+          // Visual width contributors: an image element, or an inline-HTML
+          // width-bearing span/div (a fill-in blank — these arrive as raw text,
+          // not md elements).
+          final hasVisual =
+              children.whereType<md.Element>().any((e) => e.tag == 'img') ||
+                  _inlineHtmlWidget.hasMatch(raw);
+          if (visibleLen == 0 && hasVisual) colHasVisual[colIdx] = true;
           cells.add(
             pw.Padding(
               padding:
