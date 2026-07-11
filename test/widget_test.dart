@@ -1038,6 +1038,46 @@ void main() {
     expect(frag.style?.background, isNotNull);
   });
 
+  testWidgets('Preview find matches a phrase across inline formatting',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'the **Company** shall pay',
+          highlightQuery: 'Company shall',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // "Company" (bold) and " shall" live in separate AST nodes but render as one
+    // line, so the phrase matches and is split into two highlighted fragments.
+    expect(count, 1);
+    final company = tester.widget<Text>(find.text('Company'));
+    expect(company.style?.background, isNotNull);
+    final shall = tester.widget<Text>(find.text(' shall'));
+    expect(shall.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find does not match a phrase across block boundaries',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: '# Section one\n\ntwo paragraphs',
+          highlightQuery: 'one two',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // "one" ends a heading and "two" starts a paragraph — different blocks, so
+    // the visually-adjacent phrase must NOT match.
+    expect(count, 0);
+  });
+
   testWidgets('Preview find keeps a highlighted link label tappable',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

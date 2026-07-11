@@ -434,6 +434,12 @@ class _UnderlineElementBuilder extends MarkdownElementBuilder {
 /// leaves code untouched. The count reported is exactly what's marked, so the
 /// find bar's "n/N" can't show a phantom. The transformed AST is cached, so
 /// navigating matches only re-builds widgets (no re-parse).
+/// Inline tags whose text is part of the same rendered line as its siblings, so
+/// a cross-boundary match may run through them. Everything else (p, headings,
+/// list items, table cells, …) starts a fresh match stream. `code` is handled
+/// separately (its text is never highlighted).
+const _kInlineTags = {'em', 'strong', 'a', 'del', 'u', 'mark'};
+
 class _HighlightedMarkdown extends StatefulWidget {
   const _HighlightedMarkdown({
     required this.markdown,
@@ -520,47 +526,101 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
     final re = RegExp(widget.wholeWord ? '(?<![\\w])(?:$body)(?![\\w])' : body,
         caseSensitive: widget.caseSensitive, multiLine: true);
 
+    // Pass 1 — collect each block's RENDERED inline text into one stream, so a
+    // query spanning inline markup ("the Company" over `the **Company**`) is
+    // matched on the visible text rather than per md.Text node. Inline tags keep
+    // the same stream; block tags start a new one so matches can't cross blocks.
+    // Each run records (text node, its start offset in the stream, enclosing
+    // link href) — the href keeps a highlighted link fragment tappable.
+    final streams = <int, StringBuffer>{};
+    final runs = <int, List<(md.Text, int, String?)>>{};
+    var block = 0;
+    void collect(List<md.Node> nodes, int blockId, String? href) {
+      for (final n in nodes) {
+        if (n is md.Text) {
+          final buf = streams.putIfAbsent(blockId, StringBuffer.new);
+          runs.putIfAbsent(blockId, () => []).add((n, buf.length, href));
+          buf.write(n.text);
+        } else if (n is md.Element) {
+          final children = n.children;
+          // Code renders its text directly (never highlighted); skip its text.
+          if (children == null || n.tag == 'code' || n.tag == 'pre') continue;
+          final childHref =
+              n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
+          _kInlineTags.contains(n.tag)
+              ? collect(children, blockId, childHref) // same rendered line
+              : collect(children, ++block, childHref); // new block → break
+        }
+      }
+    }
+
+    collect(ast, block, null);
+
+    // Match each block's stream in document order (ascending block id) and map
+    // every match onto the runs it overlaps. A match spanning several runs
+    // shares one data-i so navigation counts it as a single hit.
+    final splits = <md.Text, List<(int, int, int, String?)>>{};
     var counter = 0;
-    // [href] is the enclosing link's target (null outside a link); marks inside
-    // a link carry it so the highlighted part keeps its tap.
-    List<md.Node> transform(List<md.Node> nodes, String? href) {
+    for (final id in streams.keys.toList()..sort()) {
+      final text = streams[id]!.toString();
+      for (final m in re.allMatches(text)) {
+        if (m.end == m.start) continue;
+        final dataI = counter++;
+        for (final (node, start, href) in runs[id]!) {
+          final runEnd = start + node.text.length;
+          final s = m.start > start ? m.start : start;
+          final e = m.end < runEnd ? m.end : runEnd;
+          if (s < e) {
+            splits
+                .putIfAbsent(node, () => [])
+                .add((s - start, e - start, dataI, href));
+          }
+        }
+      }
+    }
+
+    // Pass 2 — rebuild the tree, splicing `mark` elements into the matched text
+    // nodes. The first mark of each data-i (document order) is the scroll anchor
+    // (a GlobalKey binds to exactly one widget).
+    final anchored = <int>{};
+    List<md.Node> build(List<md.Node> nodes) {
       final out = <md.Node>[];
       for (final n in nodes) {
         if (n is md.Text) {
-          final text = n.text;
-          final matches =
-              re.allMatches(text).where((m) => m.end > m.start).toList();
-          if (matches.isEmpty) {
+          final segs = splits[n];
+          if (segs == null) {
             out.add(n);
             continue;
           }
+          segs.sort((a, b) => a.$1.compareTo(b.$1));
+          final text = n.text;
           var last = 0;
-          for (final m in matches) {
-            if (m.start > last) out.add(md.Text(text.substring(last, m.start)));
-            final mark = md.Element.text('mark', m[0]!)
-              ..attributes['data-i'] = '${counter++}';
+          for (final (start, end, dataI, href) in segs) {
+            if (start > last) out.add(md.Text(text.substring(last, start)));
+            final mark = md.Element.text('mark', text.substring(start, end))
+              ..attributes['data-i'] = '$dataI';
             if (href != null) mark.attributes['data-href'] = href;
+            if (anchored.add(dataI)) mark.attributes['data-anchor'] = '1';
             out.add(mark);
-            last = m.end;
+            last = end;
           }
           if (last < text.length) out.add(md.Text(text.substring(last)));
         } else if (n is md.Element) {
           final children = n.children;
-          // Code renders its text directly (not highlighted); leave it whole.
           if (children == null || n.tag == 'code' || n.tag == 'pre') {
             out.add(n);
-          } else {
-            final childHref =
-                n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
-            final before = counter;
-            final newChildren = transform(children, childHref);
-            // Keep the ORIGINAL element when nothing inside it was marked —
-            // cloning drops Expando associations (e.g. the copytable chip).
-            out.add(counter == before
-                ? n
-                : (md.Element(n.tag, newChildren)
-                  ..attributes.addAll(n.attributes)));
+            continue;
           }
+          final built = build(children);
+          // Keep the ORIGINAL element when nothing inside it changed — cloning
+          // drops Expando associations (e.g. the copytable chip).
+          var changed = built.length != children.length;
+          for (var i = 0; !changed && i < built.length; i++) {
+            changed = !identical(built[i], children[i]);
+          }
+          out.add(changed
+              ? (md.Element(n.tag, built)..attributes.addAll(n.attributes))
+              : n);
         } else {
           out.add(n);
         }
@@ -568,7 +628,7 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
       return out;
     }
 
-    _nodes = transform(ast, null);
+    _nodes = build(ast);
     _count = counter;
     final cb = widget.onCount;
     if (cb != null) {
@@ -666,7 +726,11 @@ class _HighlightElementBuilder extends MarkdownElementBuilder {
         child: widget,
       );
     }
-    return isCurrent && currentKey != null
+    // Only the first mark of the current match (data-anchor) takes the scroll
+    // key — a match split across inline runs has several marks, but a GlobalKey
+    // may bind to just one widget.
+    final isAnchor = element.attributes['data-anchor'] == '1';
+    return isCurrent && isAnchor && currentKey != null
         ? KeyedSubtree(key: currentKey, child: widget)
         : widget;
   }
