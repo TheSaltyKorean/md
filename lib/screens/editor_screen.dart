@@ -26,7 +26,7 @@ import '../state/workspace_controller.dart';
 import '../state/zoom_controller.dart';
 import '../widgets/find_controller.dart';
 import '../widgets/format_toolbar.dart';
-import '../widgets/preview_view.dart';
+import '../widgets/preview_find_view.dart';
 import '../widgets/print_preview_view.dart';
 import '../widgets/raw_view.dart';
 import '../widgets/split_view.dart';
@@ -149,10 +149,12 @@ class _EditorScreenState extends State<EditorScreen>
     return _confirmDiscard(context, 'One or more open documents');
   }
 
-  /// Open find (and optionally replace). Find operates on the raw Markdown
-  /// source, so switch a non-source view (Edit/Preview) to Raw first.
+  /// Open find (and optionally replace). Plain find works in place in the
+  /// source modes AND in Preview (highlight overlay). Replace edits the source,
+  /// and WYSIWYG has no in-place find, so those route to Raw first.
   void _openFind(DocumentController doc, {bool replace = false}) {
-    if (!doc.mode.isSource) doc.setMode(EditorMode.raw);
+    final needsSource = replace || doc.mode == EditorMode.wysiwyg;
+    if (needsSource && !doc.mode.isSource) doc.setMode(EditorMode.raw);
     replace ? _find.openReplace() : _find.openFind();
   }
 
@@ -377,14 +379,15 @@ class _EditorScreenState extends State<EditorScreen>
     // Null when the active tab is a print preview rather than a document.
     final active = ws.activeDocument;
 
-    // Find is a source-mode feature and only mounts inside a source view. If the
-    // active view is no longer a source mode (switched to Edit/Preview, or moved
-    // to a tab that is), close find so no invisible state lingers and the format
-    // toolbar returns.
-    if (_find.visible && !(active?.mode.isSource ?? false)) {
+    // Find mounts inside a source view or in Preview (which highlights matches
+    // in place). If the active view supports neither (switched to Edit, or
+    // moved to a tab that is), close find so no invisible state lingers.
+    bool findable(EditorMode? m) =>
+        m != null && (m.isSource || m == EditorMode.preview);
+    if (_find.visible && !findable(active?.mode)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final doc = mounted ? ws.activeDocument : null;
-        if (mounted && !(doc?.mode.isSource ?? false)) _find.hide();
+        if (mounted && !findable(doc?.mode)) _find.hide();
       });
     }
 
@@ -599,7 +602,7 @@ class _EditorScreenState extends State<EditorScreen>
       EditorMode.split => SplitView(key: key, controller: doc, find: _find),
       EditorMode.raw => RawSourceView(key: key, controller: doc, find: _find),
       EditorMode.preview =>
-        PreviewView(key: key, markdown: doc.currentMarkdown()),
+        PreviewFindView(key: key, markdown: doc.currentMarkdown(), find: _find),
     };
     // Document zoom, applied to document views only (print previews have
     // their own zoom, and app chrome stays at 100%). The zoom composes with

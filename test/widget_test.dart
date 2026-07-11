@@ -11,7 +11,9 @@ import 'package:flutter/material.dart'
         MaterialApp,
         PopupMenuButton,
         Scaffold,
-        SelectionArea;
+        SelectionArea,
+        Text,
+        TextField;
 import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, SystemChannels;
 import 'package:flutter/widgets.dart'
@@ -37,6 +39,8 @@ import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/services/session_service.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
+import 'package:markdown_studio/widgets/find_controller.dart';
+import 'package:markdown_studio/widgets/preview_find_view.dart';
 import 'package:markdown_studio/widgets/preview_view.dart';
 import 'package:markdown_studio/widgets/print_preview_view.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -867,6 +871,85 @@ void main() {
     await tester.pumpAndSettle();
     // Unified selection across the whole document (not per-block).
     expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('Preview find highlights query occurrences in the render',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'A Contractor signs. Another contractor waits.',
+          highlightQuery: 'contractor',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // Each occurrence (case-insensitive) is split into its own Text fragment
+    // preserving the original case.
+    expect(find.text('Contractor'), findsOneWidget);
+    expect(find.text('contractor'), findsOneWidget);
+    // The fragment carries a background highlight paint.
+    final frag = tester.widget<Text>(find.text('Contractor'));
+    expect(frag.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find: no highlight when the query is empty',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'A Contractor signs here.',
+          highlightQuery: '',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // No split-out fragment: 'Contractor' stays embedded in its paragraph.
+    expect(find.text('Contractor'), findsNothing);
+  });
+
+  testWidgets('Preview find bar: type query → count, highlights, navigation',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(
+          // 'Zeta' (uppercase) appears 3x; the query is lowercase 'zeta', so
+          // the highlighted fragments don't collide with the query field text.
+          markdown: 'Zeta beta Zeta gamma Zeta done.',
+          find: fc,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // No bar until find is opened.
+    expect(find.byType(TextField), findsNothing);
+
+    fc.openFind();
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'zeta');
+    await tester.pumpAndSettle();
+
+    // 3 case-insensitive occurrences; counter starts at 1/3.
+    expect(find.text('1/3'), findsOneWidget);
+    // Each occurrence is a highlighted fragment (original case preserved).
+    expect(find.text('Zeta'), findsNWidgets(3));
+
+    // Next advances the current match.
+    await tester.tap(find.byTooltip('Next (Enter)'));
+    await tester.pumpAndSettle();
+    expect(find.text('2/3'), findsOneWidget);
+
+    // Previous from 2/3 wraps back to 1/3.
+    await tester.tap(find.byTooltip('Previous (Shift+Enter)'));
+    await tester.pumpAndSettle();
+    expect(find.text('1/3'), findsOneWidget);
+
+    // Close hides the bar.
+    await tester.tap(find.byTooltip('Close (Esc)'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
   });
 
   testWidgets('Code blocks show a copy button that copies the block',

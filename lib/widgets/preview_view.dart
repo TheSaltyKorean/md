@@ -17,6 +17,11 @@ class PreviewView extends StatelessWidget {
     required this.markdown,
     this.padding = const EdgeInsets.fromLTRB(24, 20, 24, 80),
     this.controller,
+    this.highlightQuery,
+    this.highlightCaseSensitive = false,
+    this.highlightWholeWord = false,
+    this.currentMatch = 0,
+    this.currentMatchKey,
   });
 
   final String markdown;
@@ -25,6 +30,20 @@ class PreviewView extends StatelessWidget {
   /// Optional external scroll controller (used by the split view to keep the
   /// preview in sync with the source editor).
   final ScrollController? controller;
+
+  /// Find-in-preview: when non-empty, occurrences of this query are highlighted
+  /// in the rendered output (the [currentMatch]th one emphasized), so find
+  /// works without leaving Preview.
+  final String? highlightQuery;
+  final bool highlightCaseSensitive;
+  final bool highlightWholeWord;
+
+  /// Zero-based index of the match to emphasize (and key for scroll-to).
+  final int currentMatch;
+
+  /// Attached to the current match's widget so the find bar can scroll it into
+  /// view via [Scrollable.ensureVisible].
+  final GlobalKey? currentMatchKey;
 
   static Future<void> _launch(String href) async {
     final uri = Uri.tryParse(href);
@@ -39,9 +58,20 @@ class PreviewView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final styleSheet = _styleSheet(theme);
+    final query = highlightQuery;
+    final hasHighlight = query != null && query.isNotEmpty;
     return SelectionArea(
       child: Markdown(
+        // The Markdown widget parses on data change; the find query changes the
+        // inline syntaxes/builders WITHOUT changing data, so re-key on the
+        // highlight state to force a fresh parse (and re-colour of the current
+        // match) when the query / current match changes.
+        key: hasHighlight
+            ? ValueKey('hl:$query:$highlightCaseSensitive:'
+                '$highlightWholeWord:$currentMatch')
+            : const ValueKey('hl:none'),
         data: markdown,
         controller: controller,
         // SelectionArea provides selection for the whole document; the
@@ -55,8 +85,16 @@ class PreviewView extends StatelessWidget {
         // formatting) — see _CopyableTableSyntax.
         blockSyntaxes: [_CopyableTableSyntax()],
         // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
-        // ourselves and render it underlined (matches the PDF export).
-        inlineSyntaxes: [_UnderlineSyntax()],
+        // ourselves and render it underlined (matches the PDF export). When a
+        // find query is active, a highlight syntax wraps each occurrence in a
+        // <mark> the builder paints.
+        inlineSyntaxes: [
+          _UnderlineSyntax(),
+          if (hasHighlight)
+            _HighlightSyntax(query,
+                caseSensitive: highlightCaseSensitive,
+                wholeWord: highlightWholeWord),
+        ],
         builders: {
           'u': _UnderlineElementBuilder(),
           // Custom fenced-code-block rendering with a copy button. The
@@ -65,6 +103,13 @@ class PreviewView extends StatelessWidget {
           // The injected "Copy table" chip (inline, so it doesn't grow the
           // package's block-tag registry the way a block builder would).
           'copytable': _CopyTableChipBuilder(),
+          if (hasHighlight)
+            'mark': _HighlightElementBuilder(
+              current: currentMatch,
+              currentKey: currentMatchKey,
+              matchColor: cs.primary.withValues(alpha: 0.22),
+              currentColor: cs.tertiary.withValues(alpha: 0.55),
+            ),
         },
         styleSheet: styleSheet,
         onTapLink: (text, href, title) async {
@@ -360,5 +405,66 @@ class _UnderlineElementBuilder extends MarkdownElementBuilder {
       style: (preferredStyle ?? const TextStyle())
           .copyWith(decoration: TextDecoration.underline),
     );
+  }
+}
+
+/// Wraps each occurrence of the find query in a `mark` element, numbered in
+/// document order via a `data-i` attribute so the builder can emphasize the
+/// current match. Only added when a query is active (a non-empty pattern), so
+/// it always consumes at least one character.
+class _HighlightSyntax extends md.InlineSyntax {
+  _HighlightSyntax(String query,
+      {bool caseSensitive = false, bool wholeWord = false})
+      : super(
+          wholeWord
+              ? r'\b' + RegExp.escape(query) + r'\b'
+              : RegExp.escape(query),
+          caseSensitive: caseSensitive,
+        );
+
+  int _i = 0;
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    final el = md.Element.text('mark', match[0]!);
+    el.attributes['data-i'] = '${_i++}';
+    parser.addNode(el);
+    return true;
+  }
+}
+
+/// Paints a highlight behind a matched `mark` run (a background on the text
+/// style, so it flows inline and wraps like normal text). The current match
+/// gets a stronger colour and, if provided, the scroll-to key.
+class _HighlightElementBuilder extends MarkdownElementBuilder {
+  _HighlightElementBuilder({
+    required this.current,
+    required this.currentKey,
+    required this.matchColor,
+    required this.currentColor,
+  });
+
+  final int current;
+  final GlobalKey? currentKey;
+  final Color matchColor;
+  final Color currentColor;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final isCurrent =
+        int.tryParse(element.attributes['data-i'] ?? '') == current;
+    final text = Text(
+      element.textContent,
+      style: (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(
+          background: Paint()..color = isCurrent ? currentColor : matchColor),
+    );
+    return isCurrent && currentKey != null
+        ? KeyedSubtree(key: currentKey, child: text)
+        : text;
   }
 }
