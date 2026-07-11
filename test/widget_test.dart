@@ -1632,6 +1632,44 @@ void main() {
     ws.dispose();
   });
 
+  test('An abandoned session is not restorable and is never overwritten',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': null, 'content': 'saved work', 'dirty': true, 'mode': 'raw'},
+        ],
+      });
+    final saved = store.data;
+    final ws = WorkspaceController(prefs, sessionStore: store);
+    // A forwarded doc arrived before restore → restore abandons and protects
+    // the saved session.
+    ws.openDocument('a forwarded file', path: '/tmp/fwd.md');
+    await ws.restoreSession();
+    // An update started from here must NOT overwrite the protected session…
+    expect(ws.willRestoreOnRelaunch, isFalse);
+    expect(await ws.persistSessionForRelaunch(), isFalse);
+    expect(store.data, saved); // …the saved session is untouched.
+    ws.dispose();
+  });
+
+  test('persistSessionForRelaunch reports a failed write', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    // A file-args launch (auto-persist off) whose store can't write (disk full):
+    // the snapshot fails, so the update flow falls back to the discard prompt.
+    final ws = WorkspaceController(prefs,
+        sessionStore: _ThrowingSessionStore(), autoPersist: false);
+    ws.openDocument('# X', path: '/tmp/x.md');
+    expect(ws.willRestoreOnRelaunch, isTrue); // has a store…
+    expect(await ws.persistSessionForRelaunch(), isFalse); // …but write fails
+    ws.dispose();
+  });
+
   test('FileSessionStore round-trips through the real filesystem', () async {
     final dir = Directory.systemTemp.createTempSync('mdfss');
     addTearDown(() => dir.deleteSync(recursive: true));

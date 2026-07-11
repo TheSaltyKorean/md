@@ -1124,6 +1124,14 @@ class _EditorScreenState extends State<EditorScreen>
     final ws = context.read<WorkspaceController>();
     final kind = updates.installKind;
     final oneClick = kind.canOneClick;
+    // Only the MSI/Inno path exits and auto-relaunches, snapshotting the tabs
+    // right before it — so a file-args window is restored there. The deb /
+    // download-page paths keep running (or don't exit) and rely on the
+    // auto-session, so they only restore when that's actually on (a plain
+    // launch). Promise restore in the dialog accordingly.
+    final autoRelaunch = kind == InstallKind.msi || kind == InstallKind.inno;
+    final willRestore =
+        autoRelaunch ? ws.willRestoreOnRelaunch : ws.sessionEnabled;
     final proceed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -1143,16 +1151,14 @@ class _EditorScreenState extends State<EditorScreen>
                   'Your install type updates from the download page — the '
                       'right installer is one click there.',
               } +
-              // Both a plain launch and a file-args launch restore across the
-              // relaunch (the latter is snapshotted just before it). Only a
-              // torn-off window has no session to come back to — it reopens to
-              // the main saved session, so tell the user to save first.
-              (ws.willRestoreOnRelaunch
+              // Promise restore only when this update path actually brings the
+              // current tabs back (see [willRestore]); otherwise tell the user
+              // to save, since it would reopen to the previously saved session.
+              (willRestore
                   ? ' Your open tabs and unsaved changes are restored when you '
                       'reopen.'
-                  : ' This is a separate window, so after the update it reopens '
-                      'to your main saved session — save any unsaved changes '
-                      'here first.'),
+                  : ' After the update it reopens to your previously saved '
+                      'session, so save any unsaved changes here first.'),
         ),
         actions: [
           TextButton(
@@ -1183,7 +1189,7 @@ class _EditorScreenState extends State<EditorScreen>
     // before the relaunch — so it needs no early prompt. Only a torn-off window
     // can't be restored, so confirm any unsaved work will be discarded before
     // we spend time downloading.
-    final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
+    final exitsForInstall = autoRelaunch;
     if (exitsForInstall && !ws.willRestoreOnRelaunch) {
       if (!await _prepareExit() || !mounted) return;
     }
@@ -1251,14 +1257,17 @@ class _EditorScreenState extends State<EditorScreen>
         // auto-reloaded a clean tab or surfaced a conflict, so capture the
         // latest state. This writes even on a file-args launch (auto-session
         // off), so the arg-less relaunch restores exactly what's open instead
-        // of a stale, unrelated session. A torn-off window (no store) can't be
-        // restored, so fall back to the discard confirmation there.
-        if (ws.willRestoreOnRelaunch) {
-          await ws.persistSessionForRelaunch();
-        } else if (!await _prepareExit() || !mounted) {
+        // of a stale, unrelated session. If the snapshot can't be written
+        // (disk full) or this window can't be restored (torn-off / abandoned),
+        // fall back to the discard confirmation rather than relaunch onto a
+        // stale session and silently lose unsaved buffers.
+        final persisted =
+            ws.willRestoreOnRelaunch && await ws.persistSessionForRelaunch();
+        if (!persisted) {
+          if (!await _prepareExit() || !mounted) return;
+        } else if (!mounted) {
           return;
         }
-        if (!mounted) return;
         // Spawn first, release second: the wscript launcher only WAITS for this
         // process id, so starting it before teardown is safe, and it starts the
         // install only after the pid vanishes — file replacement can never race
@@ -1268,10 +1277,11 @@ class _EditorScreenState extends State<EditorScreen>
         await _releaseResources();
         exit(0);
       } else {
-        // The .deb path keeps running (the new version is used next launch), so
-        // snapshot the open tabs too — a file-args launch would otherwise
-        // reopen to a stale session next time.
-        await ws.persistSessionForRelaunch();
+        // The .deb / download-page paths keep running, so DON'T snapshot here:
+        // a mid-update snapshot would freeze the session while later edits and
+        // discards go untracked (a file-args launch has auto-persist off),
+        // resurrecting stale state on the next launch. These paths rely on the
+        // auto-session (a plain launch), matched by the dialog's restore copy.
         await updates.launchInstaller(path, kind);
         messenger.showSnackBar(SnackBar(
             content: Text('Installer opened — ${info.version} takes over '

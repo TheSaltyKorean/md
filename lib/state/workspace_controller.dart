@@ -120,12 +120,13 @@ class WorkspaceController extends ChangeNotifier {
       _sessionStore != null && _autoPersist && !_sessionAbandoned;
 
   /// Whether an update's relaunch can bring this window's tabs back. True when
-  /// a session store exists — a plain launch (auto-session) OR a file-args
-  /// launch (auto-session off, but [persistSessionForRelaunch] snapshots the
-  /// tabs just before the relaunch). False only for a torn-off window (no
-  /// store), which would relaunch onto the main saved session instead. Drives
-  /// the update dialog copy and whether unsaved work must be confirmed first.
-  bool get willRestoreOnRelaunch => _sessionStore != null;
+  /// a session store exists and the session isn't abandoned — a plain launch
+  /// (auto-session) OR a file-args launch (auto-session off, but
+  /// [persistSessionForRelaunch] snapshots the tabs just before the relaunch).
+  /// False for a torn-off window (no store), and for an abandoned session (a
+  /// pre-opened/forwarded doc): there the saved session is deliberately
+  /// protected and must not be overwritten with the pre-opened document.
+  bool get willRestoreOnRelaunch => _sessionStore != null && !_sessionAbandoned;
 
   /// Stop this run from persisting the session. Used when [restoreSession]
   /// finds a document was already opened (an instance-forwarded path, or a
@@ -445,7 +446,9 @@ class WorkspaceController extends ChangeNotifier {
   /// caller can fall back to its normal exit prep.
   Future<bool> persistSessionForRelaunch() async {
     final store = _sessionStore;
-    if (store == null) return false;
+    // No store (torn-off), or an abandoned session whose saved data is
+    // deliberately protected (a forwarded/pre-opened doc must not overwrite it).
+    if (store == null || _sessionAbandoned) return false;
     _sessionTimer?.cancel();
     final json = jsonEncode(sessionSnapshot());
     var ok = true;
