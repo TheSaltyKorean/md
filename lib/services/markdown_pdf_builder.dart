@@ -1354,6 +1354,11 @@ class MarkdownPdfBuilder {
     // the lion's share (instead of the default intrinsic sizing collapsing a
     // column below one word).
     final colMaxLen = <int, int>{};
+    // Whether a column holds a visual-only cell (empty text but element content
+    // — a fixed-width fill-in span or an image). Such a column keeps intrinsic
+    // sizing so the widget's real width is measured instead of being starved by
+    // a text-length weight of zero.
+    final colHasVisual = <int, bool>{};
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
       final isHead = section.tag == 'thead';
@@ -1430,6 +1435,11 @@ class MarkdownPdfBuilder {
           final colIdx = cells.length;
           final cellLen = cell.textContent.trim().length;
           if ((colMaxLen[colIdx] ?? 0) < cellLen) colMaxLen[colIdx] = cellLen;
+          // A cell with no text but element content (fill-in span, image) is
+          // visual-only: flag the column so it keeps intrinsic width.
+          if (cellLen == 0 && children.whereType<md.Element>().isNotEmpty) {
+            colHasVisual[colIdx] = true;
+          }
           cells.add(
             pw.Padding(
               padding:
@@ -1457,10 +1467,14 @@ class MarkdownPdfBuilder {
     // below a readable minimum, and the ceiling stops one very long column
     // from starving the others. This fills the page width (like the on-screen
     // preview) instead of the default IntrinsicColumnWidth, which wrapped e.g.
-    // "Contractor" to "Co / ntra / cto / r" in a key/value table.
+    // "Contractor" to "Co / ntra / cto / r" in a key/value table. A column with
+    // only visual cells (a fill-in blank or image, no text) keeps intrinsic
+    // width so its fixed-width widget is measured, not starved to the floor.
     final columnWidths = <int, pw.TableColumnWidth>{
       for (final e in colMaxLen.entries)
-        e.key: pw.FlexColumnWidth(e.value.clamp(8, 40).toDouble()),
+        e.key: (e.value == 0 && (colHasVisual[e.key] ?? false))
+            ? const pw.IntrinsicColumnWidth()
+            : pw.FlexColumnWidth(e.value.clamp(8, 40).toDouble()),
     };
     return pw.Padding(
       padding: const pw.EdgeInsets.only(bottom: 8),

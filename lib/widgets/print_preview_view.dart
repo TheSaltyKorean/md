@@ -728,11 +728,14 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
                 );
               },
             );
-            // Only wrap the preview in the horizontal pan-scroll when actually
-            // zoomed in. At 100% that extra (horizontal) Scrollable would
-            // otherwise intercept the desktop mouse-wheel, leaving the preview
-            // unable to scroll vertically. Unzoomed, PdfPreview scrolls itself.
-            return factor == 1.0
+            // Only wrap the preview in the horizontal pan-scroll when zoomed
+            // IN (factor > 1), where the surface is wider than the viewport and
+            // needs horizontal panning. At 100% — or zoomed OUT, where the
+            // surface is narrower — that extra horizontal Scrollable would
+            // otherwise intercept the desktop mouse-wheel and block vertical
+            // scrolling. At factor <= 1 PdfPreview is rendered directly and
+            // scrolls itself.
+            return factor <= 1.0
                 ? preview
                 : Center(
                     child: SingleChildScrollView(
