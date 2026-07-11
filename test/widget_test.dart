@@ -1117,6 +1117,25 @@ void main() {
     expect(count, 0);
   });
 
+  testWidgets('Preview find breaks the stream across inline-nested code',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // A bold span holds foo + code + bar, then plain baz follows. The
+          // code break inside the bold must carry through so foo and baz are
+          // not treated as contiguous.
+          markdown: '**foo`code`bar**baz',
+          highlightQuery: 'foobaz',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(count, 0);
+  });
+
   testWidgets('Preview find keeps underline on highlighted <u> text',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

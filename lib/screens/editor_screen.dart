@@ -780,6 +780,13 @@ class _EditorScreenState extends State<EditorScreen>
         onSelected: (value) => _onMenu(context, ws, active, value),
         itemBuilder: (_) => [
           const PopupMenuItem(value: 'new', child: Text('New tab')),
+          // The Find toolbar button opens plain find (works in Preview too);
+          // Replace edits the source, so it lives here and routes through Raw —
+          // the only mouse/touch path to Replace in the wide layout.
+          PopupMenuItem(
+              value: 'replace',
+              enabled: active != null,
+              child: const Text('Replace…')),
           PopupMenuItem(
               value: 'saveAs',
               enabled: active != null,

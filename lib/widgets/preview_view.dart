@@ -548,7 +548,10 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
     final streams = <int, StringBuffer>{};
     final runs = <int, List<(md.Text, int, String, String?, bool)>>{};
     var block = 0;
-    void collect(
+    // Returns the stream id in effect after the last node, so a break inside an
+    // inline container propagates to the caller (text after `**foo`code`bar**`
+    // must not rejoin `foo`'s stream).
+    int collect(
         List<md.Node> nodes, int blockId, String? href, bool underline) {
       // [b] advances mid-list when a skipped inline element (code/image/line
       // break) sits between text runs, so the runs on either side land in
@@ -575,13 +578,16 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
               n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
           final childU = underline || n.tag == 'u';
           if (_kInlineTags.contains(n.tag)) {
-            collect(children, b, childHref, childU); // same rendered line
+            // Same rendered line — continue from the child's final stream so a
+            // break nested inside it carries through to later siblings.
+            b = collect(children, b, childHref, childU);
           } else {
             collect(children, ++block, childHref, childU); // nested block
             b = ++block; // text after a nested block breaks too
           }
         }
       }
+      return b;
     }
 
     collect(ast, block, null, false);
