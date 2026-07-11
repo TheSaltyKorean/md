@@ -1347,22 +1347,26 @@ class MarkdownPdfBuilder {
     );
   }
 
-  /// Matches an actual inline-HTML tag in a cell's raw text (a fill-in
-  /// span/div, `<u>`, `</span>`, …) — a `<`, optional `/`, a letter, then
-  /// content up to a closing `>`. Requiring the full `<…>` shape keeps plain
-  /// comparisons like `x<y` from being mistaken for HTML (which would drop the
-  /// whole table back to intrinsic sizing and reintroduce the label collapse).
-  static final RegExp _htmlTag = RegExp(r'<\/?[a-zA-Z][^<>]*>');
+  /// Matches an inline-HTML `<span>`/`<div>` tag — the fill-in blanks/labels the
+  /// builder renders as fixed-width widgets. Restricted to those two tag names
+  /// (and requiring the full `<…>` shape) so plain text like `x<y` or a generic
+  /// type such as `List<T>` / `Map<K,V>` is NOT mistaken for HTML, which would
+  /// drop the whole table back to intrinsic sizing and reintroduce the label
+  /// collapse this change fixes.
+  static final RegExp _htmlWidgetTag =
+      RegExp(r'<\/?(?:span|div)\b[^<>]*>', caseSensitive: false);
 
-  /// Whether any node in [nodes], at any depth, is an image or inline-code
-  /// element. Inline code can nest under emphasis or a link (e.g. `**`code`**`
-  /// is strong > code), so a shallow child-only check would miss it and wrongly
-  /// treat the table as plain text.
-  static bool _hasImageOrCode(Iterable<md.Node> nodes) {
+  /// Whether any node in [nodes], at any depth, is an inline-code element.
+  /// Inline code can nest under emphasis or a link (e.g. `**`code`**` is
+  /// strong > code) and is rendered literally wherever it sits, so the check is
+  /// recursive. Images are handled separately (only DIRECT `img` children are
+  /// drawn by the table renderer — a linked/nested image is dropped by
+  /// `_inline`, so it must not force intrinsic sizing).
+  static bool _hasInlineCode(Iterable<md.Node> nodes) {
     for (final n in nodes) {
       if (n is md.Element) {
-        if (n.tag == 'img' || n.tag == 'code') return true;
-        if (_hasImageOrCode(n.children ?? const <md.Node>[])) return true;
+        if (n.tag == 'code') return true;
+        if (_hasInlineCode(n.children ?? const <md.Node>[])) return true;
       }
     }
     return false;
@@ -1458,11 +1462,13 @@ class MarkdownPdfBuilder {
           final len = cell.textContent.trim().length;
           colMaxLen.update(colIdx, (v) => v > len ? v : len,
               ifAbsent: () => len);
-          // Any image / inline code (md elements, at any depth) or inline HTML
-          // (raw text) makes the whole table keep intrinsic sizing.
+          // Keep intrinsic sizing when a cell renders content the text-length
+          // proxy can't measure: a DIRECT image (what the renderer draws),
+          // inline code at any depth, or an inline-HTML span/div fill-in widget.
           if (!isComplex &&
-              (_hasImageOrCode(children) ||
-                  _htmlTag.hasMatch(cell.textContent))) {
+              (children.whereType<md.Element>().any((e) => e.tag == 'img') ||
+                  _hasInlineCode(children) ||
+                  _htmlWidgetTag.hasMatch(cell.textContent))) {
             isComplex = true;
           }
           cells.add(
