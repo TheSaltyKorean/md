@@ -105,6 +105,7 @@ class PreviewView extends StatelessWidget {
               currentKey: currentMatchKey,
               matchColor: cs.primary.withValues(alpha: 0.22),
               currentColor: cs.tertiary.withValues(alpha: 0.55),
+              onTapLink: _launch,
             ),
           },
           onTapLink: _launch,
@@ -471,7 +472,12 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
   final _recognizers = <GestureRecognizer>[];
   List<md.Node> _nodes = const [];
   int _count = 0;
-  String? _cacheKey;
+  // Structured cache identity (avoids a delimited string key with control
+  // bytes): only re-parse/transform when one of these changes.
+  String? _keyMarkdown;
+  String? _keyQuery;
+  bool? _keyCase;
+  bool? _keyWord;
 
   @override
   void dispose() {
@@ -489,10 +495,16 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
   /// Re-parse + re-transform only when the source or query/options change (not
   /// on navigation), then report the true match count once per change.
   void _rebuildNodes() {
-    final key = '${widget.markdown} ${widget.query} '
-        '${widget.caseSensitive} ${widget.wholeWord}';
-    if (key == _cacheKey) return;
-    _cacheKey = key;
+    if (widget.markdown == _keyMarkdown &&
+        widget.query == _keyQuery &&
+        widget.caseSensitive == _keyCase &&
+        widget.wholeWord == _keyWord) {
+      return;
+    }
+    _keyMarkdown = widget.markdown;
+    _keyQuery = widget.query;
+    _keyCase = widget.caseSensitive;
+    _keyWord = widget.wholeWord;
 
     final doc = md.Document(
       blockSyntaxes: [_CopyableTableSyntax()],
@@ -509,7 +521,9 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
         caseSensitive: widget.caseSensitive, multiLine: true);
 
     var counter = 0;
-    List<md.Node> transform(List<md.Node> nodes) {
+    // [href] is the enclosing link's target (null outside a link); marks inside
+    // a link carry it so the highlighted part keeps its tap.
+    List<md.Node> transform(List<md.Node> nodes, String? href) {
       final out = <md.Node>[];
       for (final n in nodes) {
         if (n is md.Text) {
@@ -523,8 +537,10 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
           var last = 0;
           for (final m in matches) {
             if (m.start > last) out.add(md.Text(text.substring(last, m.start)));
-            out.add(md.Element.text('mark', m[0]!)
-              ..attributes['data-i'] = '${counter++}');
+            final mark = md.Element.text('mark', m[0]!)
+              ..attributes['data-i'] = '${counter++}';
+            if (href != null) mark.attributes['data-href'] = href;
+            out.add(mark);
             last = m.end;
           }
           if (last < text.length) out.add(md.Text(text.substring(last)));
@@ -534,8 +550,16 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
           if (children == null || n.tag == 'code' || n.tag == 'pre') {
             out.add(n);
           } else {
-            out.add(md.Element(n.tag, transform(children))
-              ..attributes.addAll(n.attributes));
+            final childHref =
+                n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
+            final before = counter;
+            final newChildren = transform(children, childHref);
+            // Keep the ORIGINAL element when nothing inside it was marked —
+            // cloning drops Expando associations (e.g. the copytable chip).
+            out.add(counter == before
+                ? n
+                : (md.Element(n.tag, newChildren)
+                  ..attributes.addAll(n.attributes)));
           }
         } else {
           out.add(n);
@@ -544,7 +568,7 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
       return out;
     }
 
-    _nodes = transform(ast);
+    _nodes = transform(ast, null);
     _count = counter;
     final cb = widget.onCount;
     if (cb != null) {
@@ -571,13 +595,13 @@ class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
       listItemCrossAxisAlignment: MarkdownListItemCrossAxisAlignment.baseline,
     );
     final children = builder.build(_nodes);
-    return SingleChildScrollView(
+    // ListView (like the package's own Markdown widget) so block widgets get
+    // full viewport width — a Column in a SingleChildScrollView gives them
+    // loose width and collapses blockquote/code/rule backgrounds.
+    return ListView(
       controller: widget.controller,
       padding: widget.padding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
-      ),
+      children: children,
     );
   }
 
@@ -607,12 +631,17 @@ class _HighlightElementBuilder extends MarkdownElementBuilder {
     required this.currentKey,
     required this.matchColor,
     required this.currentColor,
+    this.onTapLink,
   });
 
   final int current;
   final GlobalKey? currentKey;
   final Color matchColor;
   final Color currentColor;
+
+  /// Present in the highlight path: a `mark` carrying a `data-href` sits inside
+  /// a link, so its highlighted fragment must stay tappable.
+  final Future<void> Function(String href)? onTapLink;
 
   @override
   Widget? visitElementAfterWithContext(
@@ -623,13 +652,22 @@ class _HighlightElementBuilder extends MarkdownElementBuilder {
   ) {
     final isCurrent =
         int.tryParse(element.attributes['data-i'] ?? '') == current;
-    final text = Text(
+    Widget widget = Text(
       element.textContent,
       style: (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(
           background: Paint()..color = isCurrent ? currentColor : matchColor),
     );
+    // Rebuilding the run as a plain widget drops the link recognizer the
+    // package attached to the surrounding label, so re-add the tap here.
+    final href = element.attributes['data-href'];
+    if (href != null && onTapLink != null) {
+      widget = GestureDetector(
+        onTap: () => onTapLink!(href),
+        child: widget,
+      );
+    }
     return isCurrent && currentKey != null
-        ? KeyedSubtree(key: currentKey, child: text)
-        : text;
+        ? KeyedSubtree(key: currentKey, child: widget)
+        : widget;
   }
 }

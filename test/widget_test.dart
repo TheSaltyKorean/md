@@ -9,6 +9,7 @@ import 'package:flutter/material.dart'
         DropdownButtonFormField,
         IconButton,
         MaterialApp,
+        GestureDetector,
         PopupMenuButton,
         Scaffold,
         SelectionArea,
@@ -1035,6 +1036,25 @@ void main() {
     expect(find.text('Important'), findsOneWidget);
     final frag = tester.widget<Text>(find.text('Important'));
     expect(frag.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find keeps a highlighted link label tappable',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: '[Docs](https://example.com)',
+          highlightQuery: 'docs',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // The highlighted 'Docs' fragment carries a tap handler (data-href), so the
+    // link still works while find is open.
+    final label = find.text('Docs');
+    expect(label, findsOneWidget);
+    expect(find.ancestor(of: label, matching: find.byType(GestureDetector)),
+        findsWidgets);
   });
 
   testWidgets('Code blocks show a copy button that copies the block',
