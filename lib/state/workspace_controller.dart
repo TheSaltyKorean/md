@@ -523,60 +523,79 @@ class WorkspaceController extends ChangeNotifier {
       _abandonSession();
       return;
     }
-    // A one-shot relaunch snapshot (from a file-args window that just updated)
-    // takes precedence: it restores the window that updated, not the untouched
-    // persistent session. It's only CONSUMED once the restore actually commits
-    // (below) — so an aborted restore keeps it for the next launch — and only a
-    // VALID snapshot is honoured; a corrupt/empty one is discarded and we fall
-    // back to the persistent session rather than leave a blank, non-persisting
-    // window.
-    var fromRelaunch = false;
-    Map<String, dynamic>? data;
+
+    // A one-shot relaunch snapshot (a file-args window that just updated) takes
+    // precedence — but it's only honoured once at least one of its tabs
+    // actually restores. A corrupt/empty/all-malformed snapshot is discarded
+    // and we fall back to the persistent session, rather than strand a blank,
+    // non-persisting window that retries the bad snapshot every launch.
     if (relaunch != null) {
-      final raw = await relaunch.read();
-      if (raw != null) {
-        try {
-          final decoded = jsonDecode(raw);
-          final docs = decoded is Map<String, dynamic> ? decoded['docs'] : null;
-          if (docs is List && docs.isNotEmpty) {
-            data = decoded as Map<String, dynamic>;
-            fromRelaunch = true;
-            // Continuing a non-persisting window — stop auto-saving now, before
-            // applying tabs, so it never overwrites the persistent session.
-            _disableAutoPersist();
-          } else {
-            await relaunch
-                .clear(); // junk snapshot — don't block future launches
+      final data = await _readSnapshot(relaunch);
+      if (data != null) {
+        final restored = await _resolveEntries(data);
+        if (restored.isNotEmpty) {
+          // A forwarded doc may have arrived during the async reads — don't
+          // clobber it, and KEEP the snapshot (don't clear) so a retry can use
+          // it next launch.
+          if (documents.any((d) => !d.isPristine)) {
+            _abandonSession();
+            return;
           }
-        } catch (_) {
-          await relaunch.clear(); // corrupt snapshot — discard and fall back
+          _applyRestored(restored, data);
+          // Continuing a non-persisting window: stop auto-saving so it can't
+          // overwrite the protected persistent session, and consume the
+          // one-shot snapshot now that the restore has committed.
+          _disableAutoPersist();
+          await relaunch.clear();
+          notifyListeners();
+          return;
         }
       }
+      // Corrupt, empty, or all-malformed snapshot: discard it so it can't
+      // linger or retry, then fall back to the persistent session. (Absent is a
+      // harmless no-op.)
+      await relaunch.clear();
     }
-    if (data == null) {
-      if (store == null) return;
-      try {
-        final raw = await store.read();
-        if (raw == null) return;
-        final decoded = jsonDecode(raw);
-        if (decoded is! Map<String, dynamic>) return;
-        data = decoded;
-      } catch (_) {
-        return; // absent or corrupt — keep the fresh blank document
-      }
+
+    // Fall back to the persistent session.
+    if (store == null) return;
+    final data = await _readSnapshot(store);
+    if (data == null) return;
+    final restored = await _resolveEntries(data);
+    if (restored.isEmpty) return;
+    if (documents.any((d) => !d.isPristine)) {
+      _abandonSession();
+      return;
     }
-    // `docs` may be missing or (in a corrupt/forward-incompatible file) not a
-    // list — guard the type instead of casting so a bad value degrades to an
-    // empty restore rather than throwing.
+    _applyRestored(restored, data);
+    notifyListeners();
+  }
+
+  /// Read + decode a snapshot store, returning the map only when it's a
+  /// well-formed object with a non-empty `docs` list (else null: absent,
+  /// corrupt, or empty).
+  Future<Map<String, dynamic>?> _readSnapshot(SessionStore store) async {
+    try {
+      final raw = await store.read();
+      if (raw == null) return null;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return null;
+      final docs = decoded['docs'];
+      if (docs is! List || docs.isEmpty) return null;
+      return decoded;
+    } catch (_) {
+      return null; // absent or corrupt — keep the fresh blank document
+    }
+  }
+
+  /// Resolve each persisted tab against the CURRENT file on disk (deciding its
+  /// content, baseline, and conflict) BEFORE the workspace is mutated — the
+  /// SINGLE place that reads the file, so loadMarkdown applies that decision
+  /// verbatim (see fromRestore) rather than re-reading and possibly disagreeing.
+  /// Malformed entries are skipped, so the result may be empty.
+  Future<List<_RestoredDoc>> _resolveEntries(Map<String, dynamic> data) async {
     final docsRaw = data['docs'];
     final entries = docsRaw is List ? docsRaw : const [];
-    if (entries.isEmpty) return;
-
-    // Resolve each tab BEFORE mutating the workspace (the disk reads are
-    // async). This is the SINGLE place that reads the current file and decides
-    // each restored tab's content, baseline, and conflict — loadMarkdown then
-    // applies that decision verbatim (see fromRestore) rather than re-reading
-    // disk itself, so the two can't disagree.
     final restored = <_RestoredDoc>[];
     for (final entry in entries) {
       if (entry is! Map) continue;
@@ -657,18 +676,12 @@ class WorkspaceController extends ChangeNotifier {
         // skip it rather than aborting the whole restore.
       }
     }
-    if (restored.isEmpty) return;
+    return restored;
+  }
 
-    // The disk reads above are async; a forwarded open-file request could
-    // have arrived meanwhile and added a real document. Re-check freshness so
-    // we don't clobber it — and suppress persistence for the same reason as
-    // the pre-read check above.
-    if (documents.any((d) => !d.isPristine)) {
-      _abandonSession();
-      return;
-    }
-
-    // Replace the initial blank tab(s).
+  /// Replace the tabs with the resolved documents and select the saved active
+  /// tab. The caller notifies listeners after any snapshot bookkeeping.
+  void _applyRestored(List<_RestoredDoc> restored, Map<String, dynamic> data) {
     for (final t in _tabs) {
       if (t is DocumentTab) _detachDoc(t.doc);
     }
@@ -692,17 +705,11 @@ class WorkspaceController extends ChangeNotifier {
     }
     if (_tabs.isEmpty) _tabs.add(DocumentTab(_newDoc()));
     // Type-guard the active index too (a corrupt/forward-version session could
-    // hold a non-int here): this runs after the tabs are rebuilt and outside
-    // the corrupt-session try, so a bad cast would crash launch instead of
-    // falling back to tab 0.
+    // hold a non-int here): a bad cast would crash launch instead of falling
+    // back to tab 0.
     final activeRaw = data['active'];
     final active = activeRaw is int ? activeRaw : 0;
     _activeIndex = active.clamp(0, _tabs.length - 1);
-    // The restore has committed, so a one-shot relaunch snapshot can now be
-    // consumed — clearing earlier would drop it if an abandon path above
-    // returned first.
-    if (fromRelaunch) await _relaunchStore?.clear();
-    notifyListeners();
   }
 
   @override

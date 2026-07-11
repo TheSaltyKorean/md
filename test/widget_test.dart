@@ -1708,6 +1708,40 @@ void main() {
     ws.dispose();
   });
 
+  test('A relaunch snapshot with only malformed entries falls back to session',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessmalformed');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final f = File('${tmp.path}/real.md')..writeAsStringSync('# Real');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': f.path, 'content': '# Real', 'dirty': false, 'mode': 'raw'},
+        ],
+      });
+    // A non-empty docs array whose only entry is malformed (non-string path):
+    // it must not be consumed as a valid relaunch, but fall back to the session.
+    final relaunch = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {'path': 123, 'content': 'x'},
+        ],
+      });
+    final ws = WorkspaceController(prefs,
+        sessionStore: store, relaunchStore: relaunch);
+    await ws.restoreSession();
+    expect(ws.documents.single.filePath, f.path); // fell back to the session…
+    expect(ws.sessionEnabled, isTrue); // …auto-persist stayed ON…
+    expect(relaunch.data, isNull); // …and the bad snapshot was discarded.
+    ws.dispose();
+  });
+
   test('An aborted relaunch restore keeps the snapshot for next launch',
       () async {
     SharedPreferences.setMockInitialValues({});
