@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -17,6 +20,12 @@ class PreviewView extends StatelessWidget {
     required this.markdown,
     this.padding = const EdgeInsets.fromLTRB(24, 20, 24, 80),
     this.controller,
+    this.highlightQuery,
+    this.highlightCaseSensitive = false,
+    this.highlightWholeWord = false,
+    this.currentMatch = 0,
+    this.currentMatchKey,
+    this.onMatchCount,
   });
 
   final String markdown;
@@ -25,6 +34,25 @@ class PreviewView extends StatelessWidget {
   /// Optional external scroll controller (used by the split view to keep the
   /// preview in sync with the source editor).
   final ScrollController? controller;
+
+  /// Find-in-preview: when non-empty, occurrences of this query are highlighted
+  /// in the rendered output (the [currentMatch]th one emphasized), so find
+  /// works without leaving Preview.
+  final String? highlightQuery;
+  final bool highlightCaseSensitive;
+  final bool highlightWholeWord;
+
+  /// Zero-based index of the match to emphasize (and key for scroll-to).
+  final int currentMatch;
+
+  /// Attached to the current match's widget so the find bar can scroll it into
+  /// view via [Scrollable.ensureVisible].
+  final GlobalKey? currentMatchKey;
+
+  /// Reports the number of matches actually highlighted in the render — the
+  /// authoritative count (it excludes code/link-target text the highlighter
+  /// can't mark), so the find bar's "n/N" agrees with what's on screen.
+  final ValueChanged<int>? onMatchCount;
 
   static Future<void> _launch(String href) async {
     final uri = Uri.tryParse(href);
@@ -39,33 +67,66 @@ class PreviewView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final styleSheet = _styleSheet(theme);
+    // Base custom builders shared by both render paths.
+    final baseBuilders = <String, MarkdownElementBuilder>{
+      // flutter_markdown_plus doesn't handle inline HTML, so <u>…</u> is parsed
+      // ourselves and rendered underlined (matches the PDF export).
+      'u': _UnderlineElementBuilder(),
+      // Fenced code block with a copy button (wrapped in codeblockDecoration).
+      'pre': _CodeBlockBuilder(theme),
+      // The injected "Copy table" chip (inline, so it doesn't grow the package's
+      // block-tag registry the way a block builder would).
+      'copytable': _CopyTableChipBuilder(),
+    };
+
+    final query = highlightQuery;
+    if (query != null && query.isNotEmpty) {
+      // Find is active: render via the AST-transforming highlighter so matches
+      // are marked AFTER the markdown resolves (emphasis / links / underline
+      // stay intact, code isn't touched, the count is what's actually marked).
+      return SelectionArea(
+        child: _HighlightedMarkdown(
+          markdown: markdown,
+          query: query,
+          caseSensitive: highlightCaseSensitive,
+          wholeWord: highlightWholeWord,
+          current: currentMatch,
+          currentKey: currentMatchKey,
+          onCount: onMatchCount,
+          controller: controller,
+          padding: padding,
+          styleSheet: styleSheet,
+          builders: {
+            ...baseBuilders,
+            'mark': _HighlightElementBuilder(
+              current: currentMatch,
+              currentKey: currentMatchKey,
+              matchColor: cs.primary.withValues(alpha: 0.22),
+              currentColor: cs.tertiary.withValues(alpha: 0.55),
+              onTapLink: _launch,
+            ),
+          },
+          onTapLink: _launch,
+        ),
+      );
+    }
+
     return SelectionArea(
       child: Markdown(
         data: markdown,
         controller: controller,
-        // SelectionArea provides selection for the whole document; the
-        // widget's own per-block SelectableText would nest inside it and
-        // assert, so it stays off here.
+        // SelectionArea provides selection for the whole document; the widget's
+        // own per-block SelectableText would nest inside it and assert.
         selectable: false,
         padding: padding,
-        // The real GFM parser identifies tables; we wrap each one with a
-        // "Copy table" chip but let the PACKAGE render the table itself
-        // (keeping selection, images, zoom, alignment, and inline
-        // formatting) — see _CopyableTableSyntax.
+        // The real GFM parser identifies tables; we wrap each one with a "Copy
+        // table" chip but let the PACKAGE render the table itself — see
+        // _CopyableTableSyntax.
         blockSyntaxes: [_CopyableTableSyntax()],
-        // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
-        // ourselves and render it underlined (matches the PDF export).
         inlineSyntaxes: [_UnderlineSyntax()],
-        builders: {
-          'u': _UnderlineElementBuilder(),
-          // Custom fenced-code-block rendering with a copy button. The
-          // package still wraps the returned widget in codeblockDecoration.
-          'pre': _CodeBlockBuilder(theme),
-          // The injected "Copy table" chip (inline, so it doesn't grow the
-          // package's block-tag registry the way a block builder would).
-          'copytable': _CopyTableChipBuilder(),
-        },
+        builders: baseBuilders,
         styleSheet: styleSheet,
         onTapLink: (text, href, title) async {
           if (href != null) await _launch(href);
@@ -360,5 +421,362 @@ class _UnderlineElementBuilder extends MarkdownElementBuilder {
       style: (preferredStyle ?? const TextStyle())
           .copyWith(decoration: TextDecoration.underline),
     );
+  }
+}
+
+/// Renders Markdown with find-match highlighting done at the AST level: it
+/// parses the source the same way the package's [Markdown] widget does, then —
+/// AFTER inline elements (emphasis, links, `<u>`, code) are resolved — walks
+/// the tree and wraps query matches in visible text with numbered `mark`
+/// elements. Because the transform runs post-parse, it never breaks markdown
+/// (a `*` query can't disturb `**bold**`), reaches text inside links/underline,
+/// keeps link tap recognizers (the `mark` stays nested inside the `a`), and
+/// leaves code untouched. The count reported is exactly what's marked, so the
+/// find bar's "n/N" can't show a phantom. The transformed AST is cached, so
+/// navigating matches only re-builds widgets (no re-parse).
+/// Inline tags whose text is part of the same rendered line as its siblings, so
+/// a cross-boundary match may run through them. Everything else (p, headings,
+/// list items, table cells, …) starts a fresh match stream. `code` is handled
+/// separately (its text is never highlighted).
+const _kInlineTags = {'em', 'strong', 'a', 'del', 'u', 'mark'};
+
+/// A soft line break (and any whitespace hugging it) renders as a single space,
+/// so the match stream normalises it the same way — otherwise the visible
+/// phrase "Company shall" over a hard-wrapped `the Company\n  shall` wouldn't
+/// match. Trailing 2+ spaces before a newline are a hard break (a `br` element,
+/// not text), so they never reach here.
+final _kSoftBreak = RegExp(r'[ \t]*\n[ \t]*');
+
+class _HighlightedMarkdown extends StatefulWidget {
+  const _HighlightedMarkdown({
+    required this.markdown,
+    required this.query,
+    required this.caseSensitive,
+    required this.wholeWord,
+    required this.current,
+    required this.currentKey,
+    required this.onCount,
+    required this.controller,
+    required this.padding,
+    required this.styleSheet,
+    required this.builders,
+    required this.onTapLink,
+  });
+
+  final String markdown;
+  final String query;
+  final bool caseSensitive;
+  final bool wholeWord;
+  final int current;
+  final GlobalKey? currentKey;
+  final ValueChanged<int>? onCount;
+  final ScrollController? controller;
+  final EdgeInsets padding;
+  final MarkdownStyleSheet styleSheet;
+  final Map<String, MarkdownElementBuilder> builders;
+  final Future<void> Function(String href) onTapLink;
+
+  @override
+  State<_HighlightedMarkdown> createState() => _HighlightedMarkdownState();
+}
+
+class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
+    implements MarkdownBuilderDelegate {
+  final _recognizers = <GestureRecognizer>[];
+  List<md.Node> _nodes = const [];
+  int _count = 0;
+  // Structured cache identity (avoids a delimited string key with control
+  // bytes): only re-parse/transform when one of these changes.
+  String? _keyMarkdown;
+  String? _keyQuery;
+  bool? _keyCase;
+  bool? _keyWord;
+
+  @override
+  void dispose() {
+    _clearRecognizers();
+    super.dispose();
+  }
+
+  void _clearRecognizers() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  /// Re-parse + re-transform only when the source or query/options change (not
+  /// on navigation), then report the true match count once per change.
+  void _rebuildNodes() {
+    if (widget.markdown == _keyMarkdown &&
+        widget.query == _keyQuery &&
+        widget.caseSensitive == _keyCase &&
+        widget.wholeWord == _keyWord) {
+      return;
+    }
+    _keyMarkdown = widget.markdown;
+    _keyQuery = widget.query;
+    _keyCase = widget.caseSensitive;
+    _keyWord = widget.wholeWord;
+
+    final doc = md.Document(
+      blockSyntaxes: [_CopyableTableSyntax()],
+      inlineSyntaxes: [_UnderlineSyntax()],
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+      encodeHtml: false,
+    );
+    final ast = doc.parseLines(const LineSplitter().convert(widget.markdown));
+
+    final body = RegExp.escape(widget.query);
+    // Same whole-word form as TextSearch (non-word lookarounds), so "C++"
+    // matches as a whole word.
+    final re = RegExp(widget.wholeWord ? '(?<![\\w])(?:$body)(?![\\w])' : body,
+        caseSensitive: widget.caseSensitive, multiLine: true);
+
+    // Pass 1 — collect each block's RENDERED inline text into one stream, so a
+    // query spanning inline markup ("the Company" over `the **Company**`) is
+    // matched on the visible text rather than per md.Text node. Inline tags keep
+    // the same stream; block tags start a new one so matches can't cross blocks.
+    // A soft line break inside a paragraph renders as a space, so it's stored as
+    // one in the stream (length-preserving, keeping run offsets aligned) — the
+    // visible phrase "Company shall" over `the Company\nshall` still matches.
+    // Each run records (text node, start offset, enclosing link href, whether
+    // it's inside <u>): href keeps a highlighted link tappable, underline lets
+    // the highlight carry the <u> style the mark would otherwise drop.
+    // Each run also stores its NORMALISED text (soft breaks collapsed) so
+    // stream offsets and the marks spliced back in agree with what's rendered.
+    final streams = <int, StringBuffer>{};
+    final runs = <int, List<(md.Text, int, String, String?, bool)>>{};
+    var block = 0;
+    // Returns the stream id in effect after the last node, so a break inside an
+    // inline container propagates to the caller (text after `**foo`code`bar**`
+    // must not rejoin `foo`'s stream).
+    int collect(
+        List<md.Node> nodes, int blockId, String? href, bool underline) {
+      // [b] advances mid-list when a skipped inline element (code/image/line
+      // break) sits between text runs, so the runs on either side land in
+      // different streams and can't match as if they were contiguous.
+      var b = blockId;
+      for (final n in nodes) {
+        if (n is md.Text) {
+          final nt = n.text.replaceAll(_kSoftBreak, ' ');
+          final buf = streams.putIfAbsent(b, StringBuffer.new);
+          runs
+              .putIfAbsent(b, () => [])
+              .add((n, buf.length, nt, href, underline));
+          buf.write(nt);
+        } else if (n is md.Element) {
+          final children = n.children;
+          // code/image/<br>/pre render (or break the line) between text but are
+          // never highlighted; start a new stream so a search can't join the
+          // text on either side (e.g. "foobar" over `foo`+`code`+`bar`).
+          if (children == null || n.tag == 'code' || n.tag == 'pre') {
+            b = ++block;
+            continue;
+          }
+          final childHref =
+              n.tag == 'a' ? (n.attributes['href'] ?? href) : href;
+          final childU = underline || n.tag == 'u';
+          if (_kInlineTags.contains(n.tag)) {
+            // Same rendered line — continue from the child's final stream so a
+            // break nested inside it carries through to later siblings.
+            b = collect(children, b, childHref, childU);
+          } else {
+            collect(children, ++block, childHref, childU); // nested block
+            b = ++block; // text after a nested block breaks too
+          }
+        }
+      }
+      return b;
+    }
+
+    collect(ast, block, null, false);
+
+    // Match each block's stream in document order (ascending block id) and map
+    // every match onto the runs it overlaps. A match spanning several runs
+    // shares one data-i so navigation counts it as a single hit.
+    final splits = <md.Text, List<(int, int, int, String?, bool)>>{};
+    var counter = 0;
+    for (final id in streams.keys.toList()..sort()) {
+      final text = streams[id]!.toString();
+      for (final m in re.allMatches(text)) {
+        if (m.end == m.start) continue;
+        final dataI = counter++;
+        for (final (node, start, nt, href, underline) in runs[id]!) {
+          final runEnd = start + nt.length;
+          final s = m.start > start ? m.start : start;
+          final e = m.end < runEnd ? m.end : runEnd;
+          if (s < e) {
+            splits
+                .putIfAbsent(node, () => [])
+                .add((s - start, e - start, dataI, href, underline));
+          }
+        }
+      }
+    }
+
+    // Pass 2 — rebuild the tree, splicing `mark` elements into the matched text
+    // nodes. The first mark of each data-i (document order) is the scroll anchor
+    // (a GlobalKey binds to exactly one widget).
+    final anchored = <int>{};
+    List<md.Node> build(List<md.Node> nodes) {
+      final out = <md.Node>[];
+      for (final n in nodes) {
+        if (n is md.Text) {
+          final segs = splits[n];
+          if (segs == null) {
+            out.add(n);
+            continue;
+          }
+          segs.sort((a, b) => a.$1.compareTo(b.$1));
+          // Slice from the SAME normalised text the offsets were computed
+          // against, so the marks land on the right characters and render on
+          // one line like the surrounding paragraph.
+          final text = n.text.replaceAll(_kSoftBreak, ' ');
+          var last = 0;
+          for (final (start, end, dataI, href, underline) in segs) {
+            if (start > last) out.add(md.Text(text.substring(last, start)));
+            final mark = md.Element.text('mark', text.substring(start, end))
+              ..attributes['data-i'] = '$dataI';
+            if (href != null) mark.attributes['data-href'] = href;
+            if (underline) mark.attributes['data-u'] = '1';
+            if (anchored.add(dataI)) mark.attributes['data-anchor'] = '1';
+            out.add(mark);
+            last = end;
+          }
+          if (last < text.length) out.add(md.Text(text.substring(last)));
+        } else if (n is md.Element) {
+          final children = n.children;
+          if (children == null || n.tag == 'code' || n.tag == 'pre') {
+            out.add(n);
+            continue;
+          }
+          final built = build(children);
+          // Keep the ORIGINAL element when nothing inside it changed — cloning
+          // drops Expando associations (e.g. the copytable chip).
+          var changed = built.length != children.length;
+          for (var i = 0; !changed && i < built.length; i++) {
+            changed = !identical(built[i], children[i]);
+          }
+          out.add(changed
+              ? (md.Element(n.tag, built)..attributes.addAll(n.attributes))
+              : n);
+        } else {
+          out.add(n);
+        }
+      }
+      return out;
+    }
+
+    _nodes = build(ast);
+    _count = counter;
+    final cb = widget.onCount;
+    if (cb != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => cb(_count));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _rebuildNodes();
+    // createLink is called during build() below; drop the previous frame's
+    // recognizers first so they don't leak.
+    _clearRecognizers();
+    final builder = MarkdownBuilder(
+      delegate: this,
+      selectable: false,
+      styleSheet: widget.styleSheet,
+      imageDirectory: null,
+      imageBuilder: null,
+      checkboxBuilder: null,
+      bulletBuilder: null,
+      builders: widget.builders,
+      paddingBuilders: const {},
+      listItemCrossAxisAlignment: MarkdownListItemCrossAxisAlignment.baseline,
+    );
+    final children = builder.build(_nodes);
+    // ListView (like the package's own Markdown widget) so block widgets get
+    // full viewport width — a Column in a SingleChildScrollView gives them
+    // loose width and collapses blockquote/code/rule backgrounds.
+    return ListView(
+      controller: widget.controller,
+      padding: widget.padding,
+      children: children,
+    );
+  }
+
+  // --- MarkdownBuilderDelegate ------------------------------------------------
+
+  @override
+  GestureRecognizer createLink(String text, String? href, String title) {
+    final recognizer = TapGestureRecognizer()
+      ..onTap = () {
+        if (href != null) widget.onTapLink(href);
+      };
+    _recognizers.add(recognizer);
+    return recognizer;
+  }
+
+  @override
+  TextSpan formatText(MarkdownStyleSheet styleSheet, String code) => TextSpan(
+      style: styleSheet.code, text: code.replaceAll(RegExp(r'\n$'), ''));
+}
+
+/// Paints a highlight behind a matched `mark` run (a background on the text
+/// style, so it flows inline and wraps like normal text). The current match
+/// gets a stronger colour and, if provided, the scroll-to key.
+class _HighlightElementBuilder extends MarkdownElementBuilder {
+  _HighlightElementBuilder({
+    required this.current,
+    required this.currentKey,
+    required this.matchColor,
+    required this.currentColor,
+    this.onTapLink,
+  });
+
+  final int current;
+  final GlobalKey? currentKey;
+  final Color matchColor;
+  final Color currentColor;
+
+  /// Present in the highlight path: a `mark` carrying a `data-href` sits inside
+  /// a link, so its highlighted fragment must stay tappable.
+  final Future<void> Function(String href)? onTapLink;
+
+  @override
+  Widget? visitElementAfterWithContext(
+    BuildContext context,
+    md.Element element,
+    TextStyle? preferredStyle,
+    TextStyle? parentStyle,
+  ) {
+    final isCurrent =
+        int.tryParse(element.attributes['data-i'] ?? '') == current;
+    // A match inside <u> loses the underline (its text child became this mark),
+    // so re-apply it here; bold/italic survive via parentStyle already.
+    final underline = element.attributes['data-u'] == '1';
+    Widget widget = Text(
+      element.textContent,
+      style: (parentStyle ?? preferredStyle ?? const TextStyle()).copyWith(
+        background: Paint()..color = isCurrent ? currentColor : matchColor,
+        decoration: underline ? TextDecoration.underline : null,
+      ),
+    );
+    // Rebuilding the run as a plain widget drops the link recognizer the
+    // package attached to the surrounding label, so re-add the tap here.
+    final href = element.attributes['data-href'];
+    if (href != null && onTapLink != null) {
+      widget = GestureDetector(
+        onTap: () => onTapLink!(href),
+        child: widget,
+      );
+    }
+    // Only the first mark of the current match (data-anchor) takes the scroll
+    // key — a match split across inline runs has several marks, but a GlobalKey
+    // may bind to just one widget.
+    final isAnchor = element.attributes['data-anchor'] == '1';
+    return isCurrent && isAnchor && currentKey != null
+        ? KeyedSubtree(key: currentKey, child: widget)
+        : widget;
   }
 }

@@ -9,9 +9,13 @@ import 'package:flutter/material.dart'
         DropdownButtonFormField,
         IconButton,
         MaterialApp,
+        GestureDetector,
         PopupMenuButton,
         Scaffold,
-        SelectionArea;
+        SelectionArea,
+        Text,
+        TextDecoration,
+        TextField;
 import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, SystemChannels;
 import 'package:flutter/widgets.dart'
@@ -37,6 +41,8 @@ import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/services/session_service.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
+import 'package:markdown_studio/widgets/find_controller.dart';
+import 'package:markdown_studio/widgets/preview_find_view.dart';
 import 'package:markdown_studio/widgets/preview_view.dart';
 import 'package:markdown_studio/widgets/print_preview_view.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -867,6 +873,321 @@ void main() {
     await tester.pumpAndSettle();
     // Unified selection across the whole document (not per-block).
     expect(find.byType(SelectionArea), findsOneWidget);
+  });
+
+  testWidgets('Preview find highlights query occurrences in the render',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'A Contractor signs. Another contractor waits.',
+          highlightQuery: 'contractor',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // Each occurrence (case-insensitive) is split into its own Text fragment
+    // preserving the original case.
+    expect(find.text('Contractor'), findsOneWidget);
+    expect(find.text('contractor'), findsOneWidget);
+    // The fragment carries a background highlight paint.
+    final frag = tester.widget<Text>(find.text('Contractor'));
+    expect(frag.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find: no highlight when the query is empty',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'A Contractor signs here.',
+          highlightQuery: '',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // No split-out fragment: 'Contractor' stays embedded in its paragraph.
+    expect(find.text('Contractor'), findsNothing);
+  });
+
+  testWidgets('Preview find bar: type query → count, highlights, navigation',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(
+          // 'Zeta' (uppercase) appears 3x; the query is lowercase 'zeta', so
+          // the highlighted fragments don't collide with the query field text.
+          markdown: 'Zeta beta Zeta gamma Zeta done.',
+          find: fc,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // No bar until find is opened.
+    expect(find.byType(TextField), findsNothing);
+
+    fc.openFind();
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'zeta');
+    await tester.pumpAndSettle();
+
+    // 3 case-insensitive occurrences; counter starts at 1/3.
+    expect(find.text('1/3'), findsOneWidget);
+    // Each occurrence is a highlighted fragment (original case preserved).
+    expect(find.text('Zeta'), findsNWidgets(3));
+
+    // Next advances the current match.
+    await tester.tap(find.byTooltip('Next (Enter)'));
+    await tester.pumpAndSettle();
+    expect(find.text('2/3'), findsOneWidget);
+
+    // Previous from 2/3 wraps back to 1/3.
+    await tester.tap(find.byTooltip('Previous (Shift+Enter)'));
+    await tester.pumpAndSettle();
+    expect(find.text('1/3'), findsOneWidget);
+
+    // Close hides the bar.
+    await tester.tap(find.byTooltip('Close (Esc)'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+  });
+
+  testWidgets('Preview find excludes matches inside code fences',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(
+          // 'Widget' appears once in prose and once in a fenced code block;
+          // the code fence isn't highlighted, so it must not be counted.
+          markdown: 'A real Widget here.\n\n```\nWidget in code\n```\n',
+          find: fc,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    fc.openFind();
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'widget');
+    await tester.pumpAndSettle();
+    // Only the prose occurrence counts (no phantom code-fence match).
+    expect(find.text('1/1'), findsOneWidget);
+  });
+
+  testWidgets('Preview find counts rendered text, not link URLs',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(
+          markdown: '[Docs](https://example.com/guide)',
+          find: fc,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    fc.openFind();
+    await tester.pumpAndSettle();
+    // 'example' only appears in the link URL (not rendered) → no match.
+    await tester.enterText(find.byType(TextField), 'example');
+    await tester.pumpAndSettle();
+    expect(find.text('No results'), findsOneWidget);
+    // 'Docs' is the rendered link label → one match.
+    await tester.enterText(find.byType(TextField), 'docs');
+    await tester.pumpAndSettle();
+    expect(find.text('1/1'), findsOneWidget);
+  });
+
+  testWidgets('Preview find query "*" leaves bold rendering intact',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(markdown: 'This is **bold** text.', find: fc),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    fc.openFind();
+    await tester.pumpAndSettle();
+    // The asterisks are emphasis delimiters (consumed by parsing), not rendered
+    // text — so the AST-level highlighter finds nothing and can't disturb the
+    // bold. (The old inline-syntax approach wrapped the raw '*' and broke it.)
+    await tester.enterText(find.byType(TextField), '*');
+    await tester.pumpAndSettle();
+    expect(find.text('No results'), findsOneWidget);
+  });
+
+  testWidgets('Preview find highlights text inside <u> underline',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'See <u>Important</u> notice.',
+          highlightQuery: 'important',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // The match inside the resolved <u> element is split out and highlighted.
+    expect(find.text('Important'), findsOneWidget);
+    final frag = tester.widget<Text>(find.text('Important'));
+    expect(frag.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find matches a phrase across inline formatting',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'the **Company** shall pay',
+          highlightQuery: 'Company shall',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // "Company" (bold) and " shall" live in separate AST nodes but render as one
+    // line, so the phrase matches and is split into two highlighted fragments.
+    expect(count, 1);
+    final company = tester.widget<Text>(find.text('Company'));
+    expect(company.style?.background, isNotNull);
+    final shall = tester.widget<Text>(find.text(' shall'));
+    expect(shall.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find matches across a soft line break', (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // Hard-wrapped paragraph: the soft break renders as a space.
+          markdown: 'the Company\nshall pay',
+          highlightQuery: 'Company shall',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(count, 1);
+    // The highlighted run renders on one line (soft break normalised to space).
+    final frag = tester.widget<Text>(find.text('Company shall'));
+    expect(frag.style?.background, isNotNull);
+  });
+
+  testWidgets('Preview find collapses indentation after a soft break',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // Continuation line is indented; the renderer shows one space.
+          markdown: 'the Company\n    shall pay',
+          highlightQuery: 'Company shall',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(count, 1);
+    expect(tester.widget<Text>(find.text('Company shall')).style?.background,
+        isNotNull);
+  });
+
+  testWidgets('Preview find does not match across skipped inline code',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // Renders "foocodebar", but code sits between foo and bar.
+          markdown: 'foo`code`bar',
+          highlightQuery: 'foobar',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // The rendered text foo…bar is not really contiguous, so no false match.
+    expect(count, 0);
+  });
+
+  testWidgets('Preview find breaks the stream across inline-nested code',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          // A bold span holds foo + code + bar, then plain baz follows. The
+          // code break inside the bold must carry through so foo and baz are
+          // not treated as contiguous.
+          markdown: '**foo`code`bar**baz',
+          highlightQuery: 'foobaz',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(count, 0);
+  });
+
+  testWidgets('Preview find keeps underline on highlighted <u> text',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'see <u>Important</u> here',
+          highlightQuery: 'Important',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    final frag = tester.widget<Text>(find.text('Important'));
+    expect(frag.style?.background, isNotNull);
+    // The <u> underline must survive under the highlight.
+    expect(frag.style?.decoration, TextDecoration.underline);
+  });
+
+  testWidgets('Preview find does not match a phrase across block boundaries',
+      (tester) async {
+    var count = -1;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: '# Section one\n\ntwo paragraphs',
+          highlightQuery: 'one two',
+          onMatchCount: (n) => count = n,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // "one" ends a heading and "two" starts a paragraph — different blocks, so
+    // the visually-adjacent phrase must NOT match.
+    expect(count, 0);
+  });
+
+  testWidgets('Preview find keeps a highlighted link label tappable',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: '[Docs](https://example.com)',
+          highlightQuery: 'docs',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // The highlighted 'Docs' fragment carries a tap handler (data-href), so the
+    // link still works while find is open.
+    final label = find.text('Docs');
+    expect(label, findsOneWidget);
+    expect(find.ancestor(of: label, matching: find.byType(GestureDetector)),
+        findsWidgets);
   });
 
   testWidgets('Code blocks show a copy button that copies the block',
