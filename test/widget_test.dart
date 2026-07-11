@@ -975,6 +975,68 @@ void main() {
     expect(find.text('1/1'), findsOneWidget);
   });
 
+  testWidgets('Preview find counts rendered text, not link URLs',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(
+          markdown: '[Docs](https://example.com/guide)',
+          find: fc,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    fc.openFind();
+    await tester.pumpAndSettle();
+    // 'example' only appears in the link URL (not rendered) → no match.
+    await tester.enterText(find.byType(TextField), 'example');
+    await tester.pumpAndSettle();
+    expect(find.text('No results'), findsOneWidget);
+    // 'Docs' is the rendered link label → one match.
+    await tester.enterText(find.byType(TextField), 'docs');
+    await tester.pumpAndSettle();
+    expect(find.text('1/1'), findsOneWidget);
+  });
+
+  testWidgets('Preview find query "*" leaves bold rendering intact',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(markdown: 'This is **bold** text.', find: fc),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    fc.openFind();
+    await tester.pumpAndSettle();
+    // The asterisks are emphasis delimiters (consumed by parsing), not rendered
+    // text — so the AST-level highlighter finds nothing and can't disturb the
+    // bold. (The old inline-syntax approach wrapped the raw '*' and broke it.)
+    await tester.enterText(find.byType(TextField), '*');
+    await tester.pumpAndSettle();
+    expect(find.text('No results'), findsOneWidget);
+  });
+
+  testWidgets('Preview find highlights text inside <u> underline',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: PreviewView(
+          markdown: 'See <u>Important</u> notice.',
+          highlightQuery: 'important',
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    // The match inside the resolved <u> element is split out and highlighted.
+    expect(find.text('Important'), findsOneWidget);
+    final frag = tester.widget<Text>(find.text('Important'));
+    expect(frag.style?.background, isNotNull);
+  });
+
   testWidgets('Code blocks show a copy button that copies the block',
       (tester) async {
     final calls = <MethodCall>[];

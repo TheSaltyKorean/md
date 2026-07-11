@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../services/text_search.dart';
+import '../state/zoom_controller.dart';
 import 'find_controller.dart';
 import 'preview_view.dart';
 
@@ -84,24 +84,23 @@ class _PreviewFindViewState extends State<PreviewFindView> {
     }
   }
 
-  /// Fenced/inline code renders its text directly (not through the inline
-  /// highlighter), so those regions are never highlighted — exclude them from
-  /// the count/navigation so a token that only appears in a code fence can't
-  /// show a phantom match with nothing to scroll to.
-  static final _codeSpans = RegExp(r'```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`');
-
+  /// A query/option change resets to the first match and rebuilds; the true
+  /// match count then arrives from the renderer via [_onMatchCount] (exactly
+  /// what was highlighted — no phantom code/URL matches).
   void _recompute() {
-    final q = _queryCtl.text;
-    final count = q.isEmpty
-        ? 0
-        : TextSearch.findAll(
-            widget.markdown.replaceAll(_codeSpans, ''),
-            q,
-            SearchOptions(caseSensitive: _caseSensitive, wholeWord: _wholeWord),
-          ).length;
     setState(() {
-      _matchCount = count;
-      _current = count == 0 ? 0 : _current.clamp(0, count - 1);
+      _current = 0;
+      if (_queryCtl.text.isEmpty) _matchCount = 0;
+    });
+    _scrollToCurrent();
+  }
+
+  void _onMatchCount(int n) {
+    if (!mounted || n == _matchCount) return;
+    setState(() {
+      _matchCount = n;
+      final maxIdx = n == 0 ? 0 : n - 1;
+      if (_current > maxIdx) _current = maxIdx;
     });
     _scrollToCurrent();
   }
@@ -145,6 +144,7 @@ class _PreviewFindViewState extends State<PreviewFindView> {
             highlightWholeWord: _wholeWord,
             currentMatch: _current,
             currentMatchKey: _currentKey,
+            onMatchCount: _onMatchCount,
           ),
         ),
         if (visible)
@@ -154,7 +154,22 @@ class _PreviewFindViewState extends State<PreviewFindView> {
             top: 8,
             left: 8,
             right: 8,
-            child: Align(alignment: Alignment.topRight, child: _bar(context)),
+            child: Align(
+              alignment: Alignment.topRight,
+              // The bar is app chrome mounted inside the zoomed document
+              // subtree; shed the document zoom (keep the platform/
+              // accessibility scale) so it stays 100% and doesn't overgrow.
+              child: Builder(builder: (context) {
+                final scaler = MediaQuery.textScalerOf(context);
+                return MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler:
+                        scaler is ZoomedTextScaler ? scaler.inherited : scaler,
+                  ),
+                  child: _bar(context),
+                );
+              }),
+            ),
           ),
       ],
     );

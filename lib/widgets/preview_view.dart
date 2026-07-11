@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -22,6 +25,7 @@ class PreviewView extends StatelessWidget {
     this.highlightWholeWord = false,
     this.currentMatch = 0,
     this.currentMatchKey,
+    this.onMatchCount,
   });
 
   final String markdown;
@@ -45,6 +49,11 @@ class PreviewView extends StatelessWidget {
   /// view via [Scrollable.ensureVisible].
   final GlobalKey? currentMatchKey;
 
+  /// Reports the number of matches actually highlighted in the render — the
+  /// authoritative count (it excludes code/link-target text the highlighter
+  /// can't mark), so the find bar's "n/N" agrees with what's on screen.
+  final ValueChanged<int>? onMatchCount;
+
   static Future<void> _launch(String href) async {
     final uri = Uri.tryParse(href);
     if (uri == null) return;
@@ -60,57 +69,63 @@ class PreviewView extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     final styleSheet = _styleSheet(theme);
+    // Base custom builders shared by both render paths.
+    final baseBuilders = <String, MarkdownElementBuilder>{
+      // flutter_markdown_plus doesn't handle inline HTML, so <u>…</u> is parsed
+      // ourselves and rendered underlined (matches the PDF export).
+      'u': _UnderlineElementBuilder(),
+      // Fenced code block with a copy button (wrapped in codeblockDecoration).
+      'pre': _CodeBlockBuilder(theme),
+      // The injected "Copy table" chip (inline, so it doesn't grow the package's
+      // block-tag registry the way a block builder would).
+      'copytable': _CopyTableChipBuilder(),
+    };
+
     final query = highlightQuery;
-    final hasHighlight = query != null && query.isNotEmpty;
-    return SelectionArea(
-      child: Markdown(
-        // The Markdown widget parses on data change; the find query changes the
-        // inline syntaxes/builders WITHOUT changing data, so re-key on the
-        // highlight state to force a fresh parse (and re-colour of the current
-        // match) when the query / current match changes.
-        key: hasHighlight
-            ? ValueKey('hl:$query:$highlightCaseSensitive:'
-                '$highlightWholeWord:$currentMatch')
-            : const ValueKey('hl:none'),
-        data: markdown,
-        controller: controller,
-        // SelectionArea provides selection for the whole document; the
-        // widget's own per-block SelectableText would nest inside it and
-        // assert, so it stays off here.
-        selectable: false,
-        padding: padding,
-        // The real GFM parser identifies tables; we wrap each one with a
-        // "Copy table" chip but let the PACKAGE render the table itself
-        // (keeping selection, images, zoom, alignment, and inline
-        // formatting) — see _CopyableTableSyntax.
-        blockSyntaxes: [_CopyableTableSyntax()],
-        // flutter_markdown_plus doesn't handle inline HTML, so parse <u>…</u>
-        // ourselves and render it underlined (matches the PDF export). When a
-        // find query is active, a highlight syntax wraps each occurrence in a
-        // <mark> the builder paints.
-        inlineSyntaxes: [
-          _UnderlineSyntax(),
-          if (hasHighlight)
-            _HighlightSyntax(query,
-                caseSensitive: highlightCaseSensitive,
-                wholeWord: highlightWholeWord),
-        ],
-        builders: {
-          'u': _UnderlineElementBuilder(),
-          // Custom fenced-code-block rendering with a copy button. The
-          // package still wraps the returned widget in codeblockDecoration.
-          'pre': _CodeBlockBuilder(theme),
-          // The injected "Copy table" chip (inline, so it doesn't grow the
-          // package's block-tag registry the way a block builder would).
-          'copytable': _CopyTableChipBuilder(),
-          if (hasHighlight)
+    if (query != null && query.isNotEmpty) {
+      // Find is active: render via the AST-transforming highlighter so matches
+      // are marked AFTER the markdown resolves (emphasis / links / underline
+      // stay intact, code isn't touched, the count is what's actually marked).
+      return SelectionArea(
+        child: _HighlightedMarkdown(
+          markdown: markdown,
+          query: query,
+          caseSensitive: highlightCaseSensitive,
+          wholeWord: highlightWholeWord,
+          current: currentMatch,
+          currentKey: currentMatchKey,
+          onCount: onMatchCount,
+          controller: controller,
+          padding: padding,
+          styleSheet: styleSheet,
+          builders: {
+            ...baseBuilders,
             'mark': _HighlightElementBuilder(
               current: currentMatch,
               currentKey: currentMatchKey,
               matchColor: cs.primary.withValues(alpha: 0.22),
               currentColor: cs.tertiary.withValues(alpha: 0.55),
             ),
-        },
+          },
+          onTapLink: _launch,
+        ),
+      );
+    }
+
+    return SelectionArea(
+      child: Markdown(
+        data: markdown,
+        controller: controller,
+        // SelectionArea provides selection for the whole document; the widget's
+        // own per-block SelectableText would nest inside it and assert.
+        selectable: false,
+        padding: padding,
+        // The real GFM parser identifies tables; we wrap each one with a "Copy
+        // table" chip but let the PACKAGE render the table itself — see
+        // _CopyableTableSyntax.
+        blockSyntaxes: [_CopyableTableSyntax()],
+        inlineSyntaxes: [_UnderlineSyntax()],
+        builders: baseBuilders,
         styleSheet: styleSheet,
         onTapLink: (text, href, title) async {
           if (href != null) await _launch(href);
@@ -408,32 +423,179 @@ class _UnderlineElementBuilder extends MarkdownElementBuilder {
   }
 }
 
-/// Wraps each occurrence of the find query in a `mark` element, numbered in
-/// document order via a `data-i` attribute so the builder can emphasize the
-/// current match. Only added when a query is active (a non-empty pattern), so
-/// it always consumes at least one character.
-class _HighlightSyntax extends md.InlineSyntax {
-  _HighlightSyntax(String query,
-      {bool caseSensitive = false, bool wholeWord = false})
-      : super(
-          // Same word-boundary form as TextSearch.compile (non-word
-          // lookarounds), so a punctuation-bearing term like "C++" matches
-          // as a whole word and the highlights agree with the find count.
-          wholeWord
-              ? '(?<![\\w])(?:${RegExp.escape(query)})(?![\\w])'
-              : RegExp.escape(query),
-          caseSensitive: caseSensitive,
-        );
+/// Renders Markdown with find-match highlighting done at the AST level: it
+/// parses the source the same way the package's [Markdown] widget does, then —
+/// AFTER inline elements (emphasis, links, `<u>`, code) are resolved — walks
+/// the tree and wraps query matches in visible text with numbered `mark`
+/// elements. Because the transform runs post-parse, it never breaks markdown
+/// (a `*` query can't disturb `**bold**`), reaches text inside links/underline,
+/// keeps link tap recognizers (the `mark` stays nested inside the `a`), and
+/// leaves code untouched. The count reported is exactly what's marked, so the
+/// find bar's "n/N" can't show a phantom. The transformed AST is cached, so
+/// navigating matches only re-builds widgets (no re-parse).
+class _HighlightedMarkdown extends StatefulWidget {
+  const _HighlightedMarkdown({
+    required this.markdown,
+    required this.query,
+    required this.caseSensitive,
+    required this.wholeWord,
+    required this.current,
+    required this.currentKey,
+    required this.onCount,
+    required this.controller,
+    required this.padding,
+    required this.styleSheet,
+    required this.builders,
+    required this.onTapLink,
+  });
 
-  int _i = 0;
+  final String markdown;
+  final String query;
+  final bool caseSensitive;
+  final bool wholeWord;
+  final int current;
+  final GlobalKey? currentKey;
+  final ValueChanged<int>? onCount;
+  final ScrollController? controller;
+  final EdgeInsets padding;
+  final MarkdownStyleSheet styleSheet;
+  final Map<String, MarkdownElementBuilder> builders;
+  final Future<void> Function(String href) onTapLink;
 
   @override
-  bool onMatch(md.InlineParser parser, Match match) {
-    final el = md.Element.text('mark', match[0]!);
-    el.attributes['data-i'] = '${_i++}';
-    parser.addNode(el);
-    return true;
+  State<_HighlightedMarkdown> createState() => _HighlightedMarkdownState();
+}
+
+class _HighlightedMarkdownState extends State<_HighlightedMarkdown>
+    implements MarkdownBuilderDelegate {
+  final _recognizers = <GestureRecognizer>[];
+  List<md.Node> _nodes = const [];
+  int _count = 0;
+  String? _cacheKey;
+
+  @override
+  void dispose() {
+    _clearRecognizers();
+    super.dispose();
   }
+
+  void _clearRecognizers() {
+    for (final r in _recognizers) {
+      r.dispose();
+    }
+    _recognizers.clear();
+  }
+
+  /// Re-parse + re-transform only when the source or query/options change (not
+  /// on navigation), then report the true match count once per change.
+  void _rebuildNodes() {
+    final key = '${widget.markdown} ${widget.query} '
+        '${widget.caseSensitive} ${widget.wholeWord}';
+    if (key == _cacheKey) return;
+    _cacheKey = key;
+
+    final doc = md.Document(
+      blockSyntaxes: [_CopyableTableSyntax()],
+      inlineSyntaxes: [_UnderlineSyntax()],
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+      encodeHtml: false,
+    );
+    final ast = doc.parseLines(const LineSplitter().convert(widget.markdown));
+
+    final body = RegExp.escape(widget.query);
+    // Same whole-word form as TextSearch (non-word lookarounds), so "C++"
+    // matches as a whole word.
+    final re = RegExp(widget.wholeWord ? '(?<![\\w])(?:$body)(?![\\w])' : body,
+        caseSensitive: widget.caseSensitive, multiLine: true);
+
+    var counter = 0;
+    List<md.Node> transform(List<md.Node> nodes) {
+      final out = <md.Node>[];
+      for (final n in nodes) {
+        if (n is md.Text) {
+          final text = n.text;
+          final matches =
+              re.allMatches(text).where((m) => m.end > m.start).toList();
+          if (matches.isEmpty) {
+            out.add(n);
+            continue;
+          }
+          var last = 0;
+          for (final m in matches) {
+            if (m.start > last) out.add(md.Text(text.substring(last, m.start)));
+            out.add(md.Element.text('mark', m[0]!)
+              ..attributes['data-i'] = '${counter++}');
+            last = m.end;
+          }
+          if (last < text.length) out.add(md.Text(text.substring(last)));
+        } else if (n is md.Element) {
+          final children = n.children;
+          // Code renders its text directly (not highlighted); leave it whole.
+          if (children == null || n.tag == 'code' || n.tag == 'pre') {
+            out.add(n);
+          } else {
+            out.add(md.Element(n.tag, transform(children))
+              ..attributes.addAll(n.attributes));
+          }
+        } else {
+          out.add(n);
+        }
+      }
+      return out;
+    }
+
+    _nodes = transform(ast);
+    _count = counter;
+    final cb = widget.onCount;
+    if (cb != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => cb(_count));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _rebuildNodes();
+    // createLink is called during build() below; drop the previous frame's
+    // recognizers first so they don't leak.
+    _clearRecognizers();
+    final builder = MarkdownBuilder(
+      delegate: this,
+      selectable: false,
+      styleSheet: widget.styleSheet,
+      imageDirectory: null,
+      imageBuilder: null,
+      checkboxBuilder: null,
+      bulletBuilder: null,
+      builders: widget.builders,
+      paddingBuilders: const {},
+      listItemCrossAxisAlignment: MarkdownListItemCrossAxisAlignment.baseline,
+    );
+    final children = builder.build(_nodes);
+    return SingleChildScrollView(
+      controller: widget.controller,
+      padding: widget.padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  // --- MarkdownBuilderDelegate ------------------------------------------------
+
+  @override
+  GestureRecognizer createLink(String text, String? href, String title) {
+    final recognizer = TapGestureRecognizer()
+      ..onTap = () {
+        if (href != null) widget.onTapLink(href);
+      };
+    _recognizers.add(recognizer);
+    return recognizer;
+  }
+
+  @override
+  TextSpan formatText(MarkdownStyleSheet styleSheet, String code) => TextSpan(
+      style: styleSheet.code, text: code.replaceAll(RegExp(r'\n$'), ''));
 }
 
 /// Paints a highlight behind a matched `mark` run (a background on the text
