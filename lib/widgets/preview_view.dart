@@ -416,8 +416,11 @@ class _HighlightSyntax extends md.InlineSyntax {
   _HighlightSyntax(String query,
       {bool caseSensitive = false, bool wholeWord = false})
       : super(
+          // Same word-boundary form as TextSearch.compile (non-word
+          // lookarounds), so a punctuation-bearing term like "C++" matches
+          // as a whole word and the highlights agree with the find count.
           wholeWord
-              ? r'\b' + RegExp.escape(query) + r'\b'
+              ? '(?<![\\w])(?:${RegExp.escape(query)})(?![\\w])'
               : RegExp.escape(query),
           caseSensitive: caseSensitive,
         );

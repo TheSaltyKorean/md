@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../services/text_search.dart';
 import 'find_controller.dart';
 import 'preview_view.dart';
 
@@ -82,17 +84,21 @@ class _PreviewFindViewState extends State<PreviewFindView> {
     }
   }
 
-  RegExp? _regex() {
-    final q = _queryCtl.text;
-    if (q.isEmpty) return null;
-    final body = RegExp.escape(q);
-    return RegExp(_wholeWord ? '\\b$body\\b' : body,
-        caseSensitive: _caseSensitive);
-  }
+  /// Fenced/inline code renders its text directly (not through the inline
+  /// highlighter), so those regions are never highlighted — exclude them from
+  /// the count/navigation so a token that only appears in a code fence can't
+  /// show a phantom match with nothing to scroll to.
+  static final _codeSpans = RegExp(r'```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`');
 
   void _recompute() {
-    final re = _regex();
-    final count = re == null ? 0 : re.allMatches(widget.markdown).length;
+    final q = _queryCtl.text;
+    final count = q.isEmpty
+        ? 0
+        : TextSearch.findAll(
+            widget.markdown.replaceAll(_codeSpans, ''),
+            q,
+            SearchOptions(caseSensitive: _caseSensitive, wholeWord: _wholeWord),
+          ).length;
     setState(() {
       _matchCount = count;
       _current = count == 0 ? 0 : _current.clamp(0, count - 1);
@@ -141,9 +147,30 @@ class _PreviewFindViewState extends State<PreviewFindView> {
             currentMatchKey: _currentKey,
           ),
         ),
-        if (visible) Positioned(top: 8, right: 8, child: _bar(context)),
+        if (visible)
+          // Bind left AND right so the bar can never exceed the viewport on
+          // narrow/mobile layouts; it aligns to the right within that space.
+          Positioned(
+            top: 8,
+            left: 8,
+            right: 8,
+            child: Align(alignment: Alignment.topRight, child: _bar(context)),
+          ),
       ],
     );
+  }
+
+  KeyEventResult _onFieldKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.enter) {
+      HardwareKeyboard.instance.isShiftPressed ? _prev() : _next();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      widget.find.hide();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   Widget _bar(BuildContext context) {
@@ -156,69 +183,80 @@ class _PreviewFindViewState extends State<PreviewFindView> {
       elevation: 3,
       borderRadius: BorderRadius.circular(8),
       color: cs.surfaceContainerHigh,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 200,
-              child: TextField(
-                controller: _queryCtl,
-                focusNode: _queryFocus,
-                decoration: const InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: 'Find in preview',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Flexible so it shrinks below its 200px preference when the
+              // viewport is too narrow for the full bar.
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 200),
+                  // Focus wrapper handles Enter → next, Shift+Enter → previous,
+                  // Esc → close (matches the source find bar and the tooltips).
+                  child: Focus(
+                    onKeyEvent: _onFieldKey,
+                    child: TextField(
+                      controller: _queryCtl,
+                      focusNode: _queryFocus,
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        border: InputBorder.none,
+                        hintText: 'Find in preview',
+                      ),
+                    ),
+                  ),
                 ),
-                onSubmitted: (_) => _next(),
               ),
-            ),
-            const SizedBox(width: 4),
-            if (has)
-              Text(label,
-                  style: TextStyle(
-                    color: _matchCount == 0 ? cs.error : cs.onSurfaceVariant,
-                    fontSize: 12,
-                  )),
-            _toggle(
-                'Aa',
-                'Match case',
-                _caseSensitive,
-                () => setState(() {
-                      _caseSensitive = !_caseSensitive;
-                      _recompute();
-                    })),
-            _toggle(
-                'W',
-                'Whole word',
-                _wholeWord,
-                () => setState(() {
-                      _wholeWord = !_wholeWord;
-                      _recompute();
-                    })),
-            IconButton(
-              tooltip: 'Previous (Shift+Enter)',
-              visualDensity: VisualDensity.compact,
-              iconSize: 20,
-              onPressed: _matchCount == 0 ? null : _prev,
-              icon: const Icon(Icons.keyboard_arrow_up_rounded),
-            ),
-            IconButton(
-              tooltip: 'Next (Enter)',
-              visualDensity: VisualDensity.compact,
-              iconSize: 20,
-              onPressed: _matchCount == 0 ? null : _next,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded),
-            ),
-            IconButton(
-              tooltip: 'Close (Esc)',
-              visualDensity: VisualDensity.compact,
-              iconSize: 20,
-              onPressed: widget.find.hide,
-              icon: const Icon(Icons.close_rounded),
-            ),
-          ],
+              const SizedBox(width: 4),
+              if (has)
+                Text(label,
+                    style: TextStyle(
+                      color: _matchCount == 0 ? cs.error : cs.onSurfaceVariant,
+                      fontSize: 12,
+                    )),
+              _toggle(
+                  'Aa',
+                  'Match case',
+                  _caseSensitive,
+                  () => setState(() {
+                        _caseSensitive = !_caseSensitive;
+                        _recompute();
+                      })),
+              _toggle(
+                  'W',
+                  'Whole word',
+                  _wholeWord,
+                  () => setState(() {
+                        _wholeWord = !_wholeWord;
+                        _recompute();
+                      })),
+              IconButton(
+                tooltip: 'Previous (Shift+Enter)',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: _matchCount == 0 ? null : _prev,
+                icon: const Icon(Icons.keyboard_arrow_up_rounded),
+              ),
+              IconButton(
+                tooltip: 'Next (Enter)',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: _matchCount == 0 ? null : _next,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+              ),
+              IconButton(
+                tooltip: 'Close (Esc)',
+                visualDensity: VisualDensity.compact,
+                iconSize: 20,
+                onPressed: widget.find.hide,
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
         ),
       ),
     );

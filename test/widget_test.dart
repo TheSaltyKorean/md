@@ -952,6 +952,29 @@ void main() {
     expect(find.byType(TextField), findsNothing);
   });
 
+  testWidgets('Preview find excludes matches inside code fences',
+      (tester) async {
+    final fc = FindController();
+    addTearDown(fc.dispose);
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: PreviewFindView(
+          // 'Widget' appears once in prose and once in a fenced code block;
+          // the code fence isn't highlighted, so it must not be counted.
+          markdown: 'A real Widget here.\n\n```\nWidget in code\n```\n',
+          find: fc,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    fc.openFind();
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'widget');
+    await tester.pumpAndSettle();
+    // Only the prose occurrence counts (no phantom code-fence match).
+    expect(find.text('1/1'), findsOneWidget);
+  });
+
   testWidgets('Code blocks show a copy button that copies the block',
       (tester) async {
     final calls = <MethodCall>[];
