@@ -71,8 +71,16 @@ class PrintPreviewTab extends WorkspaceTab {
 /// and the global auto-reload setting. Each document tab is its own
 /// [DocumentController].
 class WorkspaceController extends ChangeNotifier {
-  WorkspaceController(this._prefs, {SessionStore? sessionStore})
-      : _sessionStore = sessionStore {
+  /// [autoPersist] controls the automatic (debounced) session save and hot
+  /// exit. A file-args launch (double-click a `.md`) passes a store with
+  /// [autoPersist] `false`: normal editing must NOT overwrite the saved
+  /// session, but the store is still there so [persistSessionForRelaunch] can
+  /// snapshot the current tabs before an update relaunch (otherwise the
+  /// arg-less relaunch would restore a stale, unrelated session).
+  WorkspaceController(this._prefs,
+      {SessionStore? sessionStore, bool autoPersist = true})
+      : _sessionStore = sessionStore,
+        _autoPersist = autoPersist {
     _autoReload = _prefs.getBool(_autoReloadKey) ?? true;
     final tx = _prefs.getDouble(_toolbarXKey);
     final ty = _prefs.getDouble(_toolbarYKey);
@@ -81,7 +89,9 @@ class WorkspaceController extends ChangeNotifier {
     _activeIndex = 0;
     // Persist the session (debounced) whenever tabs, the active tab, or any
     // open document changes, so a restart/update reopens where we left off.
-    if (_sessionStore != null) addListener(_scheduleSessionSave);
+    if (_sessionStore != null && _autoPersist) {
+      addListener(_scheduleSessionSave);
+    }
   }
 
   static const _autoReloadKey = 'auto_reload';
@@ -94,14 +104,28 @@ class WorkspaceController extends ChangeNotifier {
   /// Where the open-tabs session is stored (null disables session
   /// persistence — e.g. in torn-off windows or tests that don't exercise it).
   final SessionStore? _sessionStore;
+
+  /// Whether the automatic debounced save + hot exit are active. False on a
+  /// file-args launch, whose store exists only for [persistSessionForRelaunch].
+  final bool _autoPersist;
   Timer? _sessionTimer;
   bool _sessionAbandoned = false;
 
   /// Whether this workspace persists/restores its session. When false (a
-  /// torn-off window, or a launch where [restoreSession] abandoned to a
-  /// pre-opened document), closing with unsaved work still needs a discard
-  /// prompt — hot exit only applies when the session is actually saved.
-  bool get sessionEnabled => _sessionStore != null && !_sessionAbandoned;
+  /// torn-off window, a file-args launch, or a launch where [restoreSession]
+  /// abandoned to a pre-opened document), closing with unsaved work still needs
+  /// a discard prompt — hot exit only applies when the session is actually
+  /// saved automatically.
+  bool get sessionEnabled =>
+      _sessionStore != null && _autoPersist && !_sessionAbandoned;
+
+  /// Whether an update's relaunch can bring this window's tabs back. True when
+  /// a session store exists — a plain launch (auto-session) OR a file-args
+  /// launch (auto-session off, but [persistSessionForRelaunch] snapshots the
+  /// tabs just before the relaunch). False only for a torn-off window (no
+  /// store), which would relaunch onto the main saved session instead. Drives
+  /// the update dialog copy and whether unsaved work must be confirmed first.
+  bool get willRestoreOnRelaunch => _sessionStore != null;
 
   /// Stop this run from persisting the session. Used when [restoreSession]
   /// finds a document was already opened (an instance-forwarded path, or a
@@ -405,6 +429,29 @@ class WorkspaceController extends ChangeNotifier {
     await _track(() async {
       try {
         await _sessionStore!.write(json);
+      } catch (_) {
+        ok = false;
+      }
+    });
+    return ok;
+  }
+
+  /// Snapshot the CURRENT tabs to the session store unconditionally — ignoring
+  /// the [sessionEnabled] gate — so an update's arg-less silent relaunch
+  /// restores exactly what's open now. Without this, a file-args launch (whose
+  /// auto-session is off) would relaunch onto the last *plain*-launch session:
+  /// an unrelated file. Returns false when there is no store to write to (a
+  /// torn-off window, or a test/window with session fully disabled), so the
+  /// caller can fall back to its normal exit prep.
+  Future<bool> persistSessionForRelaunch() async {
+    final store = _sessionStore;
+    if (store == null) return false;
+    _sessionTimer?.cancel();
+    final json = jsonEncode(sessionSnapshot());
+    var ok = true;
+    await _track(() async {
+      try {
+        await store.write(json);
       } catch (_) {
         ok = false;
       }

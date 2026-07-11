@@ -1571,6 +1571,67 @@ void main() {
     ws.dispose();
   });
 
+  test('Update relaunch restores the file-args window, not a stale session',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final tmp = Directory.systemTemp.createTempSync('mdsessrelaunch');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    // A stale session left by a previous plain launch (an unrelated file).
+    final old = File('${tmp.path}/old.md')..writeAsStringSync('# Old');
+    final store = _FakeSessionStore()
+      ..data = jsonEncode({
+        'version': 1,
+        'active': 0,
+        'docs': [
+          {
+            'path': old.path,
+            'content': '# Old',
+            'dirty': false,
+            'mode': 'preview',
+          },
+        ],
+      });
+    final stale = store.data;
+
+    // This run was launched by double-clicking current.md: it gets a store but
+    // auto-persist OFF, so ordinary editing can't clobber the saved session.
+    final current = File('${tmp.path}/current.md')
+      ..writeAsStringSync('# Current');
+    final ws =
+        WorkspaceController(prefs, sessionStore: store, autoPersist: false);
+    ws.openDocument('# Current', path: current.path);
+    expect(ws.sessionEnabled, isFalse); // no auto-save this run…
+    expect(ws.willRestoreOnRelaunch, isTrue); // …but it CAN persist for update
+
+    // A normal flush (e.g. window close) must NOT overwrite the saved session.
+    await ws.flushSession();
+    expect(store.data, stale);
+
+    // Triggering an in-app update snapshots the CURRENT tabs for the relaunch.
+    expect(await ws.persistSessionForRelaunch(), isTrue);
+    expect(store.data, isNot(stale));
+    ws.dispose();
+
+    // The arg-less relaunch (plain launch) restores current.md — not old.md.
+    final ws2 = WorkspaceController(prefs, sessionStore: store);
+    await ws2.restoreSession();
+    expect(ws2.documents.length, 1);
+    expect(ws2.documents.single.filePath, current.path);
+    expect(ws2.documents.single.currentMarkdown(), '# Current');
+    ws2.dispose();
+  });
+
+  test('A torn-off window (no store) cannot persist for a relaunch', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final ws = WorkspaceController(prefs); // no session store
+    expect(ws.willRestoreOnRelaunch, isFalse);
+    // Nothing to write to — the caller falls back to its discard prompt.
+    expect(await ws.persistSessionForRelaunch(), isFalse);
+    ws.dispose();
+  });
+
   test('FileSessionStore round-trips through the real filesystem', () async {
     final dir = Directory.systemTemp.createTempSync('mdfss');
     addTearDown(() => dir.deleteSync(recursive: true));

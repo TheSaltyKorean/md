@@ -53,8 +53,16 @@ Future<void> main(List<String> args) async {
   // restores everything. (Mobile has no argv, so mobile is always plain.)
   final isTornOffWindow = forceNewWindow || handoffPath != null;
   final plainLaunch = !isTornOffWindow && fileArgs.isEmpty;
-  final workspace = WorkspaceController(prefs,
-      sessionStore: plainLaunch ? FileSessionStore() : null);
+  // A plain launch owns the auto-session (restore + debounced save). A file-args
+  // launch still gets a store — but with auto-persist OFF, so normal editing
+  // doesn't clobber the saved session — purely so an in-app update can snapshot
+  // the open file for the relaunch (persistSessionForRelaunch), instead of the
+  // relaunch restoring an unrelated old session. Torn-off windows get no store.
+  final workspace = WorkspaceController(
+    prefs,
+    sessionStore: isTornOffWindow ? null : FileSessionStore(),
+    autoPersist: plainLaunch,
+  );
 
   if (single.isSupported) {
     try {

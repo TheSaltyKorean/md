@@ -1143,17 +1143,16 @@ class _EditorScreenState extends State<EditorScreen>
                   'Your install type updates from the download page — the '
                       'right installer is one click there.',
               } +
-              // Only a plain (session-backed) window is restored across the
-              // relaunch. A window opened directly from a file has no session,
-              // so promising hot-restore here would be false — it reopens to
-              // the previously saved session instead, so tell the user to save
-              // first.
-              (ws.sessionEnabled
+              // Both a plain launch and a file-args launch restore across the
+              // relaunch (the latter is snapshotted just before it). Only a
+              // torn-off window has no session to come back to — it reopens to
+              // the main saved session, so tell the user to save first.
+              (ws.willRestoreOnRelaunch
                   ? ' Your open tabs and unsaved changes are restored when you '
                       'reopen.'
-                  : ' This window was opened directly from a file, so after the '
-                      'update it reopens to your previously saved session — '
-                      'save any unsaved changes here first.'),
+                  : ' This is a separate window, so after the update it reopens '
+                      'to your main saved session — save any unsaved changes '
+                      'here first.'),
         ),
         actions: [
           TextButton(
@@ -1179,11 +1178,13 @@ class _EditorScreenState extends State<EditorScreen>
       return;
     }
 
-    // The Windows install path exits the app, so persist the session first
-    // (it's restored on the auto-relaunch). _prepareExit hot-exits when the
-    // session saves and only prompts if it can't — same as a window close.
+    // The Windows install path exits and auto-relaunches. A restorable window
+    // (plain or file-args) loses nothing — its tabs are snapshotted right
+    // before the relaunch — so it needs no early prompt. Only a torn-off window
+    // can't be restored, so confirm any unsaved work will be discarded before
+    // we spend time downloading.
     final exitsForInstall = kind == InstallKind.msi || kind == InstallKind.inno;
-    if (exitsForInstall) {
+    if (exitsForInstall && !ws.willRestoreOnRelaunch) {
       if (!await _prepareExit() || !mounted) return;
     }
 
@@ -1245,26 +1246,32 @@ class _EditorScreenState extends State<EditorScreen>
       if (cancelled) return;
       closeProgress();
       if (exitsForInstall) {
-        // Spawn first, release second: the wscript launcher only WAITS for
-        // this process id, so starting it before teardown is safe — and if
-        // the spawn throws, nothing has been released yet and the editor
-        // stays fully functional (socket, watchers) for the error path.
-        // Re-run the exit prep now that the download is done: the app stayed
-        // alive through it, during which a file watcher could have
-        // auto-reloaded a clean tab or surfaced a new conflict. _prepareExit
-        // ran BEFORE the download, so re-flush to capture those — and if that
-        // write now fails (e.g. the installer filled the disk), _prepareExit
-        // falls back to the discard prompt and we abort rather than relaunch
-        // onto a stale session.
-        if (!await _prepareExit() || !mounted) return;
-        // Once the installer is running, release resources and exit; the
-        // launcher only WAITS for this pid, so starting it before teardown is
-        // safe, and it starts the install only after the pid vanishes — file
-        // replacement can never race shutdown.
+        // Snapshot the CURRENT tabs now that the download is done — the app
+        // stayed alive through it, during which a watcher could have
+        // auto-reloaded a clean tab or surfaced a conflict, so capture the
+        // latest state. This writes even on a file-args launch (auto-session
+        // off), so the arg-less relaunch restores exactly what's open instead
+        // of a stale, unrelated session. A torn-off window (no store) can't be
+        // restored, so fall back to the discard confirmation there.
+        if (ws.willRestoreOnRelaunch) {
+          await ws.persistSessionForRelaunch();
+        } else if (!await _prepareExit() || !mounted) {
+          return;
+        }
+        if (!mounted) return;
+        // Spawn first, release second: the wscript launcher only WAITS for this
+        // process id, so starting it before teardown is safe, and it starts the
+        // install only after the pid vanishes — file replacement can never race
+        // shutdown. If the spawn throws, nothing has been released yet and the
+        // editor stays fully functional (socket, watchers) for the error path.
         await updates.launchInstaller(path, kind);
         await _releaseResources();
         exit(0);
       } else {
+        // The .deb path keeps running (the new version is used next launch), so
+        // snapshot the open tabs too — a file-args launch would otherwise
+        // reopen to a stale session next time.
+        await ws.persistSessionForRelaunch();
         await updates.launchInstaller(path, kind);
         messenger.showSnackBar(SnackBar(
             content: Text('Installer opened — ${info.version} takes over '
