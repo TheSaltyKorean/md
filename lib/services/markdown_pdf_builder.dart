@@ -1347,10 +1347,26 @@ class MarkdownPdfBuilder {
     );
   }
 
-  /// Matches the start of an inline-HTML tag in a cell's raw text (a fill-in
-  /// span/div, `<u>`, etc.). Such cells carry their own rendered widths, so the
-  /// table keeps intrinsic sizing rather than the plain-text flex weighting.
-  static final RegExp _htmlTag = RegExp(r'<[a-zA-Z/]');
+  /// Matches an actual inline-HTML tag in a cell's raw text (a fill-in
+  /// span/div, `<u>`, `</span>`, …) — a `<`, optional `/`, a letter, then
+  /// content up to a closing `>`. Requiring the full `<…>` shape keeps plain
+  /// comparisons like `x<y` from being mistaken for HTML (which would drop the
+  /// whole table back to intrinsic sizing and reintroduce the label collapse).
+  static final RegExp _htmlTag = RegExp(r'<\/?[a-zA-Z][^<>]*>');
+
+  /// Whether any node in [nodes], at any depth, is an image or inline-code
+  /// element. Inline code can nest under emphasis or a link (e.g. `**`code`**`
+  /// is strong > code), so a shallow child-only check would miss it and wrongly
+  /// treat the table as plain text.
+  static bool _hasImageOrCode(Iterable<md.Node> nodes) {
+    for (final n in nodes) {
+      if (n is md.Element) {
+        if (n.tag == 'img' || n.tag == 'code') return true;
+        if (_hasImageOrCode(n.children ?? const <md.Node>[])) return true;
+      }
+    }
+    return false;
+  }
 
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
@@ -1442,12 +1458,10 @@ class MarkdownPdfBuilder {
           final len = cell.textContent.trim().length;
           colMaxLen.update(colIdx, (v) => v > len ? v : len,
               ifAbsent: () => len);
-          // Any image / inline code (md elements) or inline HTML (raw text)
-          // makes the whole table keep intrinsic sizing (see [isComplex]).
+          // Any image / inline code (md elements, at any depth) or inline HTML
+          // (raw text) makes the whole table keep intrinsic sizing.
           if (!isComplex &&
-              (children
-                      .whereType<md.Element>()
-                      .any((e) => e.tag == 'img' || e.tag == 'code') ||
+              (_hasImageOrCode(children) ||
                   _htmlTag.hasMatch(cell.textContent))) {
             isComplex = true;
           }
