@@ -201,7 +201,7 @@ String _blockToMarkdown(md.Node node) {
   final kids = node.children ?? const [];
   switch (tag) {
     case 'p':
-      return '${_inlineToMarkdown(kids)}\n\n';
+      return '${_escapeBlockStart(_inlineToMarkdown(kids))}\n\n';
     case 'h1':
     case 'h2':
     case 'h3':
@@ -220,9 +220,11 @@ String _blockToMarkdown(md.Node node) {
     case 'ol':
       return '${_listToMarkdown(node, ordered: true)}\n';
     case 'pre':
-      // <pre><code>…</code></pre>
+      // <pre><code>…</code></pre>. Use a fence longer than any backtick run in
+      // the code so a block that itself shows ``` doesn't close early.
       final code = kids.isNotEmpty ? _renderedText(kids.first) : '';
-      return '```\n${code.trimRight()}\n```\n\n';
+      final fence = _backtickFence(code);
+      return '$fence\n${code.trimRight()}\n$fence\n\n';
     case 'hr':
       return '---\n\n';
     default:
@@ -252,10 +254,77 @@ String _listToMarkdown(md.Element list, {required bool ordered}) {
 }
 
 String _listItemContent(List<md.Node> kids) {
-  // Loose list items wrap text in <p>; tight ones hold inline nodes directly.
-  final hasBlocks = kids.any((n) => n is md.Element && _isBlock(n.tag));
-  if (!hasBlocks) return _inlineToMarkdown(kids);
-  return _toMarkdown(kids).trimRight();
+  // Loose list items wrap text in <p>; tight ones hold inline nodes directly,
+  // possibly followed by a nested list. Separate the leading inline run from
+  // block children with a newline so a nested list doesn't fuse onto the item's
+  // text (which _listToMarkdown then indents as continuation lines).
+  final inlineLead = <md.Node>[];
+  final blocks = <md.Node>[];
+  var seenBlock = false;
+  for (final n in kids) {
+    if (!seenBlock && !(n is md.Element && _isBlock(n.tag))) {
+      inlineLead.add(n);
+    } else {
+      seenBlock = true;
+      blocks.add(n);
+    }
+  }
+  final buf = StringBuffer();
+  if (inlineLead.isNotEmpty) buf.write(_inlineToMarkdown(inlineLead));
+  for (final b in blocks) {
+    if (buf.isNotEmpty) buf.write('\n');
+    buf.write(_blockToMarkdown(b).trimRight());
+  }
+  return buf.toString();
+}
+
+/// A fence of backticks longer than any run inside [code] (min 3), so a fenced
+/// code block containing ``` doesn't terminate early.
+String _backtickFence(String code) {
+  var maxRun = 0;
+  for (final m in RegExp('`+').allMatches(code)) {
+    maxRun = math.max(maxRun, m.group(0)!.length);
+  }
+  return '`' * math.max(3, maxRun + 1);
+}
+
+/// Wrap inline [code] in a backtick run longer than any inside it, padding with
+/// a space when it starts/ends with a backtick (CommonMark inline-code rules).
+String _inlineCode(String code) {
+  var maxRun = 0;
+  for (final m in RegExp('`+').allMatches(code)) {
+    maxRun = math.max(maxRun, m.group(0)!.length);
+  }
+  final delim = '`' * (maxRun + 1);
+  final pad = (code.startsWith('`') || code.endsWith('`')) ? ' ' : '';
+  return '$delim$pad$code$pad$delim';
+}
+
+/// Angle-bracket a link destination that contains whitespace or parentheses so
+/// it parses as a single destination; escape any `<`/`>`/`\` inside.
+String _linkDestination(String href) {
+  if (!RegExp(r'[\s()<>]').hasMatch(href)) return href;
+  final escaped = href
+      .replaceAll(r'\', r'\\')
+      .replaceAll('<', r'\<')
+      .replaceAll('>', r'\>');
+  return '<$escaped>';
+}
+
+/// Escape a leading block marker (`#`, `>`, `-`/`+` bullet, `N.`/`N)` ordered)
+/// so a literal paragraph doesn't re-parse as a heading/quote/list.
+String _escapeBlockStart(String s) {
+  if (s.isEmpty) return s;
+  final ol = RegExp(r'^(\d+)([.)])(\s|$)').firstMatch(s);
+  if (ol != null) {
+    return '${ol.group(1)}\\${ol.group(2)}${s.substring(ol.end - ol.group(3)!.length)}';
+  }
+  if (RegExp(r'^#{1,6}(\s|$)').hasMatch(s) ||
+      s.startsWith('>') ||
+      RegExp(r'^[-+]\s').hasMatch(s)) {
+    return '\\$s';
+  }
+  return s;
 }
 
 bool _isBlock(String tag) =>
@@ -283,18 +352,18 @@ String _inlineToMarkdown(List<md.Node> nodes) {
         case 'del':
           out.write('~~${_inlineToMarkdown(kids)}~~');
         case 'code':
-          out.write('`${_renderedText(n)}`');
+          out.write(_inlineCode(_renderedText(n)));
         case 'a':
-          final href = n.attributes['href'] ?? '';
+          final href = _linkDestination(n.attributes['href'] ?? '');
           out.write('[${_inlineToMarkdown(kids)}]($href)');
         case 'img':
-          final src = n.attributes['src'] ?? '';
+          final src = _linkDestination(n.attributes['src'] ?? '');
           final alt = n.attributes['alt'] ?? '';
           out.write('![$alt]($src)');
         case 'u':
           out.write('<u>${_inlineToMarkdown(kids)}</u>'); // toolbar underline
         case 'br':
-          out.write('\n');
+          out.write('  \n'); // two trailing spaces => a hard break survives
         case 'input':
           // GFM task-list checkbox: keep the checked/unchecked state. Checked
           // items are marked by the attribute's PRESENCE (matching the PDF

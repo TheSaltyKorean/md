@@ -1909,6 +1909,44 @@ void main() {
     expect(f.markdown, contains('[ ]'));
   });
 
+  test('Preview copy: escapes a leading block marker', () {
+    // Source \# renders literally; the copy must not re-parse as a heading.
+    final f = previewSelectionFormats(r'\# Not a heading', '# Not a heading')!;
+    expect(f.markdown, contains(r'\#'));
+    final list = previewSelectionFormats(r'\- not a list', '- not a list')!;
+    expect(list.markdown, contains(r'\-'));
+  });
+
+  test('Preview copy: keeps a nested list nested', () {
+    final f = previewSelectionFormats('- Parent\n  - Child', 'Parent Child')!;
+    expect(f.markdown, contains('- Parent'));
+    expect(f.markdown, contains('- Child'));
+    expect(f.markdown, isNot(contains('Parent- Child')));
+  });
+
+  test('Preview copy: fences a code block that contains backticks', () {
+    final f =
+        previewSelectionFormats('````\nsome ``` code\n````', 'some ``` code')!;
+    expect(f.markdown, contains('````')); // longer fence than the inner ```
+  });
+
+  test('Preview copy: widens inline-code delimiters around a backtick', () {
+    final f = previewSelectionFormats('x ``a`b`` y', 'a`b')!;
+    expect(f.markdown, contains('``a`b``'));
+  });
+
+  test('Preview copy: angle-brackets a link target with parentheses', () {
+    // A parenthesis in the destination would close the link early unbracketed.
+    final f = previewSelectionFormats('[label](a(b)c)', 'label')!;
+    expect(f.markdown, contains('<a(b)c>'));
+  });
+
+  test('Preview copy: preserves a hard line break', () {
+    final f = previewSelectionFormats('foo  \nbar', 'foo bar')!;
+    expect(
+        f.markdown, contains('  \n')); // two-space hard break, not a soft one
+  });
+
   testWidgets('Preview overrides selection copy with a rich-copy action',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(
