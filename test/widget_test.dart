@@ -1873,6 +1873,42 @@ void main() {
     expect(previewSelectionFormats('some text', '   '), isNull);
   });
 
+  test('Preview copy: an ambiguous (duplicated) selection falls back', () {
+    // "same" appears twice with different formatting — can't disambiguate.
+    expect(previewSelectionFormats('same\n\n**same**', 'same'), isNull);
+  });
+
+  test('Preview copy: keeps underline (<u>) markup', () {
+    final f = previewSelectionFormats('See <u>Important</u>', 'Important')!;
+    expect(f.markdown, contains('<u>Important</u>'));
+    expect(f.html, contains('<u>'));
+  });
+
+  test('Preview copy: slices correctly after a hard line break', () {
+    // Two trailing spaces => a hard break (<br>); selecting "bar" must not
+    // slice one char early.
+    final f = previewSelectionFormats('foo  \nbar', 'bar')!;
+    expect(f.markdown.trim(), 'bar');
+  });
+
+  test('Preview copy: escapes literal Markdown so it stays literal', () {
+    // Source shows literal asterisks; the copied Markdown must keep them literal.
+    final f = previewSelectionFormats(r'\*not italic\*', '*not italic*')!;
+    expect(f.markdown, contains(r'\*'));
+    expect(f.markdown, isNot(contains('**')));
+  });
+
+  test('Preview copy: keeps an ordered list start value', () {
+    final f = previewSelectionFormats('5. Continue\n6. More', 'Continue')!;
+    expect(f.markdown, contains('5. Continue'));
+  });
+
+  test('Preview copy: keeps task-list checkbox state', () {
+    final f = previewSelectionFormats('- [x] done\n- [ ] todo', 'done')!;
+    expect(f.markdown, contains('[x]'));
+    expect(f.markdown, contains('[ ]'));
+  });
+
   testWidgets('Preview overrides selection copy with a rich-copy action',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

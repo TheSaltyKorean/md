@@ -33,6 +33,10 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
 
   final doc = md.Document(
     extensionSet: md.ExtensionSet.gitHubFlavored,
+    // Parse the toolbar's underline markup like PreviewView does, so a
+    // selection inside <u>…</u> maps to a real element (not raw tag text) and
+    // keeps its underline in the copy.
+    inlineSyntaxes: [_UnderlineSyntax()],
     encodeHtml: false,
   );
   final blocks = doc.parseLines(const LineSplitter().convert(source));
@@ -76,6 +80,9 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
   final stream = collapsed.toString();
   final at = stream.indexOf(needle);
   if (at < 0) return null;
+  // Ambiguous: the same text appears elsewhere, so we can't know which range
+  // (and its formatting) the user meant — fall back to plain text.
+  if (stream.indexOf(needle, at + 1) >= 0) return null;
   final end = at + needle.length - 1; // inclusive last matched char
 
   final firstBlock = blockOf[at];
@@ -159,7 +166,12 @@ List<md.Node> _trimInline(List<md.Node> nodes, int lo, int hi, _Counter c) {
     } else if (n is md.Element) {
       final children = n.children;
       if (children == null) {
-        if (c.pos >= lo && c.pos < hi) out.add(n);
+        // A leaf element (e.g. <br>, <img>) still occupies its rendered width,
+        // so advance the counter by that width or later text slices one char
+        // early. Include it when its position falls in range.
+        final start = c.pos;
+        c.pos += _renderedText(n).length;
+        if (start >= lo && start < hi) out.add(n);
         continue;
       }
       final kept = _trimInline(children, lo, hi, c);
@@ -222,7 +234,9 @@ String _blockToMarkdown(md.Node node) {
 
 String _listToMarkdown(md.Element list, {required bool ordered}) {
   final out = StringBuffer();
-  var i = 1;
+  // An ordered list can start at a value other than 1 (the parser records it in
+  // the `start` attribute) — keep the visible numbering.
+  var i = ordered ? (int.tryParse(list.attributes['start'] ?? '') ?? 1) : 1;
   for (final item in list.children ?? const []) {
     if (item is! md.Element || item.tag != 'li') continue;
     final marker = ordered ? '${i++}. ' : '- ';
@@ -256,7 +270,9 @@ String _inlineToMarkdown(List<md.Node> nodes) {
   final out = StringBuffer();
   for (final n in nodes) {
     if (n is md.Text) {
-      out.write(n.text);
+      // Escape source that shows literally (e.g. \*not italic\*) so it doesn't
+      // re-parse as formatting when pasted into another Markdown editor.
+      out.write(_escapeMarkdown(n.text));
     } else if (n is md.Element) {
       final kids = n.children ?? const [];
       switch (n.tag) {
@@ -275,15 +291,29 @@ String _inlineToMarkdown(List<md.Node> nodes) {
           final src = n.attributes['src'] ?? '';
           final alt = n.attributes['alt'] ?? '';
           out.write('![$alt]($src)');
+        case 'u':
+          out.write('<u>${_inlineToMarkdown(kids)}</u>'); // toolbar underline
         case 'br':
           out.write('\n');
+        case 'input':
+          // GFM task-list checkbox: keep the checked/unchecked state. Checked
+          // items are marked by the attribute's PRESENCE (matching the PDF
+          // path); its value isn't guaranteed to be 'true'.
+          final checked = n.attributes.containsKey('checked') &&
+              n.attributes['checked'] != 'false';
+          out.write(checked ? '[x] ' : '[ ] ');
         default:
-          out.write(_inlineToMarkdown(kids)); // u, sub, sup, … → text
+          out.write(_inlineToMarkdown(kids)); // sub, sup, … → text
       }
     }
   }
   return out.toString();
 }
+
+/// Escape the inline Markdown metacharacters in literal text so pasted Markdown
+/// renders the same characters rather than re-interpreting them as syntax.
+String _escapeMarkdown(String text) =>
+    text.replaceAllMapped(RegExp(r'[\\`*_\[\]<>~]'), (m) => '\\${m[0]}');
 
 /// Collapse all whitespace runs to a single space and trim — the form used to
 /// locate the selection in the rendered stream (robust to how the renderer and
@@ -309,4 +339,16 @@ bool _isSpace(String ch) => ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
 
 class _Counter {
   int pos = 0;
+}
+
+/// Parses the app's `<u>…</u>` underline markup into a `u` element, matching
+/// PreviewView so a copied selection keeps its underline.
+class _UnderlineSyntax extends md.InlineSyntax {
+  _UnderlineSyntax() : super(r'<u>([\s\S]*?)</u>');
+
+  @override
+  bool onMatch(md.InlineParser parser, Match match) {
+    parser.addNode(md.Element.text('u', match[1] ?? ''));
+    return true;
+  }
 }
