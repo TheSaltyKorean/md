@@ -2015,6 +2015,26 @@ void main() {
     expect(f.markdown, contains(r'\&'));
   });
 
+  test('Preview copy: escapes a block marker inside a list item', () {
+    final f =
+        previewSelectionFormats(r'- \# not a heading', '# not a heading')!;
+    expect(f.markdown, contains(r'\# not a heading'));
+  });
+
+  test('Preview copy: does not escape Markdown inside <u>', () {
+    // The <u> syntax keeps its contents literal, so no backslash should appear.
+    final f = previewSelectionFormats('<u>*</u>', '*')!;
+    expect(f.markdown, contains('<u>*</u>'));
+    expect(f.markdown, isNot(contains(r'\*')));
+  });
+
+  test('Preview copy: falls back when marker text is genuinely ambiguous', () {
+    // A literal "1. Install" paragraph AND an ordered-list item "Install":
+    // selecting the list row as "1. Install" can't be resolved unambiguously.
+    expect(previewSelectionFormats('1\\. Install\n\n1. Install', '1. Install'),
+        isNull);
+  });
+
   testWidgets('Preview overrides selection copy with a rich-copy action',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

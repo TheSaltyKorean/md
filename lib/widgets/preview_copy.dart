@@ -81,18 +81,34 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
   }
 
   final stream = collapsed.toString();
-  // Try the selection as-is first; only if that doesn't uniquely match do we
-  // retry with rendered list markers stripped. This way a literal paragraph
-  // like "1. Install" maps to its own text, while a real list line selected
-  // with its bullet ("• one") still maps by falling back to the stripped form.
-  var at = _uniqueIndexOf(stream, rawNeedle);
-  var needle = rawNeedle;
-  if (at == null) {
-    final stripped = _collapse(_stripListMarkers(selectedText));
-    if (stripped.isEmpty || stripped == rawNeedle) return null;
-    at = _uniqueIndexOf(stream, stripped);
-    if (at == null) return null;
-    needle = stripped;
+  // The selection could be literal (as-is, e.g. a paragraph "1. Install") or a
+  // list row selected with its rendered marker (marker-less "Install"). Prefer
+  // the as-is match; only fall back to the stripped form when the raw form
+  // doesn't match at all.
+  final rawAt = _uniqueIndexOf(stream, rawNeedle);
+  final strippedNeedle = _collapse(_stripListMarkers(selectedText));
+  final int at;
+  final String needle;
+  if (rawAt != null) {
+    // If the marker-less form of the selection ALSO appears in a different
+    // block, the marker text is genuinely ambiguous (literal vs a real list
+    // row) — fall back to plain text rather than pick the wrong range.
+    if (strippedNeedle.isNotEmpty && strippedNeedle != rawNeedle) {
+      final rawBlock = blockOf[rawAt];
+      for (var i = stream.indexOf(strippedNeedle);
+          i >= 0;
+          i = stream.indexOf(strippedNeedle, i + 1)) {
+        if (blockOf[i] != rawBlock) return null;
+      }
+    }
+    at = rawAt;
+    needle = rawNeedle;
+  } else {
+    if (strippedNeedle.isEmpty || strippedNeedle == rawNeedle) return null;
+    final strippedAt = _uniqueIndexOf(stream, strippedNeedle);
+    if (strippedAt == null) return null;
+    at = strippedAt;
+    needle = strippedNeedle;
   }
   final end = at + needle.length - 1; // inclusive last matched char
 
@@ -284,7 +300,12 @@ String _listItemContent(List<md.Node> kids) {
     }
   }
   final buf = StringBuffer();
-  if (inlineLead.isNotEmpty) buf.write(_inlineToMarkdown(inlineLead));
+  // Escape a block marker at the start of the item's text (e.g. a literal
+  // "# not a heading") so it doesn't re-parse as a heading/nested list after
+  // the item's own marker.
+  if (inlineLead.isNotEmpty) {
+    buf.write(_escapeBlockStart(_inlineToMarkdown(inlineLead)));
+  }
   for (final b in blocks) {
     if (buf.isNotEmpty) {
       // A nested list follows directly; a loose paragraph needs a blank line so
@@ -408,7 +429,9 @@ String _inlineToMarkdown(List<md.Node> nodes) {
           final alt = _escapeMarkdown(n.attributes['alt'] ?? '');
           out.write('![$alt]($src)');
         case 'u':
-          out.write('<u>${_inlineToMarkdown(kids)}</u>'); // toolbar underline
+          // The <u> syntax captures its contents as LITERAL text, so emit the
+          // raw text (no Markdown escaping) — escapes would paste back verbatim.
+          out.write('<u>${_renderedText(n)}</u>'); // toolbar underline
         case 'br':
           out.write('  \n'); // two trailing spaces => a hard break survives
         case 'input':
