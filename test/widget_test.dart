@@ -1947,6 +1947,43 @@ void main() {
         f.markdown, contains('  \n')); // two-space hard break, not a soft one
   });
 
+  test('Preview copy: maps a list line selected with its bullet', () {
+    // SelectionArea includes the rendered "•"/number; the matcher must ignore it.
+    final f = previewSelectionFormats('- one\n- two', '• one\n• two')!;
+    expect(f.markdown, contains('- one'));
+    expect(f.markdown, contains('- two'));
+    final o = previewSelectionFormats('1. one\n2. two', '1. one\n2. two')!;
+    expect(o.markdown, contains('1. one'));
+    expect(o.markdown, contains('2. two'));
+  });
+
+  test('Preview copy: indents nested list under a wide ordered marker', () {
+    final f =
+        previewSelectionFormats('10. Parent\n    - Child', 'Parent Child')!;
+    expect(f.markdown, contains('10. Parent'));
+    expect(f.markdown, contains('    - Child')); // 4-space indent under "10. "
+  });
+
+  test('Preview copy: keeps a blank line between loose list paragraphs', () {
+    final f = previewSelectionFormats('- first\n\n  second', 'first second')!;
+    expect(f.markdown, contains('\n\n  second')); // paragraph break preserved
+  });
+
+  test('Preview copy: escapes a leading thematic break', () {
+    final f = previewSelectionFormats(r'\---', '---')!;
+    expect(f.markdown, startsWith(r'\-'));
+  });
+
+  test('Preview copy: keeps significant trailing whitespace in code', () {
+    final f = previewSelectionFormats('```\ncode   \n```', 'code')!;
+    expect(f.markdown, contains('code   ')); // trailing spaces not stripped
+  });
+
+  test('Preview copy: preserves spaces inside an inline code span', () {
+    final f = previewSelectionFormats('pre `mid ` post', 'pre mid  post')!;
+    expect(f.markdown, contains('` mid  `')); // padded so the space survives
+  });
+
   testWidgets('Preview overrides selection copy with a rich-copy action',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(

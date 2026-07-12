@@ -28,7 +28,10 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
 /// caller then copies plain text unchanged.
 ({String markdown, String html})? previewSelectionFormats(
     String source, String selectedText) {
-  final needle = _collapse(selectedText);
+  // The rendered bullets/numbers of a list are part of the selection's plain
+  // text but not the AST child text, so drop them before matching — otherwise
+  // selecting a whole list line (or Select All) wouldn't map.
+  final needle = _collapse(_stripListMarkers(selectedText));
   if (needle.isEmpty) return null;
 
   final doc = md.Document(
@@ -221,10 +224,12 @@ String _blockToMarkdown(md.Node node) {
       return '${_listToMarkdown(node, ordered: true)}\n';
     case 'pre':
       // <pre><code>…</code></pre>. Use a fence longer than any backtick run in
-      // the code so a block that itself shows ``` doesn't close early.
-      final code = kids.isNotEmpty ? _renderedText(kids.first) : '';
+      // the code so a block that itself shows ``` doesn't close early. Strip
+      // only the parser-added final newline — code whitespace is significant.
+      var code = kids.isNotEmpty ? _renderedText(kids.first) : '';
+      if (code.endsWith('\n')) code = code.substring(0, code.length - 1);
       final fence = _backtickFence(code);
-      return '$fence\n${code.trimRight()}\n$fence\n\n';
+      return '$fence\n$code\n$fence\n\n';
     case 'hr':
       return '---\n\n';
     default:
@@ -242,12 +247,13 @@ String _listToMarkdown(md.Element list, {required bool ordered}) {
   for (final item in list.children ?? const []) {
     if (item is! md.Element || item.tag != 'li') continue;
     final marker = ordered ? '${i++}. ' : '- ';
-    // A list item may hold inline text and/or nested blocks.
+    final indent = ' ' * marker.length; // align continuations to the content
     final content = _listItemContent(item.children ?? const []);
     final lines = content.trimRight().split('\n');
     out.writeln('$marker${lines.first}');
     for (final l in lines.skip(1)) {
-      out.writeln('  $l'); // continuation lines indented under the marker
+      // Keep blank lines (loose-list paragraph breaks) truly blank.
+      out.writeln(l.isEmpty ? '' : '$indent$l');
     }
   }
   return out.toString();
@@ -272,7 +278,12 @@ String _listItemContent(List<md.Node> kids) {
   final buf = StringBuffer();
   if (inlineLead.isNotEmpty) buf.write(_inlineToMarkdown(inlineLead));
   for (final b in blocks) {
-    if (buf.isNotEmpty) buf.write('\n');
+    if (buf.isNotEmpty) {
+      // A nested list follows directly; a loose paragraph needs a blank line so
+      // it doesn't collapse into a soft break.
+      final tight = b is md.Element && (b.tag == 'ul' || b.tag == 'ol');
+      buf.write(tight ? '\n' : '\n\n');
+    }
     buf.write(_blockToMarkdown(b).trimRight());
   }
   return buf.toString();
@@ -296,7 +307,15 @@ String _inlineCode(String code) {
     maxRun = math.max(maxRun, m.group(0)!.length);
   }
   final delim = '`' * (maxRun + 1);
-  final pad = (code.startsWith('`') || code.endsWith('`')) ? ' ' : '';
+  // Pad when the code starts/ends with a backtick OR a space: CommonMark strips
+  // one leading+trailing space from a padded span, so the extra space we add is
+  // consumed and the code's own spaces survive.
+  final pad = (code.startsWith('`') ||
+          code.endsWith('`') ||
+          code.startsWith(' ') ||
+          code.endsWith(' '))
+      ? ' '
+      : '';
   return '$delim$pad$code$pad$delim';
 }
 
@@ -319,12 +338,27 @@ String _escapeBlockStart(String s) {
   if (ol != null) {
     return '${ol.group(1)}\\${ol.group(2)}${s.substring(ol.end - ol.group(3)!.length)}';
   }
+  // A thematic break (---, ***, ___, or spaced like `- - -`). *** / ___ already
+  // get their chars escaped inline, so this mainly catches leading `---`.
+  if (RegExp(r'^ {0,3}([-*_])( *\1){2,} *$').hasMatch(s)) {
+    return '\\$s';
+  }
   if (RegExp(r'^#{1,6}(\s|$)').hasMatch(s) ||
       s.startsWith('>') ||
       RegExp(r'^[-+]\s').hasMatch(s)) {
     return '\\$s';
   }
   return s;
+}
+
+/// Remove rendered list markers (bullets and line-start ordered numbers) from a
+/// selection before matching — they're painted chrome, not AST text.
+String _stripListMarkers(String s) {
+  final noBullets = s.replaceAll('•', ' ');
+  // "1. " / "1) " at the start of a line (how the Preview renders ordered
+  // markers); keep the line break so items stay separated.
+  return noBullets.replaceAllMapped(
+      RegExp(r'(^|[\n\r])[ \t]*\d+[.)][ \t]+'), (m) => m.group(1)!);
 }
 
 bool _isBlock(String tag) =>
