@@ -20,7 +20,9 @@ import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, SystemChannels;
 import 'package:flutter/widgets.dart'
     show
+        Actions,
         Axis,
+        CopySelectionTextIntent,
         MediaQuery,
         SingleChildScrollView,
         Size,
@@ -40,6 +42,7 @@ import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/services/session_service.dart';
 import 'package:markdown_studio/widgets/wysiwyg_copy.dart';
+import 'package:markdown_studio/widgets/preview_copy.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
 import 'package:markdown_studio/widgets/find_controller.dart';
@@ -1824,6 +1827,229 @@ void main() {
       end: Position(path: [0], offset: 5), // just "Hello"
     );
     expect(wysiwygSelectionFormats(editorState)!.markdown.trim(), 'Hello');
+  });
+
+  test('Preview copy: partial paragraph keeps inline formatting', () {
+    // Rendered text is "Hello bold world and more"; select "bold world".
+    final f =
+        previewSelectionFormats('Hello **bold** world and more', 'bold world')!;
+    expect(f.html, contains('<strong>bold</strong>'));
+    expect(f.markdown, contains('**bold**'));
+    expect(f.markdown, contains('world'));
+    expect(f.markdown, isNot(contains('Hello'))); // trimmed before
+    expect(f.markdown, isNot(contains('more'))); // trimmed after
+  });
+
+  test('Preview copy: a heading selection stays a heading', () {
+    final f = previewSelectionFormats('# Title here\n\nbody', 'Title here')!;
+    expect(f.markdown.trim(), '# Title here');
+    expect(f.html, contains('<h1>'));
+  });
+
+  test('Preview copy: a list is copied whole with its items', () {
+    const src = '- one\n- two **bold**\n- three';
+    final f = previewSelectionFormats(src, 'two bold')!;
+    // Container blocks are kept whole, preserving list structure + formatting.
+    expect(f.html, contains('<li>'));
+    expect(f.html, contains('<strong>bold</strong>'));
+    expect(f.markdown, contains('two **bold**'));
+  });
+
+  test('Preview copy: selection across paragraphs keeps both', () {
+    const src = 'First para.\n\nSecond **para**.';
+    final f = previewSelectionFormats(src, 'First para. Second para.')!;
+    expect(f.markdown, contains('First para.'));
+    expect(f.markdown, contains('Second **para**'));
+  });
+
+  test('Preview copy: a link keeps its target', () {
+    final f = previewSelectionFormats('see [Docs](https://x.com) now', 'Docs')!;
+    expect(f.markdown, contains('[Docs](https://x.com)'));
+    expect(f.html, contains('href="https://x.com"'));
+  });
+
+  test('Preview copy: returns null when the selection is not found', () {
+    expect(previewSelectionFormats('some text', 'not present here'), isNull);
+    expect(previewSelectionFormats('some text', '   '), isNull);
+  });
+
+  test('Preview copy: an ambiguous (duplicated) selection falls back', () {
+    // "same" appears twice with different formatting — can't disambiguate.
+    expect(previewSelectionFormats('same\n\n**same**', 'same'), isNull);
+  });
+
+  test('Preview copy: keeps underline (<u>) markup', () {
+    final f = previewSelectionFormats('See <u>Important</u>', 'Important')!;
+    expect(f.markdown, contains('<u>Important</u>'));
+    expect(f.html, contains('<u>'));
+  });
+
+  test('Preview copy: slices correctly after a hard line break', () {
+    // Two trailing spaces => a hard break (<br>); selecting "bar" must not
+    // slice one char early.
+    final f = previewSelectionFormats('foo  \nbar', 'bar')!;
+    expect(f.markdown.trim(), 'bar');
+  });
+
+  test('Preview copy: escapes literal Markdown so it stays literal', () {
+    // Source shows literal asterisks; the copied Markdown must keep them literal.
+    final f = previewSelectionFormats(r'\*not italic\*', '*not italic*')!;
+    expect(f.markdown, contains(r'\*'));
+    expect(f.markdown, isNot(contains('**')));
+  });
+
+  test('Preview copy: keeps an ordered list start value', () {
+    final f = previewSelectionFormats('5. Continue\n6. More', 'Continue')!;
+    expect(f.markdown, contains('5. Continue'));
+  });
+
+  test('Preview copy: keeps task-list checkbox state', () {
+    final f = previewSelectionFormats('- [x] done\n- [ ] todo', 'done')!;
+    expect(f.markdown, contains('[x]'));
+    expect(f.markdown, contains('[ ]'));
+  });
+
+  test('Preview copy: escapes a leading block marker', () {
+    // Source \# renders literally; the copy must not re-parse as a heading.
+    final f = previewSelectionFormats(r'\# Not a heading', '# Not a heading')!;
+    expect(f.markdown, contains(r'\#'));
+    final list = previewSelectionFormats(r'\- not a list', '- not a list')!;
+    expect(list.markdown, contains(r'\-'));
+  });
+
+  test('Preview copy: keeps a nested list nested', () {
+    final f = previewSelectionFormats('- Parent\n  - Child', 'Parent Child')!;
+    expect(f.markdown, contains('- Parent'));
+    expect(f.markdown, contains('- Child'));
+    expect(f.markdown, isNot(contains('Parent- Child')));
+  });
+
+  test('Preview copy: fences a code block that contains backticks', () {
+    final f =
+        previewSelectionFormats('````\nsome ``` code\n````', 'some ``` code')!;
+    expect(f.markdown, contains('````')); // longer fence than the inner ```
+  });
+
+  test('Preview copy: widens inline-code delimiters around a backtick', () {
+    final f = previewSelectionFormats('x ``a`b`` y', 'a`b')!;
+    expect(f.markdown, contains('``a`b``'));
+  });
+
+  test('Preview copy: angle-brackets a link target with parentheses', () {
+    // A parenthesis in the destination would close the link early unbracketed.
+    final f = previewSelectionFormats('[label](a(b)c)', 'label')!;
+    expect(f.markdown, contains('<a(b)c>'));
+  });
+
+  test('Preview copy: preserves a hard line break', () {
+    final f = previewSelectionFormats('foo  \nbar', 'foo bar')!;
+    expect(
+        f.markdown, contains('  \n')); // two-space hard break, not a soft one
+  });
+
+  test('Preview copy: maps a list line selected with its bullet', () {
+    // SelectionArea includes the rendered "•"/number; the matcher must ignore it.
+    final f = previewSelectionFormats('- one\n- two', '• one\n• two')!;
+    expect(f.markdown, contains('- one'));
+    expect(f.markdown, contains('- two'));
+    final o = previewSelectionFormats('1. one\n2. two', '1. one\n2. two')!;
+    expect(o.markdown, contains('1. one'));
+    expect(o.markdown, contains('2. two'));
+  });
+
+  test('Preview copy: indents nested list under a wide ordered marker', () {
+    final f =
+        previewSelectionFormats('10. Parent\n    - Child', 'Parent Child')!;
+    expect(f.markdown, contains('10. Parent'));
+    expect(f.markdown, contains('    - Child')); // 4-space indent under "10. "
+  });
+
+  test('Preview copy: keeps a blank line between loose list paragraphs', () {
+    final f = previewSelectionFormats('- first\n\n  second', 'first second')!;
+    expect(f.markdown, contains('\n\n  second')); // paragraph break preserved
+  });
+
+  test('Preview copy: escapes a leading thematic break', () {
+    final f = previewSelectionFormats(r'\---', '---')!;
+    expect(f.markdown, startsWith(r'\-'));
+  });
+
+  test('Preview copy: keeps significant trailing whitespace in code', () {
+    final f = previewSelectionFormats('```\ncode   \n```', 'code')!;
+    expect(f.markdown, contains('code   ')); // trailing spaces not stripped
+  });
+
+  test('Preview copy: preserves spaces inside an inline code span', () {
+    final f = previewSelectionFormats('pre `mid ` post', 'pre mid  post')!;
+    expect(f.markdown, contains('` mid  `')); // padded so the space survives
+  });
+
+  test('Preview copy: keeps literal marker text (not treated as a list)', () {
+    // Source 1\. renders "1. Install"; selecting it must preserve the marker.
+    final f = previewSelectionFormats(r'1\. Install', '1. Install')!;
+    expect(f.markdown, contains(r'1\.'));
+    expect(f.markdown, contains('Install'));
+  });
+
+  test('Preview copy: escapes a block marker after a soft break', () {
+    final f = previewSelectionFormats(
+        'foo\n\\# Not a heading', 'foo # Not a heading')!;
+    expect(f.markdown, contains(r'\# Not a heading'));
+  });
+
+  test('Preview copy: escapes image alt text', () {
+    final f = previewSelectionFormats(r'x ![a\]b](y) z', 'x z')!;
+    expect(f.markdown, contains(r'a\]b'));
+  });
+
+  test('Preview copy: maps a selection spanning an empty block', () {
+    // The rule is rendered-empty; the matcher must not double the boundary space.
+    final f = previewSelectionFormats('a\n\n---\n\nb', 'a b')!;
+    expect(f.markdown, contains('---'));
+    expect(f.markdown, contains('a'));
+    expect(f.markdown, contains('b'));
+  });
+
+  test('Preview copy: escapes ampersands so entities stay literal', () {
+    final f = previewSelectionFormats(r'\&copy;', '&copy;')!;
+    expect(f.markdown, contains(r'\&'));
+  });
+
+  test('Preview copy: escapes a block marker inside a list item', () {
+    final f =
+        previewSelectionFormats(r'- \# not a heading', '# not a heading')!;
+    expect(f.markdown, contains(r'\# not a heading'));
+  });
+
+  test('Preview copy: does not escape Markdown inside <u>', () {
+    // The <u> syntax keeps its contents literal, so no backslash should appear.
+    final f = previewSelectionFormats('<u>*</u>', '*')!;
+    expect(f.markdown, contains('<u>*</u>'));
+    expect(f.markdown, isNot(contains(r'\*')));
+  });
+
+  test('Preview copy: falls back when marker text is genuinely ambiguous', () {
+    // A literal "1. Install" paragraph AND an ordered-list item "Install":
+    // selecting the list row as "1. Install" can't be resolved unambiguously.
+    expect(previewSelectionFormats('1\\. Install\n\n1. Install', '1. Install'),
+        isNull);
+  });
+
+  testWidgets('Preview overrides selection copy with a rich-copy action',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PreviewView(markdown: '# Hi\n\nsome **text**')),
+    ));
+    await tester.pumpAndSettle();
+    // The copy intent is overridden just above the SelectionArea, so Ctrl/Cmd+C
+    // routes to the formatting-preserving copy instead of plain text.
+    final actions = tester.widget<Actions>(
+      find
+          .ancestor(
+              of: find.byType(SelectionArea), matching: find.byType(Actions))
+          .first,
+    );
+    expect(actions.actions.containsKey(CopySelectionTextIntent), isTrue);
   });
 
   test('WYSIWYG copy returns null when nothing is selected', () {

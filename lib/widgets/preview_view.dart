@@ -7,6 +7,9 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:url_launcher/url_launcher.dart';
 
+import 'preview_copy.dart';
+import 'wysiwyg_copy.dart' show writeRichClipboard;
+
 /// Renders Markdown to a styled, scrollable, read-only view. Used both for the
 /// preview pane of the split view and for the full-screen read-only mode.
 ///
@@ -86,7 +89,8 @@ class PreviewView extends StatelessWidget {
       // Find is active: render via the AST-transforming highlighter so matches
       // are marked AFTER the markdown resolves (emphasis / links / underline
       // stay intact, code isn't touched, the count is what's actually marked).
-      return SelectionArea(
+      return _CopyableSelectionArea(
+        markdown: markdown,
         child: _HighlightedMarkdown(
           markdown: markdown,
           query: query,
@@ -113,7 +117,8 @@ class PreviewView extends StatelessWidget {
       );
     }
 
-    return SelectionArea(
+    return _CopyableSelectionArea(
+      markdown: markdown,
       child: Markdown(
         data: markdown,
         controller: controller,
@@ -169,6 +174,74 @@ class PreviewView extends StatelessWidget {
       tableBorder: TableBorder.all(color: cs.outlineVariant),
       tableHead: const TextStyle(fontWeight: FontWeight.bold),
       a: TextStyle(color: cs.primary, decoration: TextDecoration.underline),
+    );
+  }
+}
+
+/// Wraps a Preview render in a [SelectionArea] whose copy keeps formatting.
+///
+/// Flutter's selection layer only ever exposes the PLAIN TEXT of a selection,
+/// so both Ctrl/Cmd+C (via an overridable [CopySelectionTextIntent] action) and
+/// the right-click Copy (via a custom [contextMenuBuilder]) route through
+/// [previewSelectionFormats]: the selected text is mapped back onto the Markdown
+/// source and Markdown + HTML are written to the clipboard. If the selection
+/// can't be located, it copies the plain text unchanged.
+class _CopyableSelectionArea extends StatefulWidget {
+  const _CopyableSelectionArea({required this.markdown, required this.child});
+
+  final String markdown;
+  final Widget child;
+
+  @override
+  State<_CopyableSelectionArea> createState() => _CopyableSelectionAreaState();
+}
+
+class _CopyableSelectionAreaState extends State<_CopyableSelectionArea> {
+  String? _selectedText;
+
+  Future<void> _richCopy() async {
+    final text = _selectedText;
+    if (text == null || text.isEmpty) return;
+    final formats = previewSelectionFormats(widget.markdown, text);
+    if (formats == null) {
+      await Clipboard.setData(ClipboardData(text: text));
+    } else {
+      await writeRichClipboard(formats.markdown, formats.html);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        // Ctrl/Cmd+C dispatches this intent; SelectableRegion makes its copy
+        // action overridable, so this replaces it with the rich copy.
+        CopySelectionTextIntent: CallbackAction<CopySelectionTextIntent>(
+          onInvoke: (_) {
+            _richCopy();
+            return null;
+          },
+        ),
+      },
+      child: SelectionArea(
+        onSelectionChanged: (content) => _selectedText = content?.plainText,
+        // The right-click Copy button calls _copy() directly (not the intent),
+        // so swap its handler for the rich copy here.
+        contextMenuBuilder: (context, selState) {
+          final items = selState.contextMenuButtonItems.map((item) {
+            if (item.type != ContextMenuButtonType.copy) return item;
+            return item.copyWith(onPressed: () {
+              _richCopy();
+              selState.hideToolbar();
+            });
+          }).toList();
+          return AdaptiveTextSelectionToolbar.buttonItems(
+            anchors: selState.contextMenuAnchors,
+            buttonItems: items,
+          );
+        },
+        child: widget.child,
+      ),
     );
   }
 }
