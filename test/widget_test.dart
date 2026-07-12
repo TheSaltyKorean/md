@@ -20,7 +20,9 @@ import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, SystemChannels;
 import 'package:flutter/widgets.dart'
     show
+        Actions,
         Axis,
+        CopySelectionTextIntent,
         MediaQuery,
         SingleChildScrollView,
         Size,
@@ -40,6 +42,7 @@ import 'package:markdown_studio/state/document_controller.dart';
 import 'package:markdown_studio/state/theme_controller.dart';
 import 'package:markdown_studio/services/session_service.dart';
 import 'package:markdown_studio/widgets/wysiwyg_copy.dart';
+import 'package:markdown_studio/widgets/preview_copy.dart';
 import 'package:markdown_studio/state/workspace_controller.dart';
 import 'package:markdown_studio/state/zoom_controller.dart';
 import 'package:markdown_studio/widgets/find_controller.dart';
@@ -1824,6 +1827,67 @@ void main() {
       end: Position(path: [0], offset: 5), // just "Hello"
     );
     expect(wysiwygSelectionFormats(editorState)!.markdown.trim(), 'Hello');
+  });
+
+  test('Preview copy: partial paragraph keeps inline formatting', () {
+    // Rendered text is "Hello bold world and more"; select "bold world".
+    final f =
+        previewSelectionFormats('Hello **bold** world and more', 'bold world')!;
+    expect(f.html, contains('<strong>bold</strong>'));
+    expect(f.markdown, contains('**bold**'));
+    expect(f.markdown, contains('world'));
+    expect(f.markdown, isNot(contains('Hello'))); // trimmed before
+    expect(f.markdown, isNot(contains('more'))); // trimmed after
+  });
+
+  test('Preview copy: a heading selection stays a heading', () {
+    final f = previewSelectionFormats('# Title here\n\nbody', 'Title here')!;
+    expect(f.markdown.trim(), '# Title here');
+    expect(f.html, contains('<h1>'));
+  });
+
+  test('Preview copy: a list is copied whole with its items', () {
+    const src = '- one\n- two **bold**\n- three';
+    final f = previewSelectionFormats(src, 'two bold')!;
+    // Container blocks are kept whole, preserving list structure + formatting.
+    expect(f.html, contains('<li>'));
+    expect(f.html, contains('<strong>bold</strong>'));
+    expect(f.markdown, contains('two **bold**'));
+  });
+
+  test('Preview copy: selection across paragraphs keeps both', () {
+    const src = 'First para.\n\nSecond **para**.';
+    final f = previewSelectionFormats(src, 'First para. Second para.')!;
+    expect(f.markdown, contains('First para.'));
+    expect(f.markdown, contains('Second **para**'));
+  });
+
+  test('Preview copy: a link keeps its target', () {
+    final f = previewSelectionFormats('see [Docs](https://x.com) now', 'Docs')!;
+    expect(f.markdown, contains('[Docs](https://x.com)'));
+    expect(f.html, contains('href="https://x.com"'));
+  });
+
+  test('Preview copy: returns null when the selection is not found', () {
+    expect(previewSelectionFormats('some text', 'not present here'), isNull);
+    expect(previewSelectionFormats('some text', '   '), isNull);
+  });
+
+  testWidgets('Preview overrides selection copy with a rich-copy action',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(body: PreviewView(markdown: '# Hi\n\nsome **text**')),
+    ));
+    await tester.pumpAndSettle();
+    // The copy intent is overridden just above the SelectionArea, so Ctrl/Cmd+C
+    // routes to the formatting-preserving copy instead of plain text.
+    final actions = tester.widget<Actions>(
+      find
+          .ancestor(
+              of: find.byType(SelectionArea), matching: find.byType(Actions))
+          .first,
+    );
+    expect(actions.actions.containsKey(CopySelectionTextIntent), isTrue);
   });
 
   test('WYSIWYG copy returns null when nothing is selected', () {
