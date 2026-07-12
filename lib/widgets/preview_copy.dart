@@ -28,11 +28,8 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
 /// caller then copies plain text unchanged.
 ({String markdown, String html})? previewSelectionFormats(
     String source, String selectedText) {
-  // The rendered bullets/numbers of a list are part of the selection's plain
-  // text but not the AST child text, so drop them before matching — otherwise
-  // selecting a whole list line (or Select All) wouldn't map.
-  final needle = _collapse(_stripListMarkers(selectedText));
-  if (needle.isEmpty) return null;
+  final rawNeedle = _collapse(selectedText);
+  if (rawNeedle.isEmpty) return null;
 
   final doc = md.Document(
     extensionSet: md.ExtensionSet.gitHubFlavored,
@@ -52,9 +49,12 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
   final collapsed = StringBuffer();
   final blockOf = <int>[]; // collapsed index -> block index
   final offsetOf = <int>[]; // collapsed index -> raw offset within that block
+  // prevSpace persists ACROSS blocks so a rendered-empty block (a rule, an
+  // image-only paragraph) between text blocks doesn't emit a second collapsed
+  // space that the actual selection wouldn't have.
+  var prevSpace = true; // also trims the stream's leading space
   for (var b = 0; b < blockText.length; b++) {
     final raw = blockText[b];
-    var prevSpace = collapsed.isEmpty; // trim leading space of the stream
     for (var i = 0; i < raw.length; i++) {
       final isSpace = _isSpace(raw[i]);
       if (isSpace) {
@@ -71,8 +71,8 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
       }
     }
     // A block boundary is whitespace in the render, so the next block can't
-    // fuse onto this one for matching.
-    if (b < blockText.length - 1 && collapsed.isNotEmpty) {
+    // fuse onto this one — but only one space, even across empty blocks.
+    if (b < blockText.length - 1 && !prevSpace) {
       collapsed.write(' ');
       blockOf.add(b);
       offsetOf.add(raw.length);
@@ -81,11 +81,19 @@ const _inlineTags = {'em', 'strong', 'a', 'del', 'u', 'sub', 'sup'};
   }
 
   final stream = collapsed.toString();
-  final at = stream.indexOf(needle);
-  if (at < 0) return null;
-  // Ambiguous: the same text appears elsewhere, so we can't know which range
-  // (and its formatting) the user meant — fall back to plain text.
-  if (stream.indexOf(needle, at + 1) >= 0) return null;
+  // Try the selection as-is first; only if that doesn't uniquely match do we
+  // retry with rendered list markers stripped. This way a literal paragraph
+  // like "1. Install" maps to its own text, while a real list line selected
+  // with its bullet ("• one") still maps by falling back to the stripped form.
+  var at = _uniqueIndexOf(stream, rawNeedle);
+  var needle = rawNeedle;
+  if (at == null) {
+    final stripped = _collapse(_stripListMarkers(selectedText));
+    if (stripped.isEmpty || stripped == rawNeedle) return null;
+    at = _uniqueIndexOf(stream, stripped);
+    if (at == null) return null;
+    needle = stripped;
+  }
   final end = at + needle.length - 1; // inclusive last matched char
 
   final firstBlock = blockOf[at];
@@ -332,7 +340,12 @@ String _linkDestination(String href) {
 
 /// Escape a leading block marker (`#`, `>`, `-`/`+` bullet, `N.`/`N)` ordered)
 /// so a literal paragraph doesn't re-parse as a heading/quote/list.
-String _escapeBlockStart(String s) {
+/// Escape block markers at the start of EVERY line (a paragraph can contain
+/// hard/soft breaks), so no line re-parses as a heading/quote/list/rule.
+String _escapeBlockStart(String s) =>
+    s.split('\n').map(_escapeLineStart).join('\n');
+
+String _escapeLineStart(String s) {
   if (s.isEmpty) return s;
   final ol = RegExp(r'^(\d+)([.)])(\s|$)').firstMatch(s);
   if (ol != null) {
@@ -392,7 +405,7 @@ String _inlineToMarkdown(List<md.Node> nodes) {
           out.write('[${_inlineToMarkdown(kids)}]($href)');
         case 'img':
           final src = _linkDestination(n.attributes['src'] ?? '');
-          final alt = n.attributes['alt'] ?? '';
+          final alt = _escapeMarkdown(n.attributes['alt'] ?? '');
           out.write('![$alt]($src)');
         case 'u':
           out.write('<u>${_inlineToMarkdown(kids)}</u>'); // toolbar underline
@@ -416,7 +429,7 @@ String _inlineToMarkdown(List<md.Node> nodes) {
 /// Escape the inline Markdown metacharacters in literal text so pasted Markdown
 /// renders the same characters rather than re-interpreting them as syntax.
 String _escapeMarkdown(String text) =>
-    text.replaceAllMapped(RegExp(r'[\\`*_\[\]<>~]'), (m) => '\\${m[0]}');
+    text.replaceAllMapped(RegExp(r'[\\`*_\[\]<>~&]'), (m) => '\\${m[0]}');
 
 /// Collapse all whitespace runs to a single space and trim — the form used to
 /// locate the selection in the rendered stream (robust to how the renderer and
@@ -439,6 +452,14 @@ String _collapse(String s) {
 }
 
 bool _isSpace(String ch) => ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
+
+/// Index of [needle] in [stream] iff it occurs exactly once — a duplicated
+/// selection can't be resolved to a definite (formatted) range.
+int? _uniqueIndexOf(String stream, String needle) {
+  final at = stream.indexOf(needle);
+  if (at < 0 || stream.indexOf(needle, at + 1) >= 0) return null;
+  return at;
+}
 
 class _Counter {
   int pos = 0;

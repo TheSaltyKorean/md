@@ -1984,6 +1984,37 @@ void main() {
     expect(f.markdown, contains('` mid  `')); // padded so the space survives
   });
 
+  test('Preview copy: keeps literal marker text (not treated as a list)', () {
+    // Source 1\. renders "1. Install"; selecting it must preserve the marker.
+    final f = previewSelectionFormats(r'1\. Install', '1. Install')!;
+    expect(f.markdown, contains(r'1\.'));
+    expect(f.markdown, contains('Install'));
+  });
+
+  test('Preview copy: escapes a block marker after a soft break', () {
+    final f = previewSelectionFormats(
+        'foo\n\\# Not a heading', 'foo # Not a heading')!;
+    expect(f.markdown, contains(r'\# Not a heading'));
+  });
+
+  test('Preview copy: escapes image alt text', () {
+    final f = previewSelectionFormats(r'x ![a\]b](y) z', 'x z')!;
+    expect(f.markdown, contains(r'a\]b'));
+  });
+
+  test('Preview copy: maps a selection spanning an empty block', () {
+    // The rule is rendered-empty; the matcher must not double the boundary space.
+    final f = previewSelectionFormats('a\n\n---\n\nb', 'a b')!;
+    expect(f.markdown, contains('---'));
+    expect(f.markdown, contains('a'));
+    expect(f.markdown, contains('b'));
+  });
+
+  test('Preview copy: escapes ampersands so entities stay literal', () {
+    final f = previewSelectionFormats(r'\&copy;', '&copy;')!;
+    expect(f.markdown, contains(r'\&'));
+  });
+
   testWidgets('Preview overrides selection copy with a rich-copy action',
       (tester) async {
     await tester.pumpWidget(const MaterialApp(
