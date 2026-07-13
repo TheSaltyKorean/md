@@ -1,6 +1,13 @@
 # Markdown Studio — Privacy Policy
 
-*Last updated: July 5, 2026*
+*Last updated: July 13, 2026*
+
+This policy covers both the Markdown Studio **application** and the project
+**website** (markdownstudio.dev). They are treated separately below: the app
+sends no analytics of any kind, while the website uses Google Analytics to
+count visits.
+
+## The application
 
 Markdown Studio is a local document editor. **It does not collect, store, or
 transmit any personal data, telemetry, analytics, or document content.**
@@ -31,6 +38,18 @@ transmit any personal data, telemetry, analytics, or document content.**
 External links opened from the app (e.g. the support page or links in your
 documents) are handled by your browser and are subject to those sites' own
 policies.
+
+## The website (markdownstudio.dev)
+
+The project's website — a separate, static marketing and documentation site —
+uses **Google Analytics 4** to measure aggregate visits (such as pages viewed,
+approximate region, and device/browser type) so we can see which pages are
+useful. This applies only to the website, **not** the application, which sends
+no analytics as described above. Google Analytics sets cookies and processes
+this data under [Google's privacy policy](https://policies.google.com/privacy);
+you can opt out with the
+[Google Analytics opt-out add-on](https://tools.google.com/dlpage/gaoptout) or
+by blocking analytics cookies in your browser.
 
 Questions: open an issue at
 <https://github.com/TheSaltyKorean/md/issues>.
