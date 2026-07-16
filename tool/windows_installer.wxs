@@ -67,5 +67,27 @@
                        KeyPath="yes" />
       </Component>
     </StandardDirectory>
+
+    <!-- Register .md as a handled file type at install time (per-user → HKCU),
+         so the app no longer has to self-register on first run. This mirrors
+         the ProgID the runtime FileAssociationService writes
+         (MarkdownStudio.md): handler + icon + Open-With entry. We deliberately
+         do NOT set the UserChoice default — modern Windows reserves that for
+         the user's explicit confirmation. -->
+    <Component Id="FileAssociation" Directory="INSTALLFOLDER"
+               Guid="b7f4d2e0-9a13-4c58-8e6d-4f1a2c7b0d95">
+      <RegistryValue Root="HKCU" Key="Software\Classes\MarkdownStudio.md"
+                     Type="string" Value="Markdown Document" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\Classes\MarkdownStudio.md\DefaultIcon"
+                     Type="string" Value="[INSTALLFOLDER]markdown_studio.exe,0" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\Classes\MarkdownStudio.md\shell\open\command"
+                     Type="string"
+                     Value="&quot;[INSTALLFOLDER]markdown_studio.exe&quot; &quot;%1&quot;" />
+      <RegistryValue Root="HKCU" Key="Software\Classes\.md\OpenWithProgids"
+                     Name="MarkdownStudio.md" Type="string" Value=""
+                     KeyPath="yes" />
+    </Component>
   </Package>
 </Wix>

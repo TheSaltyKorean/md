@@ -25,11 +25,61 @@ class FileAssociationService {
   bool get isSupported => !kIsWeb && (Platform.isWindows || Platform.isLinux);
 
   /// Whether to show the association prompt on launch: supported platform, the
-  /// user hasn't already decided, and we're not already the handler.
+  /// user hasn't already decided, we're not already the handler, and we're not
+  /// running from an installed location.
+  ///
+  /// Installed copies register the association from the installer (Inno/WiX
+  /// `[Registry]` on Windows, the `.desktop` MimeType on the Linux `.deb`), so
+  /// the app must not nag about it at first run. Only portable/zip/dev builds —
+  /// which no installer touched — still fall back to the runtime prompt.
   Future<bool> shouldPrompt() async {
     if (!isSupported) return false;
     if (_prefs.getBool(_doneKey) ?? false) return false;
+    if (isInstalledCopy()) return false;
     return !(await isAssociated());
+  }
+
+  /// True when this executable lives under a location an installer owns, so
+  /// the package (not the app) is responsible for the file association.
+  bool isInstalledCopy() {
+    if (kIsWeb) return false;
+    if (Platform.isWindows) {
+      final localApps = Platform.environment['LocalAppData'];
+      return isInstalledPath(
+        exe: Platform.resolvedExecutable,
+        installRoots: [
+          if (localApps != null && localApps.isNotEmpty) '$localApps\\Programs',
+          Platform.environment['ProgramFiles'],
+          Platform.environment['ProgramFiles(x86)'],
+        ],
+        separator: '\\',
+      );
+    }
+    if (Platform.isLinux) {
+      // The .deb installs under /opt/markdown-studio; the /usr/bin launcher is
+      // a symlink but resolvedExecutable resolves to the real /opt path.
+      return isInstalledPath(
+        exe: Platform.resolvedExecutable,
+        installRoots: const ['/opt', '/usr'],
+        separator: '/',
+      );
+    }
+    return false;
+  }
+
+  /// Pure decision for [isInstalledCopy]: whether [exe] sits under one of the
+  /// [installRoots] (case-insensitive, path-separator aware).
+  @visibleForTesting
+  static bool isInstalledPath({
+    required String exe,
+    required List<String?> installRoots,
+    required String separator,
+  }) {
+    final e = exe.toLowerCase();
+    return installRoots.whereType<String>().any((root) {
+      if (root.isEmpty) return false;
+      return e.startsWith('${root.toLowerCase()}$separator');
+    });
   }
 
   /// Record that the user has made a decision so we stop prompting.

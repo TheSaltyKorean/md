@@ -50,7 +50,42 @@ Name: "{group}\Markdown Studio"; Filename: "{app}\markdown_studio.exe"
 Name: "{autodesktop}\Markdown Studio"; Filename: "{app}\markdown_studio.exe"; \
   Tasks: desktopicon
 
+; Register the app as a handler for .md at install time (per-user, so HKCU) —
+; the app no longer has to self-register on first run. This mirrors the ProgID
+; the runtime FileAssociationService writes (MarkdownStudio.md). We register the
+; handler + icon + Open-With entry only; we do NOT force the UserChoice default,
+; which modern Windows reserves for the user's explicit confirmation.
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\MarkdownStudio.md"; \
+  ValueType: string; ValueName: ""; ValueData: "Markdown Document"; \
+  Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\MarkdownStudio.md\DefaultIcon"; \
+  ValueType: string; ValueName: ""; ValueData: "{app}\markdown_studio.exe,0"
+Root: HKCU; Subkey: "Software\Classes\MarkdownStudio.md\shell\open\command"; \
+  ValueType: string; ValueName: ""; \
+  ValueData: """{app}\markdown_studio.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\.md\OpenWithProgids"; \
+  ValueType: none; ValueName: "MarkdownStudio.md"; \
+  Flags: uninsdeletevalue
+
 [Run]
 Filename: "{app}\markdown_studio.exe"; \
   Description: "Launch Markdown Studio"; \
   Flags: nowait postinstall skipifsilent
+
+[Code]
+const
+  SHCNE_ASSOCCHANGED = $08000000;
+  SHCNF_IDLIST       = $0000;
+
+procedure SHChangeNotify(wEventId: Integer; uFlags: Cardinal;
+  dwItem1, dwItem2: Cardinal);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  // Tell the shell the .md association changed so Explorer refreshes icons
+  // and the Open-With list without needing a reboot or re-login.
+  if CurStep = ssPostInstall then
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, 0, 0);
+end;

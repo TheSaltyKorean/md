@@ -426,6 +426,68 @@ void main() {
         isTrue);
   });
 
+  test('Association: installed copies are detected per platform', () {
+    // Windows: under %LocalAppData%\Programs or Program Files → installed;
+    // a dev/build tree or portable unzip elsewhere → not installed.
+    const perUser = r'C:\Users\r\AppData\Local\Programs';
+    const pf = r'C:\Program Files';
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: '$perUser\\Markdown Studio\\markdown_studio.exe',
+          installRoots: const [perUser, pf, null],
+          separator: r'\',
+        ),
+        isTrue);
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: r'C:\git\md\build\windows\x64\runner\Release\markdown_studio.exe',
+          installRoots: const [perUser, pf],
+          separator: r'\',
+        ),
+        isFalse);
+    // A portable copy the user unzipped to Downloads is not installed.
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: r'C:\Users\r\Downloads\MarkdownStudio\markdown_studio.exe',
+          installRoots: const [perUser, pf],
+          separator: r'\',
+        ),
+        isFalse);
+    // Case-insensitive, matching the registry/filesystem on Windows.
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: r'c:\program files\markdown studio\markdown_studio.exe',
+          installRoots: const [pf],
+          separator: r'\',
+        ),
+        isTrue);
+
+    // Linux: the .deb lands under /opt; a tarball run from $HOME is portable.
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: '/opt/markdown-studio/markdown_studio',
+          installRoots: const ['/opt', '/usr'],
+          separator: '/',
+        ),
+        isTrue);
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: '/home/r/markdown-studio/markdown_studio',
+          installRoots: const ['/opt', '/usr'],
+          separator: '/',
+        ),
+        isFalse);
+    // A root that is a name prefix but not a path segment must not match
+    // (/opt vs /optional).
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: '/optional/markdown_studio',
+          installRoots: const ['/opt'],
+          separator: '/',
+        ),
+        isFalse);
+  });
+
   test('Zoom controller steps, clamps, snaps, and persists', () async {
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
