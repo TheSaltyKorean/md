@@ -259,10 +259,8 @@ class _EditorScreenState extends State<EditorScreen>
   Future<void> _maybePromptAssociation() async {
     if (!mounted) return;
     final service = context.read<FileAssociationService>();
-    // An installed copy quietly reclaims a registration left pointing at a
-    // stale executable (e.g. a local dev build) before any prompting logic.
-    await service.repairRegistrationIfNeeded();
-    if (!mounted) return;
+    // Installed copies get their association from the installer, so the prompt
+    // is only offered for portable/zip/dev builds (see shouldPrompt).
     if (!await service.shouldPrompt() || !mounted) return;
 
     final choice = await showDialog<_AssocChoice>(

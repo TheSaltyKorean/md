@@ -241,12 +241,10 @@ jobs:
         run: |
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
-          # Render the PolyForm license to the RTF the MSI dialog requires.
-          $text = Get-Content LICENSE.md -Raw
-          $esc = $text -replace '\\','\\' -replace '\{','\{' -replace '\}','\}'
-          $esc = $esc -replace "`r`n","`n" -replace "`n",'\par '
-          Set-Content -Path license.rtf -Encoding Ascii -Value `
-            "{\rtf1\ansi\deff0{\fonttbl{\f0 Segoe UI;}}\fs18 $esc}"
+          # Render the PolyForm license (Markdown) to formatted RTF for the MSI
+          # dialog — the dialog can't display Markdown, so feed it real RTF
+          # instead of the raw source (which showed literal '#', '**', links).
+          pwsh tool/md-to-rtf.ps1 -InputPath LICENSE.md -OutputPath license.rtf
           wix build tool/windows_installer.wxs `
             -ext WixToolset.UI.wixext `
             -arch x64 `
