@@ -6,7 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Best-effort registration of this app as a handler for `.md` files, plus a
 /// once-per-decision "should I prompt?" gate.
 ///
-/// Runtime association is only meaningful on desktop:
+/// **Installed copies register the association from the installer** (Inno
+/// `[Registry]` / MSI advertised ProgId on Windows, the `.desktop` MimeType on
+/// the Linux `.deb`), so the app never touches associations there — see
+/// [isInstalledCopy]. This runtime path is only a fallback for portable / zip /
+/// dev builds that no installer configured:
 ///  * **Windows** — register a per-user ProgID under `HKCU\Software\Classes`
 ///    and surface the Default Apps settings so the user can confirm the default.
 ///  * **Linux** — `xdg-mime default` for `text/markdown`.
@@ -35,6 +39,7 @@ class FileAssociationService {
   Future<bool> shouldPrompt() async {
     if (!isSupported) return false;
     if (_prefs.getBool(_doneKey) ?? false) return false;
+    // Installer-owned copies get their association at install time; never nag.
     if (isInstalledCopy()) return false;
     return !(await isAssociated());
   }
@@ -56,11 +61,14 @@ class FileAssociationService {
       );
     }
     if (Platform.isLinux) {
-      // The .deb installs under /opt/markdown-studio; the /usr/bin launcher is
-      // a symlink but resolvedExecutable resolves to the real /opt path.
+      // The .deb installs the real executable under /opt/markdown-studio; its
+      // /usr/bin entry is only a symlink, and resolvedExecutable resolves
+      // through it to the /opt path. So /opt is the sole installer-owned root —
+      // a portable build unpacked under e.g. /usr/local or $HOME is NOT
+      // installed and still gets the runtime prompt.
       return isInstalledPath(
         exe: Platform.resolvedExecutable,
-        installRoots: const ['/opt', '/usr'],
+        installRoots: const ['/opt/markdown-studio'],
         separator: '/',
       );
     }
@@ -122,59 +130,7 @@ class FileAssociationService {
     return false;
   }
 
-  /// Windows self-heal: if our ProgID's open command points at a *different*
-  /// executable than the one running — classic case: a locally built copy
-  /// registered the association, then the user installed the app, so
-  /// double-clicking `.md` files keeps launching the stale build — re-point
-  /// the registration to this executable. Only an **installed** copy (the
-  /// per-user `%LocalAppData%\Programs` location, or a legacy Program Files
-  /// one) asserts ownership; ad-hoc dev builds never silently steal the
-  /// association back. Runs quietly (no Settings pane).
-  Future<void> repairRegistrationIfNeeded() async {
-    if (kIsWeb || !Platform.isWindows) return;
-    try {
-      final res = await Process.run('reg', [
-        'query',
-        'HKCU\\Software\\Classes\\$progId\\shell\\open\\command',
-        '/ve',
-      ]);
-      if (res.exitCode != 0) return; // never registered — nothing to repair
-      final localApps = Platform.environment['LocalAppData'];
-      if (needsRepair(
-        exe: Platform.resolvedExecutable,
-        programDirs: [
-          // The per-user install root (since 1.0.9).
-          if (localApps != null && localApps.isNotEmpty) '$localApps\\Programs',
-          // Legacy per-machine installs.
-          Platform.environment['ProgramFiles'],
-          Platform.environment['ProgramFiles(x86)'],
-        ],
-        registeredCommand: res.stdout.toString(),
-      )) {
-        await _associateWindows(openSettings: false);
-      }
-    } catch (_) {/* best effort */}
-  }
-
-  /// Pure decision for [repairRegistrationIfNeeded]: repair only when this
-  /// executable lives under one of the install directories (an installed
-  /// copy) and the registered open command doesn't already point at it.
-  @visibleForTesting
-  static bool needsRepair({
-    required String exe,
-    required List<String?> programDirs,
-    required String? registeredCommand,
-  }) {
-    if (registeredCommand == null) return false;
-    final e = exe.toLowerCase();
-    final installed = programDirs
-        .whereType<String>()
-        .any((p) => p.isNotEmpty && e.startsWith('${p.toLowerCase()}\\'));
-    if (!installed) return false;
-    return !registeredCommand.toLowerCase().contains(e);
-  }
-
-  Future<bool> _associateWindows({bool openSettings = true}) async {
+  Future<bool> _associateWindows() async {
     final exe = Platform.resolvedExecutable.replaceAll(r'\', r'\\');
     final reg = StringBuffer()
       ..writeln('Windows Registry Editor Version 5.00')
@@ -195,10 +151,8 @@ class FileAssociationService {
     final file = File('${Directory.systemTemp.path}\\md_assoc.reg');
     await file.writeAsString(reg.toString());
     final res = await Process.run('reg', ['import', file.path]);
-    if (openSettings) {
-      // Surface Default Apps so the user can set us as the default for .md.
-      await Process.run('cmd', ['/c', 'start', '', 'ms-settings:defaultapps']);
-    }
+    // Surface Default Apps so the user can set us as the default for .md.
+    await Process.run('cmd', ['/c', 'start', '', 'ms-settings:defaultapps']);
     return res.exitCode == 0;
   }
 

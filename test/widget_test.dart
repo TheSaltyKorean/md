@@ -366,66 +366,6 @@ void main() {
     expect(zoom.factor, greaterThan(1.0));
   });
 
-  test('Association repair: installed copies reclaim, dev builds never', () {
-    const pf = r'C:\Program Files';
-    const pf86 = r'C:\Program Files (x86)';
-    const installedExe =
-        r'C:\Program Files\Markdown Studio\markdown_studio.exe';
-    const devExe = r'C:\git\md\build\windows\x64\runner\Release'
-        r'\markdown_studio.exe';
-
-    // Installed copy + registration pointing at a dev build → repair.
-    expect(
-        FileAssociationService.needsRepair(
-          exe: installedExe,
-          programDirs: const [pf, pf86],
-          registeredCommand: '(Default)    REG_SZ    "$devExe" "%1"',
-        ),
-        isTrue);
-
-    // Registration already points at this installed copy → leave alone
-    // (case-insensitive, as the registry is).
-    expect(
-        FileAssociationService.needsRepair(
-          exe: installedExe,
-          programDirs: const [pf, pf86],
-          registeredCommand:
-              '(Default)    REG_SZ    "${installedExe.toUpperCase()}" "%1"',
-        ),
-        isFalse);
-
-    // A dev build must never steal the association back.
-    expect(
-        FileAssociationService.needsRepair(
-          exe: devExe,
-          programDirs: const [pf, pf86],
-          registeredCommand: '(Default)    REG_SZ    "$installedExe" "%1"',
-        ),
-        isFalse);
-
-    // Never registered → nothing to repair.
-    expect(
-        FileAssociationService.needsRepair(
-          exe: installedExe,
-          programDirs: const [pf, pf86],
-          registeredCommand: null,
-        ),
-        isFalse);
-
-    // The per-user install root (since 1.0.9) also counts as installed and
-    // reclaims a stale association.
-    const perUser = r'C:\Users\r\AppData\Local\Programs';
-    const perUserExe =
-        r'C:\Users\r\AppData\Local\Programs\Markdown Studio\markdown_studio.exe';
-    expect(
-        FileAssociationService.needsRepair(
-          exe: perUserExe,
-          programDirs: const [perUser, pf, pf86],
-          registeredCommand: '(Default)    REG_SZ    "$devExe" "%1"',
-        ),
-        isTrue);
-  });
-
   test('Association: installed copies are detected per platform', () {
     // Windows: under %LocalAppData%\Programs or Program Files → installed;
     // a dev/build tree or portable unzip elsewhere → not installed.
@@ -462,27 +402,37 @@ void main() {
         ),
         isTrue);
 
-    // Linux: the .deb lands under /opt; a tarball run from $HOME is portable.
+    // Linux: only the .deb's real /opt/markdown-studio path counts as installed.
     expect(
         FileAssociationService.isInstalledPath(
           exe: '/opt/markdown-studio/markdown_studio',
-          installRoots: const ['/opt', '/usr'],
+          installRoots: const ['/opt/markdown-studio'],
           separator: '/',
         ),
         isTrue);
+    // A tarball run from $HOME is portable.
     expect(
         FileAssociationService.isInstalledPath(
           exe: '/home/r/markdown-studio/markdown_studio',
-          installRoots: const ['/opt', '/usr'],
+          installRoots: const ['/opt/markdown-studio'],
+          separator: '/',
+        ),
+        isFalse);
+    // /usr is NOT an install root — a portable copy under /usr/local must still
+    // be treated as not-installed (the .deb only symlinks /usr/bin).
+    expect(
+        FileAssociationService.isInstalledPath(
+          exe: '/usr/local/markdown-studio/markdown_studio',
+          installRoots: const ['/opt/markdown-studio'],
           separator: '/',
         ),
         isFalse);
     // A root that is a name prefix but not a path segment must not match
-    // (/opt vs /optional).
+    // (/opt/markdown-studio vs /opt/markdown-studio-nightly).
     expect(
         FileAssociationService.isInstalledPath(
-          exe: '/optional/markdown_studio',
-          installRoots: const ['/opt'],
+          exe: '/opt/markdown-studio-nightly/markdown_studio',
+          installRoots: const ['/opt/markdown-studio'],
           separator: '/',
         ),
         isFalse);
