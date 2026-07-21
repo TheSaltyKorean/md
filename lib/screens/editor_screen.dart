@@ -3,8 +3,7 @@ import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:flutter/gestures.dart'
-    show PointerScrollEvent, PointerSignalEvent;
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show HardwareKeyboard, LogicalKeyboardKey, SystemNavigator;
@@ -479,100 +478,80 @@ class _EditorScreenState extends State<EditorScreen>
           autofocus: true,
           child: Scaffold(
             appBar: AppBar(
-              titleSpacing: 0,
-              // The open-document tabs sit where the filename would be.
-              title: _TabStrip(
-                workspace: ws,
-                onClose: _closeTab,
-                onTabDragEnd: _onTabDragEnd,
+              titleSpacing: 8,
+              centerTitle: false,
+              automaticallyImplyLeading: false,
+              // Top row: the toolbar icons, left-aligned (horizontally
+              // scrollable if they can't all fit); the overflow hamburger pins
+              // to the far right via [actions]. The open-document tabs sit on
+              // their own row(s) below the app bar (see body), wrapping into
+              // additional rows as they overflow.
+              title: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: _toolbarIcons(context, ws, active, theme, isNarrow),
+                ),
               ),
-              // On phone widths the tab strip owns the whole top row; the mode
-              // selector and the action icons then share a single second row
-              // (mode on the left, icons on the right). On wide layouts they
-              // live in the top actions row. The format toolbar floats over the
-              // body.
-              actions:
-                  isNarrow ? null : _actions(context, ws, active, theme, false),
-              bottom: isNarrow
-                  ? PreferredSize(
-                      preferredSize: const Size.fromHeight(48),
-                      child: Container(
-                        height: 48,
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .outlineVariant),
-                          ),
-                        ),
-                        child: Row(
+              actions: [_overflowMenu(context, ws, active, isNarrow)],
+            ),
+            body: Column(
+              children: [
+                // Open-document tabs on their own row(s), below the toolbar;
+                // they wrap into additional rows as more tabs open.
+                _TabStrip(
+                  workspace: ws,
+                  onClose: _closeTab,
+                  onTabDragEnd: _onTabDragEnd,
+                ),
+                Expanded(
+                  child: DropTarget(
+                    onDragEntered: (_) => setState(() => _dragging = true),
+                    onDragExited: (_) => setState(() => _dragging = false),
+                    onDragDone: (detail) => _onFilesDropped(detail, ws),
+                    // Ctrl/Cmd + mouse wheel zooms, like a browser; a two-finger
+                    // pinch zooms on touch. A raw Listener observes without
+                    // consuming, so a one-finger drag still scrolls normally — an
+                    // accepted trade-off for not swallowing normal scrolling.
+                    child: Listener(
+                      onPointerSignal: (event) {
+                        if (event is! PointerScrollEvent) return;
+                        final keys = HardwareKeyboard.instance;
+                        if (!keys.isControlPressed && !keys.isMetaPressed) {
+                          return;
+                        }
+                        if (event.scrollDelta.dy == 0) return;
+                        event.scrollDelta.dy < 0
+                            ? zoom.zoomIn()
+                            : zoom.zoomOut();
+                      },
+                      onPointerDown: _onPinchDown,
+                      onPointerMove: _onPinchMove,
+                      onPointerUp: (e) => _onPinchEnd(e.pointer),
+                      onPointerCancel: (e) => _onPinchEnd(e.pointer),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) => Stack(
                           children: [
-                            if (active != null)
-                              // Mode toggle on the left; scrolls horizontally if
-                              // it can't fit next to the icons on a narrow phone.
-                              Expanded(
-                                child: Container(
-                                  alignment: Alignment.centerLeft,
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 8),
-                                  child: SingleChildScrollView(
-                                    scrollDirection: Axis.horizontal,
-                                    child:
-                                        Center(child: _ModeToggle(doc: active)),
-                                  ),
-                                ),
-                              )
-                            else
-                              const Spacer(),
-                            ..._actions(context, ws, active, theme, true),
-                            const SizedBox(width: 4),
+                            Positioned.fill(child: _body(activeTab)),
+                            // The floating, draggable format palette — hidden in Preview
+                            // and print-preview tabs (nothing to edit there) and, in a
+                            // source mode, while find is open so it can't cover the find
+                            // card on narrow windows.
+                            if (active != null &&
+                                active.mode != EditorMode.preview &&
+                                !(_find.visible && active.mode.isSource))
+                              FloatingFormatToolbar(
+                                controller: active,
+                                area: constraints.biggest,
+                              ),
+                            if (_dragging) _dropHint(context),
                           ],
                         ),
                       ),
-                    )
-                  : null,
-            ),
-            body: DropTarget(
-              onDragEntered: (_) => setState(() => _dragging = true),
-              onDragExited: (_) => setState(() => _dragging = false),
-              onDragDone: (detail) => _onFilesDropped(detail, ws),
-              // Ctrl/Cmd + mouse wheel zooms, like a browser; a two-finger
-              // pinch zooms on touch. A raw Listener observes without
-              // consuming, so a one-finger drag still scrolls normally — an
-              // accepted trade-off for not swallowing normal scrolling.
-              child: Listener(
-                onPointerSignal: (event) {
-                  if (event is! PointerScrollEvent) return;
-                  final keys = HardwareKeyboard.instance;
-                  if (!keys.isControlPressed && !keys.isMetaPressed) return;
-                  if (event.scrollDelta.dy == 0) return;
-                  event.scrollDelta.dy < 0 ? zoom.zoomIn() : zoom.zoomOut();
-                },
-                onPointerDown: _onPinchDown,
-                onPointerMove: _onPinchMove,
-                onPointerUp: (e) => _onPinchEnd(e.pointer),
-                onPointerCancel: (e) => _onPinchEnd(e.pointer),
-                child: LayoutBuilder(
-                  builder: (context, constraints) => Stack(
-                    children: [
-                      Positioned.fill(child: _body(activeTab)),
-                      // The floating, draggable format palette — hidden in Preview
-                      // and print-preview tabs (nothing to edit there) and, in a
-                      // source mode, while find is open so it can't cover the find
-                      // card on narrow windows.
-                      if (active != null &&
-                          active.mode != EditorMode.preview &&
-                          !(_find.visible && active.mode.isSource))
-                        FloatingFormatToolbar(
-                          controller: active,
-                          area: constraints.biggest,
-                        ),
-                      if (_dragging) _dropHint(context),
-                    ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
           ),
         ),
@@ -659,7 +638,11 @@ class _EditorScreenState extends State<EditorScreen>
 
   /// [active] is null when the active tab is a print preview; document-bound
   /// actions (mode toggle, find, save, print) are then hidden or disabled.
-  List<Widget> _actions(
+  /// The left-aligned toolbar icons for the top app-bar row. The overflow
+  /// hamburger is separate ([_overflowMenu]) so it can pin to the far right
+  /// while these stay left; the open-document tabs live on their own row(s)
+  /// below the app bar (see build()).
+  List<Widget> _toolbarIcons(
     BuildContext context,
     WorkspaceController ws,
     DocumentController? active,
@@ -683,12 +666,20 @@ class _EditorScreenState extends State<EditorScreen>
       selectedIcon: Icon(Icons.sync_outlined, color: cs.primary),
       onPressed: () => ws.setAutoReload(!ws.autoReload),
     );
+    // Compact icon-only view-mode toggle (document tabs only).
+    final modeToggle = active == null
+        ? null
+        : Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Center(child: _ModeToggle(doc: active)),
+          );
 
     if (isNarrow) {
-      // Phone layout: keep Save + auto-reload + theme; everything else in menu.
-      // No update chip here: at phone widths the long button starves the
-      // tab strip; the overflow menu carries the same command.
+      // Phone layout: mode toggle + Save + auto-reload + theme; everything else
+      // lives in the overflow menu. No update chip here: at phone widths the
+      // long button starves the row; the overflow menu carries the command.
       return [
+        if (modeToggle != null) modeToggle,
         if (zoomChip != null) zoomChip,
         IconButton(
           tooltip: 'Save',
@@ -700,53 +691,11 @@ class _EditorScreenState extends State<EditorScreen>
             tooltip: 'Theme: ${theme.mode.name}',
             icon: themeIcon,
             onPressed: theme.cycle),
-        PopupMenuButton<String>(
-          onSelected: (value) => _onMenu(context, ws, active, value),
-          // Document-bound commands are disabled while a print preview tab is
-          // active (there is no document to act on).
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: 'open', child: Text('Open…')),
-            const PopupMenuItem(value: 'new', child: Text('New tab')),
-            PopupMenuItem(
-                value: 'find',
-                enabled: active != null,
-                child: const Text('Find')),
-            // Replace edits the source, so this routes through Raw — a mouse/
-            // touch path to Replace that also works from Preview (which offers
-            // find only).
-            PopupMenuItem(
-                value: 'replace',
-                enabled: active != null,
-                child: const Text('Replace…')),
-            PopupMenuItem(
-                value: 'save',
-                enabled: active != null,
-                child: const Text('Save')),
-            PopupMenuItem(
-                value: 'saveAs',
-                enabled: active != null,
-                child: const Text('Save As…')),
-            PopupMenuItem(
-                value: 'print',
-                enabled: active != null,
-                child: const Text('Print / Export PDF')),
-            ..._zoomMenuItems(context),
-            ..._updateMenuItems(context),
-            const PopupMenuItem(
-                value: 'support', child: Text('Support the project ❤')),
-            const PopupMenuItem(value: 'about', child: Text('About')),
-          ],
-        ),
       ];
     }
 
     return [
-      // Compact icon-only view-mode toggle (wide layouts; document tabs only).
-      if (active != null)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Center(child: _ModeToggle(doc: active)),
-        ),
+      if (modeToggle != null) modeToggle,
       if (updateChip != null) updateChip,
       if (zoomChip != null) zoomChip,
       IconButton(
@@ -774,29 +723,69 @@ class _EditorScreenState extends State<EditorScreen>
           tooltip: 'Theme: ${theme.mode.name}',
           icon: themeIcon,
           onPressed: theme.cycle),
-      PopupMenuButton<String>(
-        onSelected: (value) => _onMenu(context, ws, active, value),
-        itemBuilder: (_) => [
-          const PopupMenuItem(value: 'new', child: Text('New tab')),
-          // The Find toolbar button opens plain find (works in Preview too);
-          // Replace edits the source, so it lives here and routes through Raw —
-          // the only mouse/touch path to Replace in the wide layout.
-          PopupMenuItem(
-              value: 'replace',
-              enabled: active != null,
-              child: const Text('Replace…')),
-          PopupMenuItem(
-              value: 'saveAs',
-              enabled: active != null,
-              child: const Text('Save As…')),
-          ..._zoomMenuItems(context),
-          ..._updateMenuItems(context),
-          const PopupMenuItem(
-              value: 'support', child: Text('Support the project ❤')),
-          const PopupMenuItem(value: 'about', child: Text('About')),
-        ],
-      ),
     ];
+  }
+
+  /// The overflow (hamburger) menu, pinned to the far right of the top row.
+  Widget _overflowMenu(
+    BuildContext context,
+    WorkspaceController ws,
+    DocumentController? active,
+    bool isNarrow,
+  ) {
+    // Document-bound commands are disabled while a print preview tab is active
+    // (there is no document to act on).
+    return PopupMenuButton<String>(
+      onSelected: (value) => _onMenu(context, ws, active, value),
+      itemBuilder: (_) => isNarrow
+          ? [
+              const PopupMenuItem(value: 'open', child: Text('Open…')),
+              const PopupMenuItem(value: 'new', child: Text('New tab')),
+              PopupMenuItem(
+                  value: 'find',
+                  enabled: active != null,
+                  child: const Text('Find')),
+              PopupMenuItem(
+                  value: 'replace',
+                  enabled: active != null,
+                  child: const Text('Replace…')),
+              PopupMenuItem(
+                  value: 'save',
+                  enabled: active != null,
+                  child: const Text('Save')),
+              PopupMenuItem(
+                  value: 'saveAs',
+                  enabled: active != null,
+                  child: const Text('Save As…')),
+              PopupMenuItem(
+                  value: 'print',
+                  enabled: active != null,
+                  child: const Text('Print / Export PDF')),
+              ..._zoomMenuItems(context),
+              ..._updateMenuItems(context),
+              const PopupMenuItem(
+                  value: 'support', child: Text('Support the project ❤')),
+              const PopupMenuItem(value: 'about', child: Text('About')),
+            ]
+          : [
+              const PopupMenuItem(value: 'new', child: Text('New tab')),
+              // Replace edits the source, so it routes through Raw — the only
+              // mouse/touch path to Replace in the wide layout.
+              PopupMenuItem(
+                  value: 'replace',
+                  enabled: active != null,
+                  child: const Text('Replace…')),
+              PopupMenuItem(
+                  value: 'saveAs',
+                  enabled: active != null,
+                  child: const Text('Save As…')),
+              ..._zoomMenuItems(context),
+              ..._updateMenuItems(context),
+              const PopupMenuItem(
+                  value: 'support', child: Text('Support the project ❤')),
+              const PopupMenuItem(value: 'about', child: Text('About')),
+            ],
+    );
   }
 
   /// Update entries shared by both overflow menus.
@@ -1394,183 +1383,107 @@ class _TabStrip extends StatefulWidget {
 }
 
 class _TabStripState extends State<_TabStrip> {
-  final ScrollController _scroll = ScrollController();
-  bool _canLeft = false;
-  bool _canRight = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _scroll.addListener(_updateArrows);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
-  }
-
-  @override
-  void didUpdateWidget(covariant _TabStrip oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Tabs may have been opened/closed — recompute overflow after layout.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
-  }
-
-  @override
-  void dispose() {
-    _scroll.removeListener(_updateArrows);
-    _scroll.dispose();
-    super.dispose();
-  }
-
-  void _updateArrows() {
-    if (!mounted || !_scroll.hasClients) return;
-    final pos = _scroll.position;
-    final canLeft = pos.pixels > 0.5;
-    final canRight = pos.pixels < pos.maxScrollExtent - 0.5;
-    if (canLeft != _canLeft || canRight != _canRight) {
-      setState(() {
-        _canLeft = canLeft;
-        _canRight = canRight;
-      });
-    }
-  }
-
-  void _nudge(double delta) {
-    if (!_scroll.hasClients) return;
-    final target =
-        (_scroll.offset + delta).clamp(0.0, _scroll.position.maxScrollExtent);
-    _scroll.animateTo(target,
-        duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
-  }
-
-  void _onPointerSignal(PointerSignalEvent event) {
-    if (event is! PointerScrollEvent || !_scroll.hasClients) return;
-    // Translate vertical wheel into horizontal scroll (a horizontal ListView
-    // otherwise ignores the wheel on desktop).
-    final primary =
-        event.scrollDelta.dy != 0 ? event.scrollDelta.dy : event.scrollDelta.dx;
-    final target =
-        (_scroll.offset + primary).clamp(0.0, _scroll.position.maxScrollExtent);
-    _scroll.jumpTo(target);
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final workspace = widget.workspace;
     final tabs = workspace.tabs;
-    // Recompute overflow after every layout so the chevrons appear/disappear on
-    // a pure window-width change, not only on tab add/remove or scroll.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _updateArrows());
     return Container(
-      height: 36,
+      width: double.infinity,
       decoration: BoxDecoration(
         color: cs.surfaceContainerLow,
         border: Border(bottom: BorderSide(color: cs.outlineVariant)),
       ),
-      child: Row(
+      // Tabs flow left-to-right and wrap onto additional rows as they overflow
+      // the width, rather than scrolling within a single row.
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          // New-tab button is left-aligned; the tabs then fill the space to
-          // its right and scroll when they overflow.
-          IconButton(
-            tooltip: 'New tab',
-            iconSize: 18,
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.add_rounded),
-            onPressed: workspace.newDocument,
-          ),
-          if (_canLeft)
-            IconButton(
-              tooltip: 'Scroll left',
+          // New-tab button, left-aligned before the first tab.
+          SizedBox(
+            height: 36,
+            child: IconButton(
+              tooltip: 'New tab',
               iconSize: 18,
               visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.chevron_left_rounded),
-              onPressed: () => _nudge(-180),
+              icon: const Icon(Icons.add_rounded),
+              onPressed: workspace.newDocument,
             ),
-          Expanded(
-            child: Listener(
-              onPointerSignal: _onPointerSignal,
-              child: ListView.builder(
-                controller: _scroll,
-                scrollDirection: Axis.horizontal,
-                // One extra slot for an end drop target so a tab can be dropped
-                // after the last one.
-                itemCount: tabs.length + 1,
-                itemBuilder: (context, i) {
-                  if (i == tabs.length) {
-                    return DragTarget<int>(
-                      onWillAcceptWithDetails: (d) => true,
-                      onAcceptWithDetails: (d) =>
-                          workspace.reorder(d.data, tabs.length),
-                      builder: (context, candidate, rejected) => Container(
-                        width: 64,
-                        alignment: Alignment.centerLeft,
-                        decoration: BoxDecoration(
-                          border: Border(
-                            left: BorderSide(
-                              color: candidate.isNotEmpty
-                                  ? cs.primary
-                                  : Colors.transparent,
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }
-                  final tab = _Tab(
-                    tab: tabs[i],
-                    selected: i == workspace.activeIndex,
-                    onTap: () => workspace.select(i),
-                    onClose: () => widget.onClose(i),
-                  );
-                  return DragTarget<int>(
-                    onWillAcceptWithDetails: (d) => d.data != i,
-                    onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
-                    builder: (context, candidate, rejected) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            left: BorderSide(
-                              color: candidate.isNotEmpty
-                                  ? cs.primary
-                                  : Colors.transparent,
-                              width: 2,
-                            ),
-                          ),
-                        ),
-                        child: Draggable<int>(
-                          data: i,
-                          feedback: Material(
-                            color: Colors.transparent,
-                            elevation: 6,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 220),
-                              child: Container(
-                                color: cs.surfaceContainerHigh,
-                                child: tab,
-                              ),
-                            ),
-                          ),
-                          childWhenDragging: Opacity(opacity: 0.3, child: tab),
-                          onDragEnd: (details) =>
-                              widget.onTabDragEnd(i, details),
-                          child: tab,
-                        ),
-                      );
-                    },
-                  );
-                },
+          ),
+          for (var i = 0; i < tabs.length; i++)
+            _draggableTab(context, workspace, tabs, i, cs),
+          // Trailing drop target so a tab can be dropped after the last one.
+          DragTarget<int>(
+            onWillAcceptWithDetails: (d) => true,
+            onAcceptWithDetails: (d) => workspace.reorder(d.data, tabs.length),
+            builder: (context, candidate, rejected) => Container(
+              width: 48,
+              height: 36,
+              alignment: Alignment.centerLeft,
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color:
+                        candidate.isNotEmpty ? cs.primary : Colors.transparent,
+                    width: 2,
+                  ),
+                ),
               ),
             ),
           ),
-          if (_canRight)
-            IconButton(
-              tooltip: 'Scroll right',
-              iconSize: 18,
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.chevron_right_rounded),
-              onPressed: () => _nudge(180),
-            ),
         ],
       ),
+    );
+  }
+
+  Widget _draggableTab(
+    BuildContext context,
+    WorkspaceController workspace,
+    List<WorkspaceTab> tabs,
+    int i,
+    ColorScheme cs,
+  ) {
+    final tab = _Tab(
+      tab: tabs[i],
+      selected: i == workspace.activeIndex,
+      onTap: () => workspace.select(i),
+      onClose: () => widget.onClose(i),
+    );
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (d) => d.data != i,
+      onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
+      builder: (context, candidate, rejected) {
+        return SizedBox(
+          height: 36,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                  color: candidate.isNotEmpty ? cs.primary : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+            ),
+            child: Draggable<int>(
+              data: i,
+              feedback: Material(
+                color: Colors.transparent,
+                elevation: 6,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: Container(
+                    color: cs.surfaceContainerHigh,
+                    child: tab,
+                  ),
+                ),
+              ),
+              childWhenDragging: Opacity(opacity: 0.3, child: tab),
+              onDragEnd: (details) => widget.onTabDragEnd(i, details),
+              child: tab,
+            ),
+          ),
+        );
+      },
     );
   }
 }

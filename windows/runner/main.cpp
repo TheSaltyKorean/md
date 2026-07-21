@@ -50,7 +50,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
   Win32Window::Point origin(origin_x, origin_y);
   Win32Window::Size size(desired_w, desired_h);
-  if (!window.Create(L"markdown_studio", origin, size)) {
+  if (!window.Create(L"Markdown Studio", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

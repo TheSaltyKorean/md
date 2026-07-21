@@ -672,10 +672,10 @@ void main() {
     await tester.pumpAndSettle();
   });
 
-  testWidgets('Phone layout: mode toggle and icons share the second row',
+  testWidgets('Toolbar icons own the top row; tabs sit on their own row below',
       (tester) async {
-    // Narrow width triggers the stacked layout: the tab strip owns the top
-    // row; the mode toggle and action icons share the second row.
+    // The toolbar icons (mode toggle + actions) are left-aligned on the top
+    // app-bar row; the open-document tabs sit on their own row(s) below it.
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -698,19 +698,24 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    // The Save icon sits BELOW the top app-bar row (second row, not crammed
-    // next to the tabs). kToolbarHeight = 56.
+    // The Save icon sits in the top app-bar row (kToolbarHeight = 56).
     final save = find.byTooltip('Save');
     expect(save, findsOneWidget);
-    expect(tester.getCenter(save).dy, greaterThan(56.0));
+    expect(tester.getCenter(save).dy, lessThan(56.0));
 
-    // The mode toggle shares that same row as the icons — same vertical
-    // centre, not stacked on a separate line. Locate it by its 'Raw' segment
-    // tooltip (a mode label that doesn't collide with other chrome).
+    // The mode toggle shares that same top row — same vertical centre. Locate
+    // it by its 'Raw' segment tooltip (a mode label that doesn't collide with
+    // other chrome).
     final mode = find.byTooltip('Raw');
     expect(mode, findsOneWidget);
     expect(tester.getCenter(mode).dy,
         moreOrLessEquals(tester.getCenter(save).dy, epsilon: 2.0));
+
+    // The tab strip sits BELOW the app bar, on its own row: the New-tab button
+    // (which lives in the strip) is lower than the top-row icons.
+    final newTab = find.byTooltip('New tab');
+    expect(newTab, findsOneWidget);
+    expect(tester.getCenter(newTab).dy, greaterThan(56.0));
   });
 
   test('Update version comparison is strict and parse-safe', () {
