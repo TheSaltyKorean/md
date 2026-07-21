@@ -495,63 +495,68 @@ class _EditorScreenState extends State<EditorScreen>
               ),
               actions: [_overflowMenu(context, ws, active, isNarrow)],
             ),
-            body: Column(
-              children: [
-                // Open-document tabs on their own row(s), below the toolbar;
-                // they wrap into additional rows as more tabs open.
-                _TabStrip(
-                  workspace: ws,
-                  onClose: _closeTab,
-                  onTabDragEnd: _onTabDragEnd,
-                ),
-                Expanded(
-                  child: DropTarget(
-                    onDragEntered: (_) => setState(() => _dragging = true),
-                    onDragExited: (_) => setState(() => _dragging = false),
-                    onDragDone: (detail) => _onFilesDropped(detail, ws),
-                    // Ctrl/Cmd + mouse wheel zooms, like a browser; a two-finger
-                    // pinch zooms on touch. A raw Listener observes without
-                    // consuming, so a one-finger drag still scrolls normally — an
-                    // accepted trade-off for not swallowing normal scrolling.
-                    child: Listener(
-                      onPointerSignal: (event) {
-                        if (event is! PointerScrollEvent) return;
-                        final keys = HardwareKeyboard.instance;
-                        if (!keys.isControlPressed && !keys.isMetaPressed) {
-                          return;
-                        }
-                        if (event.scrollDelta.dy == 0) return;
-                        event.scrollDelta.dy < 0
-                            ? zoom.zoomIn()
-                            : zoom.zoomOut();
-                      },
-                      onPointerDown: _onPinchDown,
-                      onPointerMove: _onPinchMove,
-                      onPointerUp: (e) => _onPinchEnd(e.pointer),
-                      onPointerCancel: (e) => _onPinchEnd(e.pointer),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) => Stack(
-                          children: [
-                            Positioned.fill(child: _body(activeTab)),
-                            // The floating, draggable format palette — hidden in Preview
-                            // and print-preview tabs (nothing to edit there) and, in a
-                            // source mode, while find is open so it can't cover the find
-                            // card on narrow windows.
-                            if (active != null &&
-                                active.mode != EditorMode.preview &&
-                                !(_find.visible && active.mode.isSource))
-                              FloatingFormatToolbar(
-                                controller: active,
-                                area: constraints.biggest,
-                              ),
-                            if (_dragging) _dropHint(context),
-                          ],
+            body: LayoutBuilder(
+              builder: (context, constraints) => Column(
+                children: [
+                  // Open-document tabs on their own row(s), below the toolbar;
+                  // they wrap into additional rows as more tabs open. The height
+                  // cap is half the *available body* height (constraints), so a
+                  // short window or on-screen keyboard can't be overflowed.
+                  _TabStrip(
+                    workspace: ws,
+                    onClose: _closeTab,
+                    onTabDragEnd: _onTabDragEnd,
+                    maxHeight: constraints.maxHeight * 0.5,
+                  ),
+                  Expanded(
+                    child: DropTarget(
+                      onDragEntered: (_) => setState(() => _dragging = true),
+                      onDragExited: (_) => setState(() => _dragging = false),
+                      onDragDone: (detail) => _onFilesDropped(detail, ws),
+                      // Ctrl/Cmd + mouse wheel zooms, like a browser; a two-finger
+                      // pinch zooms on touch. A raw Listener observes without
+                      // consuming, so a one-finger drag still scrolls normally — an
+                      // accepted trade-off for not swallowing normal scrolling.
+                      child: Listener(
+                        onPointerSignal: (event) {
+                          if (event is! PointerScrollEvent) return;
+                          final keys = HardwareKeyboard.instance;
+                          if (!keys.isControlPressed && !keys.isMetaPressed) {
+                            return;
+                          }
+                          if (event.scrollDelta.dy == 0) return;
+                          event.scrollDelta.dy < 0
+                              ? zoom.zoomIn()
+                              : zoom.zoomOut();
+                        },
+                        onPointerDown: _onPinchDown,
+                        onPointerMove: _onPinchMove,
+                        onPointerUp: (e) => _onPinchEnd(e.pointer),
+                        onPointerCancel: (e) => _onPinchEnd(e.pointer),
+                        child: LayoutBuilder(
+                          builder: (context, constraints) => Stack(
+                            children: [
+                              Positioned.fill(child: _body(activeTab)),
+                              // The floating, draggable format palette — hidden in Preview
+                              // and print-preview tabs (nothing to edit there) and, in a
+                              // source mode, while find is open so it can't cover the find
+                              // card on narrow windows.
+                              if (active != null &&
+                                  active.mode != EditorMode.preview &&
+                                  !(_find.visible && active.mode.isSource))
+                                FloatingFormatToolbar(
+                                  controller: active,
+                                  area: constraints.biggest,
+                                ),
+                              if (_dragging) _dropHint(context),
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1372,11 +1377,16 @@ class _TabStrip extends StatefulWidget {
     required this.workspace,
     required this.onClose,
     required this.onTabDragEnd,
+    required this.maxHeight,
   });
 
   final WorkspaceController workspace;
   final ValueChanged<int> onClose;
   final void Function(int index, DraggableDetails details) onTabDragEnd;
+
+  /// Maximum height the strip may occupy before its rows scroll vertically.
+  /// Derived from the available body height so it can never overflow.
+  final double maxHeight;
 
   @override
   State<_TabStrip> createState() => _TabStripState();
@@ -1400,9 +1410,7 @@ class _TabStripState extends State<_TabStrip> {
       // a large tab count can never overflow the Column or push the editor and
       // later rows off-screen.
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * 0.5,
-        ),
+        constraints: BoxConstraints(maxHeight: widget.maxHeight),
         child: SingleChildScrollView(
           child: Wrap(
             crossAxisAlignment: WrapCrossAlignment.center,
@@ -1421,14 +1429,23 @@ class _TabStripState extends State<_TabStrip> {
               for (var i = 0; i < tabs.length; i++)
                 if (i == tabs.length - 1)
                   // The trailing "drop after the last tab" target rides in the
-                  // same Wrap run as the last tab, so it can never wrap onto a
-                  // blank row of its own when the row is nearly full.
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _draggableTab(context, workspace, tabs, i, cs),
-                      _endDropTarget(context, workspace, tabs, cs),
-                    ],
+                  // same Wrap run as the last tab (never a standalone child, so
+                  // no blank row). Bounded to the strip width with a Flexible
+                  // tab so the pair shrinks/ellipsizes instead of horizontally
+                  // overflowing a window narrower than one tab + the target.
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.sizeOf(context).width,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: _draggableTab(context, workspace, tabs, i, cs),
+                        ),
+                        _endDropTarget(context, workspace, tabs, cs),
+                      ],
+                    ),
                   )
                 else
                   _draggableTab(context, workspace, tabs, i, cs),
