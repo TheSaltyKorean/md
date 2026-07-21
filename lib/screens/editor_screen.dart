@@ -766,6 +766,7 @@ class _EditorScreenState extends State<EditorScreen>
                   value: 'print',
                   enabled: active != null,
                   child: const Text('Print / Export PDF')),
+              ..._toggleMenuItems(context, ws),
               ..._zoomMenuItems(context),
               ..._updateMenuItems(context),
               const PopupMenuItem(
@@ -784,6 +785,7 @@ class _EditorScreenState extends State<EditorScreen>
                   value: 'saveAs',
                   enabled: active != null,
                   child: const Text('Save As…')),
+              ..._toggleMenuItems(context, ws),
               ..._zoomMenuItems(context),
               ..._updateMenuItems(context),
               const PopupMenuItem(
@@ -791,6 +793,25 @@ class _EditorScreenState extends State<EditorScreen>
               const PopupMenuItem(value: 'about', child: Text('About')),
             ],
     );
+  }
+
+  /// Auto-reload + theme entries, kept in the overflow menu so these commands
+  /// stay reachable even when a narrow window clips them out of the top icon
+  /// row (which scrolls horizontally and can't be wheel-scrolled).
+  List<PopupMenuEntry<String>> _toggleMenuItems(
+      BuildContext context, WorkspaceController ws) {
+    final theme = context.read<ThemeController>();
+    return [
+      CheckedPopupMenuItem(
+        value: 'toggleAutoReload',
+        checked: ws.autoReload,
+        child: const Text('Auto-reload'),
+      ),
+      PopupMenuItem(
+        value: 'cycleTheme',
+        child: Text('Theme: ${theme.mode.name}'),
+      ),
+    ];
   }
 
   /// Update entries shared by both overflow menus.
@@ -1077,6 +1098,12 @@ class _EditorScreenState extends State<EditorScreen>
       case 'toggleUpdateCheck':
         final updates = context.read<UpdateController>();
         updates.setCheckOnStartup(!updates.checkOnStartup);
+        break;
+      case 'toggleAutoReload':
+        ws.setAutoReload(!ws.autoReload);
+        break;
+      case 'cycleTheme':
+        context.read<ThemeController>().cycle();
         break;
       case 'support':
         _support(context);
@@ -1393,11 +1420,58 @@ class _TabStrip extends StatefulWidget {
 }
 
 class _TabStripState extends State<_TabStrip> {
+  final ScrollController _scroll = ScrollController();
+  final GlobalKey _activeTabKey = GlobalKey();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// After a rebuild (a tab was added or the selection changed), scroll the
+  /// active tab into view — once the rows wrap past the height cap it could
+  /// otherwise be stranded below the scrolled, capped strip.
+  void _revealActiveTab() {
+    final ctx = _activeTabKey.currentContext;
+    if (ctx == null || !_scroll.hasClients) return;
+    Scrollable.ensureVisible(
+      ctx,
+      alignment: 0.5,
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final workspace = widget.workspace;
     final tabs = workspace.tabs;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealActiveTab());
+
+    // The Wrap item for tab [i]. The last tab carries the trailing "drop after
+    // the last tab" target in the same run (never a standalone child, so no
+    // blank row), bounded to the strip width with a Flexible tab so the pair
+    // shrinks/ellipsizes instead of overflowing a very narrow window.
+    Widget tabItem(int i) {
+      if (i == tabs.length - 1) {
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(child: _draggableTab(context, workspace, tabs, i, cs)),
+              _endDropTarget(context, workspace, tabs, cs),
+            ],
+          ),
+        );
+      }
+      return _draggableTab(context, workspace, tabs, i, cs);
+    }
+
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(
@@ -1405,13 +1479,13 @@ class _TabStripState extends State<_TabStrip> {
         border: Border(bottom: BorderSide(color: cs.outlineVariant)),
       ),
       // Tabs flow left-to-right and wrap onto additional rows as they overflow
-      // the width, rather than scrolling within a single row. The strip is
-      // capped at half the window height and scrolls vertically beyond that, so
-      // a large tab count can never overflow the Column or push the editor and
-      // later rows off-screen.
+      // the width. The strip is capped at half the available body height and
+      // scrolls vertically beyond that, so a large tab count can never overflow
+      // the Column or push the editor off-screen.
       child: ConstrainedBox(
         constraints: BoxConstraints(maxHeight: widget.maxHeight),
         child: SingleChildScrollView(
+          controller: _scroll,
           child: Wrap(
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
@@ -1427,28 +1501,10 @@ class _TabStripState extends State<_TabStrip> {
                 ),
               ),
               for (var i = 0; i < tabs.length; i++)
-                if (i == tabs.length - 1)
-                  // The trailing "drop after the last tab" target rides in the
-                  // same Wrap run as the last tab (never a standalone child, so
-                  // no blank row). Bounded to the strip width with a Flexible
-                  // tab so the pair shrinks/ellipsizes instead of horizontally
-                  // overflowing a window narrower than one tab + the target.
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.sizeOf(context).width,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: _draggableTab(context, workspace, tabs, i, cs),
-                        ),
-                        _endDropTarget(context, workspace, tabs, cs),
-                      ],
-                    ),
-                  )
+                if (i == workspace.activeIndex)
+                  KeyedSubtree(key: _activeTabKey, child: tabItem(i))
                 else
-                  _draggableTab(context, workspace, tabs, i, cs),
+                  tabItem(i),
             ],
           ),
         ),
