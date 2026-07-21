@@ -1395,43 +1395,74 @@ class _TabStripState extends State<_TabStrip> {
         border: Border(bottom: BorderSide(color: cs.outlineVariant)),
       ),
       // Tabs flow left-to-right and wrap onto additional rows as they overflow
-      // the width, rather than scrolling within a single row.
-      child: Wrap(
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          // New-tab button, left-aligned before the first tab.
-          SizedBox(
-            height: 36,
-            child: IconButton(
-              tooltip: 'New tab',
-              iconSize: 18,
-              visualDensity: VisualDensity.compact,
-              icon: const Icon(Icons.add_rounded),
-              onPressed: workspace.newDocument,
-            ),
-          ),
-          for (var i = 0; i < tabs.length; i++)
-            _draggableTab(context, workspace, tabs, i, cs),
-          // Trailing drop target so a tab can be dropped after the last one.
-          DragTarget<int>(
-            onWillAcceptWithDetails: (d) => true,
-            onAcceptWithDetails: (d) => workspace.reorder(d.data, tabs.length),
-            builder: (context, candidate, rejected) => Container(
-              width: 48,
-              height: 36,
-              alignment: Alignment.centerLeft,
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(
-                    color:
-                        candidate.isNotEmpty ? cs.primary : Colors.transparent,
-                    width: 2,
-                  ),
+      // the width, rather than scrolling within a single row. The strip is
+      // capped at half the window height and scrolls vertically beyond that, so
+      // a large tab count can never overflow the Column or push the editor and
+      // later rows off-screen.
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.5,
+        ),
+        child: SingleChildScrollView(
+          child: Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              // New-tab button, left-aligned before the first tab.
+              SizedBox(
+                height: 36,
+                child: IconButton(
+                  tooltip: 'New tab',
+                  iconSize: 18,
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.add_rounded),
+                  onPressed: workspace.newDocument,
                 ),
               ),
+              for (var i = 0; i < tabs.length; i++)
+                if (i == tabs.length - 1)
+                  // The trailing "drop after the last tab" target rides in the
+                  // same Wrap run as the last tab, so it can never wrap onto a
+                  // blank row of its own when the row is nearly full.
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _draggableTab(context, workspace, tabs, i, cs),
+                      _endDropTarget(context, workspace, tabs, cs),
+                    ],
+                  )
+                else
+                  _draggableTab(context, workspace, tabs, i, cs),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Drop target that moves a dragged tab to the last position. Rendered right
+  /// after the final tab (never as a standalone Wrap child) so it can't create
+  /// an empty trailing row.
+  Widget _endDropTarget(
+    BuildContext context,
+    WorkspaceController workspace,
+    List<WorkspaceTab> tabs,
+    ColorScheme cs,
+  ) {
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (d) => true,
+      onAcceptWithDetails: (d) => workspace.reorder(d.data, tabs.length),
+      builder: (context, candidate, rejected) => Container(
+        width: 48,
+        height: 36,
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(
+              color: candidate.isNotEmpty ? cs.primary : Colors.transparent,
+              width: 2,
             ),
           ),
-        ],
+        ),
       ),
     );
   }
