@@ -493,7 +493,7 @@ class _EditorScreenState extends State<EditorScreen>
                   children: _toolbarIcons(context, ws, active, theme, isNarrow),
                 ),
               ),
-              actions: [_overflowMenu(context, ws, active, isNarrow)],
+              actions: [_overflowMenu(context, ws, active)],
             ),
             body: LayoutBuilder(
               builder: (context, constraints) => Column(
@@ -736,62 +736,41 @@ class _EditorScreenState extends State<EditorScreen>
     BuildContext context,
     WorkspaceController ws,
     DocumentController? active,
-    bool isNarrow,
   ) {
-    // Document-bound commands are disabled while a print preview tab is active
-    // (there is no document to act on).
+    // Every toolbar command lives here too, so anything the horizontally
+    // scrolling top icon row clips off (narrow window, or large accessibility
+    // text even while "wide") stays reachable from this pinned hamburger — a
+    // mouse wheel can't scroll the icon row horizontally. Document-bound
+    // commands are disabled while a print preview tab is active.
     return PopupMenuButton<String>(
       onSelected: (value) => _onMenu(context, ws, active, value),
-      itemBuilder: (_) => isNarrow
-          ? [
-              const PopupMenuItem(value: 'open', child: Text('Open…')),
-              const PopupMenuItem(value: 'new', child: Text('New tab')),
-              PopupMenuItem(
-                  value: 'find',
-                  enabled: active != null,
-                  child: const Text('Find')),
-              PopupMenuItem(
-                  value: 'replace',
-                  enabled: active != null,
-                  child: const Text('Replace…')),
-              PopupMenuItem(
-                  value: 'save',
-                  enabled: active != null,
-                  child: const Text('Save')),
-              PopupMenuItem(
-                  value: 'saveAs',
-                  enabled: active != null,
-                  child: const Text('Save As…')),
-              PopupMenuItem(
-                  value: 'print',
-                  enabled: active != null,
-                  child: const Text('Print / Export PDF')),
-              ..._toggleMenuItems(context, ws),
-              ..._zoomMenuItems(context),
-              ..._updateMenuItems(context),
-              const PopupMenuItem(
-                  value: 'support', child: Text('Support the project ❤')),
-              const PopupMenuItem(value: 'about', child: Text('About')),
-            ]
-          : [
-              const PopupMenuItem(value: 'new', child: Text('New tab')),
-              // Replace edits the source, so it routes through Raw — the only
-              // mouse/touch path to Replace in the wide layout.
-              PopupMenuItem(
-                  value: 'replace',
-                  enabled: active != null,
-                  child: const Text('Replace…')),
-              PopupMenuItem(
-                  value: 'saveAs',
-                  enabled: active != null,
-                  child: const Text('Save As…')),
-              ..._toggleMenuItems(context, ws),
-              ..._zoomMenuItems(context),
-              ..._updateMenuItems(context),
-              const PopupMenuItem(
-                  value: 'support', child: Text('Support the project ❤')),
-              const PopupMenuItem(value: 'about', child: Text('About')),
-            ],
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'open', child: Text('Open…')),
+        const PopupMenuItem(value: 'new', child: Text('New tab')),
+        PopupMenuItem(
+            value: 'find', enabled: active != null, child: const Text('Find')),
+        // Replace edits the source, so it routes through Raw.
+        PopupMenuItem(
+            value: 'replace',
+            enabled: active != null,
+            child: const Text('Replace…')),
+        PopupMenuItem(
+            value: 'save', enabled: active != null, child: const Text('Save')),
+        PopupMenuItem(
+            value: 'saveAs',
+            enabled: active != null,
+            child: const Text('Save As…')),
+        PopupMenuItem(
+            value: 'print',
+            enabled: active != null,
+            child: const Text('Print / Export PDF')),
+        ..._toggleMenuItems(context, ws),
+        ..._zoomMenuItems(context),
+        ..._updateMenuItems(context),
+        const PopupMenuItem(
+            value: 'support', child: Text('Support the project ❤')),
+        const PopupMenuItem(value: 'about', child: Text('About')),
+      ],
     );
   }
 
@@ -1423,6 +1402,11 @@ class _TabStripState extends State<_TabStrip> {
   final ScrollController _scroll = ScrollController();
   final GlobalKey _activeTabKey = GlobalKey();
 
+  /// Identity of the tab last scrolled into view, so the reveal fires only when
+  /// the *selection* changes — not on every unrelated workspace notification
+  /// (theme, auto-reload, dirty state, closing an off-screen inactive tab).
+  WorkspaceTab? _lastRevealedActive;
+
   @override
   void dispose() {
     _scroll.dispose();
@@ -1448,7 +1432,15 @@ class _TabStripState extends State<_TabStrip> {
     final cs = Theme.of(context).colorScheme;
     final workspace = widget.workspace;
     final tabs = workspace.tabs;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _revealActiveTab());
+    final activeIndex = workspace.activeIndex;
+    final active = (activeIndex >= 0 && activeIndex < tabs.length)
+        ? tabs[activeIndex]
+        : null;
+    // Only scroll the active tab into view when the selection itself changed.
+    if (active != null && !identical(active, _lastRevealedActive)) {
+      _lastRevealedActive = active;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealActiveTab());
+    }
 
     // The Wrap item for tab [i]. The last tab carries the trailing "drop after
     // the last tab" target in the same run (never a standalone child, so no
@@ -1553,6 +1545,35 @@ class _TabStripState extends State<_TabStrip> {
       onTap: () => workspace.select(i),
       onClose: () => widget.onClose(i),
     );
+    final feedback = Material(
+      color: Colors.transparent,
+      elevation: 6,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 220),
+        child: Container(color: cs.surfaceContainerHigh, child: tab),
+      ),
+    );
+    final childWhenDragging = Opacity(opacity: 0.3, child: tab);
+    void onEnd(DraggableDetails d) => widget.onTabDragEnd(i, d);
+    // On touch a plain Draggable claims the swipe and reorders instead of
+    // letting the vertical strip scroll; require a long-press to reorder there.
+    // Desktop keeps immediate click-drag.
+    final touch = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final Widget draggable = touch
+        ? LongPressDraggable<int>(
+            data: i,
+            feedback: feedback,
+            childWhenDragging: childWhenDragging,
+            onDragEnd: onEnd,
+            child: tab,
+          )
+        : Draggable<int>(
+            data: i,
+            feedback: feedback,
+            childWhenDragging: childWhenDragging,
+            onDragEnd: onEnd,
+            child: tab,
+          );
     return DragTarget<int>(
       onWillAcceptWithDetails: (d) => d.data != i,
       onAcceptWithDetails: (d) => workspace.reorder(d.data, i),
@@ -1568,23 +1589,7 @@ class _TabStripState extends State<_TabStrip> {
                 ),
               ),
             ),
-            child: Draggable<int>(
-              data: i,
-              feedback: Material(
-                color: Colors.transparent,
-                elevation: 6,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 220),
-                  child: Container(
-                    color: cs.surfaceContainerHigh,
-                    child: tab,
-                  ),
-                ),
-              ),
-              childWhenDragging: Opacity(opacity: 0.3, child: tab),
-              onDragEnd: (details) => widget.onTabDragEnd(i, details),
-              child: tab,
-            ),
+            child: draggable,
           ),
         );
       },
