@@ -36,6 +36,13 @@ rationale. Update this whenever a new rule or significant decision is made.
 - `file_picker` pinned to 10.x (`^10.3.10`) (Android CVE-22 accepted; fix needs v11, blocked on AppFlowy — issue #2).
 - Org/bundle id base: `com.markdownstudio`.
 
+## Roadmap
+
+Agreed-but-unbuilt work lives in [`ROADMAP.md`](ROADMAP.md). Current
+items: **court filing templates for every state and federal court** (blocked on
+engine gaps — no pleading-paper line numbering, page size and per-edge margins
+not profile fields, seeds are compiled-in constants).
+
 ## Status log
 
 - 2026-06-28: Initial app built; `flutter analyze` clean, `flutter test` green on 3.41.9.
