@@ -38,7 +38,7 @@ rationale. Update this whenever a new rule or significant decision is made.
 
 ## Roadmap
 
-Agreed-but-unbuilt work lives in [`ROADMAP.md`](ROADMAP.md). Current
+Agreed-but-unbuilt work lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Current
 items: **court filing templates for every state and federal court** (blocked on
 engine gaps — no pleading-paper line numbering, page size and per-edge margins
 not profile fields, seeds are compiled-in constants).
