@@ -14,11 +14,12 @@ the Status log when they ship.
 
 **Status:** planned — not started. Blocked on engine gaps (see below).
 
-Ship a browsable catalog of ready-made print profiles, one per court, so a
-filer picks their court and gets a document whose **formatting** matches that
-court's local rules. Today there is exactly one generic **Court Filing**
-seeded profile; it encodes the *conventions most courts share*, not any
-specific court's rules.
+Ship a browsable catalog of ready-made print profiles, keyed by **court and
+filing type** (a brief, a motion, and an appendix in the same court need not
+share one format), so a filer picks their court and document type and gets a
+document whose **formatting** matches that court's local rules. Today there is
+exactly one generic **Court Filing** seeded profile; it encodes the
+*conventions most courts share*, not any specific court's rules.
 
 **This is formatting-only, and the scope line matters.** A `PrintProfile`
 controls rendering — `PrintService` receives already-authored Markdown, so a
@@ -100,8 +101,10 @@ verified against the current code:
   templates are unshippable until a conforming face is available, so it is
   not optional cleanup.
 - **Phase 1 — catalog mechanism.** Bundled read-only template catalog (asset
-  JSON, not `shared_preferences`), with browse/search by jurisdiction and
-  "use this as a starting point" → copies into the user's profiles. Read-only
+  JSON, not `shared_preferences`), entries keyed by **court + filing type**
+  so a court can carry multiple profiles/skeletons, with browse/search by
+  jurisdiction and "use this as a starting point" → copies into the user's
+  profiles. Read-only
   so a rules update can replace a template without clobbering user edits.
   **Copies must carry their origin** — source template id + version + the
   `lastVerified` they were taken from — because a bundled rules update
@@ -111,8 +114,8 @@ verified against the current code:
   whose copy is behind and offer a diff/re-pull. Without it a current
   `lastVerified` on the catalog is decoration, not a safeguard.
 - **Phase 2 — federal seed set.** Start with the tier that is most uniform
-  and best documented: SCOTUS, the 13 circuits, and a first slice of
-  district courts. Prove the catalog end-to-end on a tractable set.
+  and best documented: SCOTUS and the 13 circuits. Prove the catalog
+  end-to-end on a tractable set.
 - **Phase 3 — state high courts**, then intermediate appellate.
 - **Phase 4 — trial courts**, accepting that coverage will be partial and
   county-level rules may never be complete.
@@ -171,7 +174,8 @@ a `PrintProfile` structurally cannot supply need a second capability:
   31 pages; the limit for this court is 30") is a genuinely useful,
   bounded feature and does not require legal judgement.
 
-Pairs naturally with item 1's catalog: a court entry would carry *both* a
-print profile and a document skeleton, so "pick your court" yields a
-formatted document that already has the right scaffolding. Until this ships,
-item 1's catalog is described as formatting-only.
+Pairs naturally with item 1's catalog: a court + filing-type entry would carry
+*both* a print profile and a document skeleton, so "pick your court and
+filing type" yields a formatted document that already has the right
+scaffolding. Until this ships, item 1's catalog is described as
+formatting-only.
