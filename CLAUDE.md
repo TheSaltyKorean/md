@@ -106,12 +106,12 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
    certificate and breaks in-place updates for every installed user.
    Cert SHA-256 ends in `…AE:CA:61:3F`.
 
-## Distribution & publishing state (as of 2026-07-06)
+## Distribution & publishing state (as of 2026-08-05)
 
 - **Releases**: pushing a `v*` tag builds and publishes everything
   (`release.yml`); `workflow_dispatch` = dry run (no publish). Assets use
   stable versionless names so the README deep-links
-  `releases/latest/download/…`. Latest: **v1.0.8**.
+  `releases/latest/download/…`. Latest: **v1.0.19**.
 - **Windows**: MSI (WiX 5, permanent UpgradeCode — never change it),
   Inno setup.exe, portable zip. All unsigned; Store/winget are the trusted
   channels. WiX is pinned to 5.x (v6+ gates behind the OSMF EULA).
@@ -126,12 +126,18 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
   (`InstallKind` msi/inno/deb/other) to a private temp dir and runs it via
   a generated wscript that waits for this process to exit, installs
   silently, and relaunches. Portable/store/mobile → download page.
-- **winget**: initial submission for 1.0.1 is
-  [microsoft/winget-pkgs#398219](https://github.com/microsoft/winget-pkgs/pull/398219)
-  (CLA signed by the owner **as an individual**). Future releases
-  auto-update via the `winget` job once the `WINGET_TOKEN` secret (classic
-  PAT, `public_repo`) is set; the job skips until the package exists
-  upstream.
+- **winget**: **live and fully automated.** Identifier
+  `TheSaltyKorean.MarkdownStudio` (CLA signed by the owner **as an
+  individual**). First submission was
+  [winget-pkgs#398219](https://github.com/microsoft/winget-pkgs/pull/398219)
+  (1.0.17, merged 2026-07-05); 1.0.19 went through hands-off via
+  [winget-pkgs#405700](https://github.com/microsoft/winget-pkgs/pull/405700)
+  — moderator-approved and publish-pipeline-succeeded 2026-07-22. The
+  `WINGET_TOKEN` secret (classic PAT, `public_repo`) is set and the
+  `winget` job now runs for real on every tagged release, so no manual
+  submission step is needed. Expect a lag between the release and
+  `winget upgrade` seeing it — each version PR goes through winget-pkgs
+  moderation.
 - **Microsoft Store**: pipeline-ready (MSIX step gated on
   `MSIX_IDENTITY_NAME` / `MSIX_PUBLISHER` / `MSIX_PUBLISHER_DISPLAY_NAME`
   secrets; `PRIVACY.md` for the listing). **ON HOLD — do not publish or
