@@ -39,9 +39,12 @@ rationale. Update this whenever a new rule or significant decision is made.
 ## Roadmap
 
 Agreed-but-unbuilt work lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Current
-items: **court filing templates for every state and federal court** (blocked on
-engine gaps — no pleading-paper line numbering, page size and per-edge margins
-not profile fields, seeds are compiled-in constants).
+items: (1) **court filing templates for every state and federal court** —
+formatting only, blocked on engine gaps (no pleading-paper line numbering; page
+size, per-edge margins and font size not profile fields; Times New Roman and
+Century Schoolbook absent from `availableFonts`; seeds are compiled-in
+constants); (2) **document templates + filing checks** — the caption/certificate
+/page-limit half that a `PrintProfile` structurally cannot deliver.
 
 ## Status log
 

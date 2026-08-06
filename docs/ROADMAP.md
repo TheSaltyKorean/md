@@ -15,10 +15,19 @@ the Status log when they ship.
 **Status:** planned — not started. Blocked on engine gaps (see below).
 
 Ship a browsable catalog of ready-made print profiles, one per court, so a
-filer picks their court and gets a document that already conforms to that
-court's local formatting rules. Today there is exactly one generic
-**Court Filing** seeded profile; it encodes the *conventions most courts
-share*, not any specific court's rules.
+filer picks their court and gets a document whose **formatting** matches that
+court's local rules. Today there is exactly one generic **Court Filing**
+seeded profile; it encodes the *conventions most courts share*, not any
+specific court's rules.
+
+**This is formatting-only, and the scope line matters.** A `PrintProfile`
+controls rendering — `PrintService` receives already-authored Markdown, so a
+profile can set margins, spacing, fonts and page furniture, but it cannot
+supply a caption block, a certificate of service, or enforce a page or word
+limit. Those are *document content* concerns and need a separate capability
+(boilerplate document templates + a limits check), tracked as item 2 below.
+Until that exists, the catalog must be described to users as a formatting
+starting point, never as compliance.
 
 ### Why this is worth doing
 
@@ -64,10 +73,18 @@ verified against the current code:
    number applied to all edges. Courts routinely specify per-edge margins
    (e.g. 1" top/bottom/right with a wider left edge for binding).
 4. **No font-size field on the profile.** `legalMode` hardcodes 12pt in
-   `markdown_pdf_builder.dart`. Courts that require 13pt or 14pt, or a
-   specific family (Century Schoolbook for SCOTUS; Times New Roman
-   elsewhere), cannot be expressed.
-5. **Seeded profiles are compiled-in constants.** `PrintProfile.seeds` is a
+   `markdown_pdf_builder.dart`. Courts that require 13pt or 14pt cannot be
+   expressed.
+5. **The required font families are not available.**
+   `PrintService.availableFonts` is seven Google families (Roboto, Inter,
+   Lato, Open Sans, Montserrat, Merriweather, Noto Serif) with a Roboto
+   fallback. **Times New Roman** — the most commonly mandated family — and
+   **Century Schoolbook** (SCOTUS) are both absent, so those templates would
+   silently fall back to a non-conforming face. This one is not just a
+   missing field: it needs licensed or metric-compatible substitutes
+   (e.g. Liberation Serif / TeX Gyre Schola) embedded in the PDF, plus a
+   decision about shipping font binaries and their licences.
+6. **Seeded profiles are compiled-in constants.** `PrintProfile.seeds` is a
    `const` list of three, and profiles persist as one JSON list in
    `shared_preferences`. That mechanism does not scale to hundreds of
    templates — it needs a bundled read-only asset catalog, kept separate
@@ -75,20 +92,44 @@ verified against the current code:
 
 ### Staged plan
 
-- **Phase 0 — engine.** Close gaps 1–4: line numbering (`lineNumbers`,
+- **Phase 0 — engine.** Close gaps 1–5: line numbering (`lineNumbers`,
   `lineNumberCount`, margin rules), per-edge margins, page size and body
-  font size as profile fields. Each is independently useful and independently
-  reviewable; ship them as separate PRs.
+  font size as profile fields, and the court-required font families with
+  embedding. Each is independently useful and independently reviewable; ship
+  them as separate PRs. **Gap 5 gates Phase 2** — SCOTUS and most federal
+  templates are unshippable until a conforming face is available, so it is
+  not optional cleanup.
 - **Phase 1 — catalog mechanism.** Bundled read-only template catalog (asset
   JSON, not `shared_preferences`), with browse/search by jurisdiction and
   "use this as a starting point" → copies into the user's profiles. Read-only
   so a rules update can replace a template without clobbering user edits.
+  **Copies must carry their origin** — source template id + version + the
+  `lastVerified` they were taken from — because a bundled rules update
+  replaces only the catalog entry, leaving already-copied profiles (including
+  ones bound to live documents) silently stale. That provenance is what makes
+  a reconciliation flow possible: on catalog update, flag bound documents
+  whose copy is behind and offer a diff/re-pull. Without it a current
+  `lastVerified` on the catalog is decoration, not a safeguard.
 - **Phase 2 — federal seed set.** Start with the tier that is most uniform
   and best documented: SCOTUS, the 13 circuits, and a first slice of
   district courts. Prove the catalog end-to-end on a tractable set.
 - **Phase 3 — state high courts**, then intermediate appellate.
 - **Phase 4 — trial courts**, accepting that coverage will be partial and
   county-level rules may never be complete.
+
+### Completion criterion
+
+"Every state and federal court" is the **direction**, not a shippable
+definition of done — Phase 4 openly accepts coverage that may never be
+complete, so treating the whole item as one deliverable would leave it
+permanently open. Split it instead:
+
+- **Finite, shippable:** Phases 0–2 (engine + catalog + the appellate federal
+  tier: SCOTUS and the 13 circuits). That is a bounded set with well
+  documented rules, and it is what moves to the Status log when it ships.
+- **Ongoing, never "done":** Phases 3–4 are continuing coverage work, tracked
+  by jurisdictions-covered rather than completion. Ship them incrementally;
+  do not gate anything on finishing them.
 
 ### Open questions to settle before Phase 1
 
@@ -108,3 +149,29 @@ verified against the current code:
 - **Contribution path.** Community-submitted templates would scale coverage
   far better than doing all 300+ in-house, but need a review process — this
   is exactly the content where an unreviewed wrong answer causes harm.
+
+---
+
+## 2. Document templates and filing checks (content, not formatting)
+
+**Status:** planned — not started. Prerequisite for the *compliance* half of
+item 1; independent of it otherwise.
+
+Item 1 can only ever deliver **formatting**. The parts of a court filing that
+a `PrintProfile` structurally cannot supply need a second capability:
+
+- **Boilerplate document templates** — a starting Markdown document, not a
+  render recipe: caption block, parties, case-number field, signature block,
+  certificate of service, proof-of-service. Today the user must author all of
+  this by hand; the existing `<div>` flex/align support in the PDF builder
+  (PRs #16, #19) is what makes such captions renderable, but nothing
+  *generates* them.
+- **Filing checks** — page and word limits are the common hard constraints,
+  and they are verifiable mechanically. A pre-filing check ("this brief is
+  31 pages; the limit for this court is 30") is a genuinely useful,
+  bounded feature and does not require legal judgement.
+
+Pairs naturally with item 1's catalog: a court entry would carry *both* a
+print profile and a document skeleton, so "pick your court" yields a
+formatted document that already has the right scaffolding. Until this ships,
+item 1's catalog is described as formatting-only.
