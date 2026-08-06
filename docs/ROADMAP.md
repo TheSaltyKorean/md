@@ -104,8 +104,8 @@ verified against the current code:
   JSON, not `shared_preferences`), entries keyed by **court + filing type**
   so a court can carry multiple profiles/skeletons, with browse/search by
   jurisdiction and "use this as a starting point" → copies into the user's
-  profiles. Read-only
-  so a rules update can replace a template without clobbering user edits.
+  profiles. Read-only so a rules update can replace a template without
+  clobbering user edits.
   **Copies must carry their origin** — source template id + version + the
   `lastVerified` they were taken from — because a bundled rules update
   replaces only the catalog entry, leaving already-copied profiles (including
@@ -116,23 +116,30 @@ verified against the current code:
 - **Phase 2 — federal seed set.** Start with the tier that is most uniform
   and best documented: SCOTUS and the 13 circuits. Prove the catalog
   end-to-end on a tractable set.
-- **Phase 3 — state high courts**, then intermediate appellate.
-- **Phase 4 — trial courts**, accepting that coverage will be partial and
+- **Phase 3 — remaining federal tiers.** The 94 district courts (local rules
+  and standing orders vary per district), then bankruptcy and the specialty
+  courts (Fed. Cl., Tax, CIT, CAVC).
+- **Phase 4 — state courts.** High courts first, then intermediate appellate.
+- **Phase 5 — trial courts**, accepting that coverage will be partial and
   county-level rules may never be complete.
 
 ### Completion criterion
 
 "Every state and federal court" is the **direction**, not a shippable
-definition of done — Phase 4 openly accepts coverage that may never be
+definition of done — Phase 5 openly accepts coverage that may never be
 complete, so treating the whole item as one deliverable would leave it
 permanently open. Split it instead:
 
 - **Finite, shippable:** Phases 0–2 (engine + catalog + the appellate federal
   tier: SCOTUS and the 13 circuits). That is a bounded set with well
   documented rules, and it is what moves to the Status log when it ships.
-- **Ongoing, never "done":** Phases 3–4 are continuing coverage work, tracked
+- **Ongoing, never "done":** Phases 3–5 are continuing coverage work, tracked
   by jurisdictions-covered rather than completion. Ship them incrementally;
   do not gate anything on finishing them.
+
+Every tier in the Scope table maps to exactly one phase: appellate federal →
+Phase 2, district + bankruptcy/specialty → Phase 3, state appellate → Phase 4,
+trial → Phase 5. Nothing in that table is unassigned.
 
 ### Open questions to settle before Phase 1
 
