@@ -130,7 +130,7 @@ and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
   `TheSaltyKorean.MarkdownStudio` (CLA signed by the owner **as an
   individual**). First submission was
   [winget-pkgs#398219](https://github.com/microsoft/winget-pkgs/pull/398219)
-  (1.0.17, merged 2026-07-05); 1.0.19 went through hands-off via
+  (1.0.17, merged 2026-07-20); 1.0.19 went through hands-off via
   [winget-pkgs#405700](https://github.com/microsoft/winget-pkgs/pull/405700)
   — moderator-approved and publish-pipeline-succeeded 2026-07-22. The
   `WINGET_TOKEN` secret (classic PAT, `public_repo`) is set and the
