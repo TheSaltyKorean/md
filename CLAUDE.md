@@ -11,7 +11,8 @@ with **Flutter** and **Material 3**. Targets **Linux, Windows, Android, iOS**
 
 The README is intentionally short (downloads + highlights) — keep it that
 way. Full details live in `docs/DEVELOPMENT.md` (toolchain, layout, building)
-and `docs/RELEASING.md` (release pipeline, signing, stores). High level:
+and `docs/RELEASING.md` (release pipeline, signing, stores). Agreed-but-unbuilt
+work is tracked in `docs/ROADMAP.md`. High level:
 
 - Four view modes: **Edit** (AppFlowy block/Notion-style WYSIWYG), **Split**
   (source + live preview), **Raw** (full-width source), **Preview** (read-only

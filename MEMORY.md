@@ -36,6 +36,16 @@ rationale. Update this whenever a new rule or significant decision is made.
 - `file_picker` pinned to 10.x (`^10.3.10`) (Android CVE-22 accepted; fix needs v11, blocked on AppFlowy — issue #2).
 - Org/bundle id base: `com.markdownstudio`.
 
+## Roadmap
+
+Agreed-but-unbuilt work lives in [`docs/ROADMAP.md`](docs/ROADMAP.md). Current
+items: (1) **court filing templates for every state and federal court** —
+formatting only, blocked on engine gaps (no pleading-paper line numbering; page
+size, per-edge margins and font size not profile fields; Times New Roman and
+Century Schoolbook absent from `availableFonts`; seeds are compiled-in
+constants); (2) **document templates + filing checks** — the caption/certificate
+/page-limit half that a `PrintProfile` structurally cannot deliver.
+
 ## Status log
 
 - 2026-06-28: Initial app built; `flutter analyze` clean, `flutter test` green on 3.41.9.
