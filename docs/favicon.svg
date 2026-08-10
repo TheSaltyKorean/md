@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img"
+     aria-label="Markdown Studio">
+  <rect width="64" height="64" rx="14" fill="#1a237e"/>
+  <!-- "M" -->
+  <path d="M12 44V20h7l7 9 7-9h7v24h-7V31l-7 9-7-9v13z" fill="#ffffff"/>
+  <!-- descending arrow: Markdown source going down to a printed page -->
+  <path d="M50 20v12h5l-8 11-8-11h5V20z" fill="#8c9eff"/>
+</svg>

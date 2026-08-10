@@ -14,6 +14,10 @@ How Markdown Studio binaries are built, published, and submitted to stores.
 
 3. `.github/workflows/release.yml` builds every platform on GitHub runners
    and publishes a GitHub Release with install notes attached.
+4. Update the site's structured data: bump `softwareVersion` and
+   `datePublished` in the `SoftwareApplication` JSON-LD block in
+   `docs/index.html`, and bump `<lastmod>` for `/` in `docs/sitemap.xml`.
+   (Nothing enforces this — it drifted from 1.0.2 to 1.0.19 once.)
 
 Release assets use **stable, versionless names** so the README can deep-link
 `releases/latest/download/<name>`:
@@ -155,3 +159,62 @@ upload with Transporter or the Xcode Organizer. See
   Snap Store.
 - **Flatpak:** create a manifest packaging the `bundle/` output for Flathub.
 - See [Linux deployment](https://docs.flutter.dev/deployment/linux).
+
+## Website, SEO & AI discoverability
+
+The marketing site is GitHub Pages served from `/docs` on `main`, at
+`markdownstudio.dev`, **behind Cloudflare** (the DNS is proxied — responses
+carry `server: cloudflare`).
+
+| File | Purpose |
+| --- | --- |
+| `docs/index.html` | Standalone landing page. No front matter, so Jekyll copies it through verbatim and its hand-written `<head>` survives. Carries its own gtag snippet, meta tags, and JSON-LD. |
+| `docs/_config.yml` | Jekyll config for the themed pages: site title, per-page descriptions, `noindex` for contributor-only docs. Without it, every page was titled "… \| md" and shared one meta description. |
+| `docs/_includes/head-custom.html` | Injected into every **themed** page's `<head>` (robots directive, theme colour, favicon, gtag). `index.html` duplicates this by hand. |
+| `docs/robots.txt` | Explicitly allows search and AI crawlers. |
+| `docs/llms.txt` | Machine-readable site summary for AI assistants. Keep it in sync when pages are added or the feature set changes. |
+| `docs/sitemap.xml` | Hand-maintained. Add new public pages and bump `<lastmod>`. |
+
+### Cloudflare blocks AI crawlers by default — check this
+
+Cloudflare injects a **managed `robots.txt` block** ("BEGIN Cloudflare Managed
+content") into the response. Its default posture is
+`Content-Signal: ai-train=no` plus `Disallow: /` for `ClaudeBot`, `GPTBot`,
+`CCBot`, `Google-Extended`, `Applebot-Extended`, `Bytespider`,
+`meta-externalagent` and `Amazonbot`.
+
+For an app whose pitch is "draft with AI", that is backwards. Turn the managed
+AI-crawler blocking **off** in the Cloudflare dashboard (zone
+`markdownstudio.dev` → **AI Crawl Control**, and check **Security → Settings**
+for a "Block AI bots" / managed robots.txt toggle) so `docs/robots.txt` is what
+actually gets served. Verify with:
+
+```bash
+curl -s https://markdownstudio.dev/robots.txt
+```
+
+The AI crawlers are only *robots.txt*-disallowed, not blocked at the edge —
+those user agents still get `200`, so this is purely a policy signal that
+well-behaved crawlers obey.
+
+### Download tracking
+
+There are two independent sources, and they measure different things:
+
+- **GA4 (`G-GME1XMYJBH`)** — `docs/index.html` emits a `download_click` event
+  (params: `file_name`, `file_extension`, `platform`, `link_url`, `link_text`)
+  for every click on a `releases/latest/download/…` link. It uses a distinct
+  event name rather than GA4's built-in `file_download`, because enhanced
+  measurement only auto-fires for `.exe`/`.zip`/`.gz` — reusing the name would
+  double-count those and under-count `.msi`/`.deb`/`.apk`/`.ipa`. This measures
+  **website-driven intent only**.
+- **GitHub API** — the authoritative cumulative totals, including downloads
+  from the releases page, `winget`, and the in-app updater:
+
+  ```bash
+  gh api --paginate repos/TheSaltyKorean/md/releases \
+    --jq '.[] | .tag_name as $t | .assets[] | "\($t)\t\(.name)\t\(.download_count)"'
+  ```
+
+  GitHub only exposes a *current* count, never a history, so a time series
+  needs periodic snapshots.

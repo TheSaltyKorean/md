@@ -1,0 +1,87 @@
+# Jekyll config for the GitHub Pages site served from /docs.
+#
+# Before this file existed the site had no config, so GitHub Pages fell back to
+# repo defaults: every page was titled "… | md" and every page shared one meta
+# description (the repo blurb). Both are fixed here.
+#
+# `theme` is pinned to the theme the site was already being built with — do not
+# change it casually, the pages are styled against Primer's CSS.
+
+title: Markdown Studio
+description: >-
+  Free cross-platform Markdown editor and viewer with a Notion-style WYSIWYG,
+  and print/PDF profiles that produce polished documents — branded reports,
+  technical specs, and court-compliant filings.
+url: https://markdownstudio.dev
+baseurl: ""
+lang: en-US
+
+theme: jekyll-theme-primer
+
+logo: /assets/print-preview-court.png
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-titles-from-headings
+
+# index.html has no front matter, so Jekyll copies it through verbatim and its
+# hand-written <head> survives. CNAME is deliberately NOT excluded — it has to
+# reach the published site for the custom domain.
+
+# Per-page titles come from each file's first heading (jekyll-titles-from-headings).
+# Descriptions are set here rather than in YAML front matter, because these .md
+# files are also read directly on GitHub, where front matter renders as an
+# ugly key/value table.
+defaults:
+  - scope:
+      path: ""
+    values:
+      image: /assets/print-preview-court.png
+
+  - scope:
+      path: print-profiles.md
+    values:
+      description: >-
+        Complete reference for Markdown Studio print and branding profiles:
+        every JSON field explained, colour and font tables, and worked examples
+        from personal notes to court-ready filings.
+
+  - scope:
+      path: pdf-inline-html.md
+    values:
+      description: >-
+        The inline-HTML subset Markdown Studio's PDF renderer understands —
+        signature lines, fill-in blanks, redactions, two-column case captions,
+        alignment, flex rows, and forced page breaks.
+
+  - scope:
+      path: ai-profile-authoring.md
+    values:
+      description: >-
+        A copy-paste prompt that makes any AI assistant generate an importable
+        Markdown Studio print profile from a plain-English description.
+
+  - scope:
+      path: ROADMAP.md
+    values:
+      description: >-
+        Agreed-but-unbuilt work for Markdown Studio — what is planned next for
+        the editor, print profiles, and platform support.
+
+  # Internal contributor docs: useful to link, but they dilute the site's
+  # topical focus if indexed, so keep them out of search results.
+  - scope:
+      path: DEVELOPMENT.md
+    values:
+      noindex: true
+      description: >-
+        Toolchain, project layout, and instructions for building Markdown
+        Studio from source.
+
+  - scope:
+      path: RELEASING.md
+    values:
+      noindex: true
+      description: >-
+        How Markdown Studio binaries are built, published, and submitted to
+        app stores.
