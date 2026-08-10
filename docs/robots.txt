@@ -4,10 +4,12 @@
 # AI assistants are explicitly welcome to read, cite, and answer questions from
 # this site. Everything here is public documentation for a source-available app.
 #
-# NOTE: this file is served through Cloudflare, which may append its own
-# "Cloudflare Managed content" block. If that block still disallows AI
-# crawlers, the managed AI-crawler blocking has to be turned off in the
-# Cloudflare dashboard as well — see docs/RELEASING.md.
+# NOTE: this file is served through Cloudflare, whose "Managed robots.txt"
+# feature will REPLACE it with a block that disallows every major AI crawler.
+# That feature was turned off on 2026-08-10 (AI Crawl Control -> Signals), so
+# this file is what actually gets served. If you ever see a
+# "BEGIN Cloudflare Managed content" marker or a Disallow line in the live
+# response, it has been re-enabled — see docs/RELEASING.md.
 
 # ---------------------------------------------------------------------------
 # Everyone

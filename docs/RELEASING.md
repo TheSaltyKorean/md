@@ -175,27 +175,90 @@ carry `server: cloudflare`).
 | `docs/llms.txt` | Machine-readable site summary for AI assistants. Keep it in sync when pages are added or the feature set changes. |
 | `docs/sitemap.xml` | Hand-maintained. Add new public pages and bump `<lastmod>`. |
 
-### Cloudflare blocks AI crawlers by default — check this
+### Cloudflare's AI settings — configured 2026-08-10, re-check if it regresses
 
-Cloudflare injects a **managed `robots.txt` block** ("BEGIN Cloudflare Managed
-content") into the response. Its default posture is
-`Content-Signal: ai-train=no` plus `Disallow: /` for `ClaudeBot`, `GPTBot`,
-`CCBot`, `Google-Extended`, `Applebot-Extended`, `Bytespider`,
-`meta-externalagent` and `Amazonbot`.
+Cloudflare ships two AI-crawler controls, both enabled by default. They are
+zone settings, so they live in the dashboard, not in this repo — nothing here
+can override them.
 
-For an app whose pitch is "draft with AI", that is backwards. Turn the managed
-AI-crawler blocking **off** in the Cloudflare dashboard (zone
-`markdownstudio.dev` → **AI Crawl Control**, and check **Security → Settings**
-for a "Block AI bots" / managed robots.txt toggle) so `docs/robots.txt` is what
-actually gets served. Verify with:
+**Only one of them was actually affecting this site.** Keep the distinction
+straight, or a future regression gets diagnosed as two problems when it is one:
+
+| Setting | Dashboard path | Was | Effect here | Now |
+| --- | --- | --- | --- | --- |
+| Managed robots.txt | **AI Crawl Control → Signals →** "Managed robots.txt" toggle | On | **This was the problem.** Cloudflare overwrote the origin `robots.txt`. | **Off** |
+| Block AI training bots | **Overview →** right rail → "Manage AI bot access" → "Block AI training bots" | "Block only on pages with ads" | **Inert** — the site carries analytics but no advertising, so the rule matched nothing. | **"Do not block (allow crawlers)"** |
+
+While Managed robots.txt was on, Cloudflare replaced the origin file with its
+own block ("BEGIN Cloudflare Managed content"), declaring
+`Content-Signal: search=yes,ai-train=no,use=reference` and `Disallow: /` for
+`ClaudeBot`, `GPTBot`, `CCBot`, `Google-Extended`, `Applebot-Extended`,
+`Bytespider`, `meta-externalagent` and `Amazonbot` — i.e. every major AI
+crawler, on a site whose pitch is "draft with AI". With it off,
+`docs/robots.txt` is served verbatim.
+
+The second setting was changed only to remove a latent trap (it would start
+biting if ads were ever added), **not** because it was blocking anything. That
+is confirmed by measurement: no crawler was ever blocked at the edge —
+`ClaudeBot`, `Claude-User`, `GPTBot`, `OAI-SearchBot`, `PerplexityBot` and
+`Googlebot` user agents all got `200` throughout. The whole problem was a
+policy signal that well-behaved crawlers voluntarily obey.
+
+Verify the origin file is the one being served. Note the `-f`: without it a
+404 or 5xx pipes an error page into `grep`, which reports a reassuring `0` and
+makes an outage look like a pass. The positive `Allow:` count guards against
+an empty body doing the same:
 
 ```bash
-curl -s https://markdownstudio.dev/robots.txt
+robots=$(curl -fsS https://markdownstudio.dev/robots.txt) && {
+  printf 'blocking directives: %s (want 0)\n' \
+    "$(grep -cE '^Disallow|BEGIN Cloudflare Managed' <<< "$robots")"
+  printf 'allow rules:         %s (want >0)\n' \
+    "$(grep -c '^Allow: /' <<< "$robots")"
+} || echo 'FETCH FAILED — unverified; do NOT read this as a pass'
 ```
 
-The AI crawlers are only *robots.txt*-disallowed, not blocked at the edge —
-those user agents still get `200`, so this is purely a policy signal that
-well-behaved crawlers obey.
+### Agent Readiness
+
+Cloudflare's **Agent Readiness → Diagnostics** page scores the site for AI
+agents. As of 2026-08-10 it reports **Level 1 "Quick Wins" 4/5**, with both
+items it marks *High impact* (robots.txt, sitemap) green, along with AI Crawler
+Rules and Content Signals.
+
+The remaining Level 1 item is **Markdown Negotiation** ("Markdown for Agents" —
+serve `text/markdown` to agents that ask for it via `Accept`), which **requires
+a Pro plan**. Skipped deliberately, because most of the benefit is already
+there for free: every doc is published at **both** a generated `.html` route
+and its original `.md` route, and the `.md` route returns the raw source as
+`text/markdown` — Jekyll renders the HTML page without removing the source
+file. `docs/llms.txt` then gives assistants a plain-text entry point into all
+of it.
+
+Confirmed by measurement (2026-08-10) — every one of these returns
+`200 text/markdown`, not a rendered page:
+
+```bash
+for p in print-profiles pdf-inline-html ai-profile-authoring ROADMAP DEVELOPMENT \
+         samples/motion-for-continuance; do
+  curl -fsS -o /dev/null -w "%{http_code} %{content_type}  $p.md\n" \
+    "https://markdownstudio.dev/$p.md"
+done
+```
+
+For that to be true of `llms.txt` it has to actually *link* the `.md` routes —
+it originally pointed at the `.html` ones, which handed assistants HTML and
+made this claim false. Its documentation links are now `.md`, with a note in
+the file telling future editors not to "fix" them back.
+
+So the gap Markdown Negotiation closes is genuinely narrow here: an agent that
+sends `Accept: text/markdown` to an *`.html`* URL it found via the sitemap or
+a search result still gets HTML. One that starts from `llms.txt`, or swaps the
+extension, gets Markdown.
+
+Levels 2 and 3 (agent sign-up on behalf of users, API discovery, agent log-in
+and tool use) score 0 and are **not applicable** — Markdown Studio is a
+downloadable desktop/mobile app, not a hosted service with an API or accounts.
+Don't treat those as gaps.
 
 ### Download tracking
 
