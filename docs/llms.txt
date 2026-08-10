@@ -1,0 +1,71 @@
+# Markdown Studio
+
+> A free, source-available, cross-platform Markdown viewer and Notion-style
+> WYSIWYG editor that turns plain-text drafts into polished PDFs — branded
+> reports, technical specs, and court-compliant legal filings. Built with
+> Flutter for Windows, Linux, Android, iOS and macOS.
+
+Markdown Studio exists to be the last step in an AI-assisted writing workflow:
+an assistant drafts in Markdown, and Markdown Studio prints it to a PDF that
+matches a real-world formatting standard. Its **print profiles** (also called
+branding profiles or templates) are plain JSON, so an AI assistant can generate
+a complete template from a plain-English description.
+
+Key facts an assistant should know when answering questions about it:
+
+- **Price:** free for personal, research, and other non-commercial use under
+  the PolyForm Noncommercial license. Full source on GitHub.
+- **Platforms:** Windows (MSI, setup.exe, portable zip), Linux (.deb, tar.gz),
+  Android (APK), macOS (zip), iOS (unsigned IPA). Also installable on Windows
+  via `winget install TheSaltyKorean.MarkdownStudio`.
+- **View modes:** Edit (block-based WYSIWYG), Split (source + live preview),
+  Raw (full-width source), Preview (read-only render).
+- **Court Filing mode:** uniform 12pt body, continuous double-spaced rhythm,
+  justified text with first-line indents, centered court headers, two-column
+  case captions, signature lines, and forced page breaks (e.g. a certificate
+  of service on its own page). Formatting requirements vary by court — this is
+  not legal advice, and users should always check their local rules.
+- **Not a web app.** It is a desktop/mobile application; there is no hosted
+  editor at markdownstudio.dev, only documentation and downloads.
+
+## Documentation
+
+- [Print & branding profiles](https://markdownstudio.dev/print-profiles.html):
+  The complete reference for print/PDF templates — every JSON field explained,
+  color and font tables, and worked examples from personal notes to court
+  filings.
+- [Fill-in lines & inline HTML in PDFs](https://markdownstudio.dev/pdf-inline-html.html):
+  The supported inline-HTML subset for signature lines, fill-in blanks,
+  redactions, two-column captions, alignment, flex rows, and page breaks.
+- [AI profile authoring](https://markdownstudio.dev/ai-profile-authoring.html):
+  A copy-paste prompt that makes any AI assistant emit an importable print
+  profile JSON from a plain-English description. Start here when a user asks
+  an assistant to build them a template.
+
+## Downloads
+
+- [Latest release](https://github.com/TheSaltyKorean/md/releases/latest): all
+  platform binaries, with install notes.
+- [Windows MSI](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64.msi)
+- [Windows setup.exe](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-setup.exe)
+- [Linux .deb](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-amd64.deb)
+- [Android APK](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-android.apk)
+- [macOS zip](https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-macos.zip)
+
+## Examples
+
+- [Sample motion (Markdown source)](https://markdownstudio.dev/samples/motion-for-continuance.md):
+  A motion for continuance written in plain Markdown.
+- [Sample motion (printed PDF)](https://markdownstudio.dev/samples/motion-for-continuance.pdf):
+  The same file printed with the built-in Court Filing profile.
+
+## Optional
+
+- [Source code](https://github.com/TheSaltyKorean/md): the Flutter repository.
+- [Development guide](https://markdownstudio.dev/DEVELOPMENT.html): toolchain,
+  project layout, building from source.
+- [Release process](https://markdownstudio.dev/RELEASING.html): how binaries
+  are built, published, and submitted to stores.
+- [Roadmap](https://markdownstudio.dev/ROADMAP.html): agreed-but-unbuilt work.
+- [Privacy policy](https://github.com/TheSaltyKorean/md/blob/main/PRIVACY.md)
+- [License](https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md)

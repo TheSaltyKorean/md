@@ -1,5 +1,19 @@
-<!-- Google tag (gtag.js) — injected into every themed page's <head> (the
-     standalone index.html carries its own copy). -->
+{%- comment -%}
+  Injected into every themed (Jekyll-rendered) page's <head>. The standalone
+  index.html is copied through verbatim and carries its own copy of all of this.
+{%- endcomment -%}
+
+{%- if page.noindex -%}
+<meta name="robots" content="noindex,follow">
+{%- else -%}
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+{%- endif -%}
+
+<meta name="theme-color" content="#1a237e" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121216" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+<!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-GME1XMYJBH"></script>
 <script>
   window.dataLayer = window.dataLayer || [];

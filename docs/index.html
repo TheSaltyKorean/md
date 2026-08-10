@@ -16,15 +16,25 @@
 <meta name="description" content="Free cross-platform Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings for pro se litigants. WYSIWYG editing, print profiles, AI-friendly. Windows, Linux, Android, iOS, macOS.">
 <link rel="canonical" href="https://markdownstudio.dev/">
 <meta name="google-site-verification" content="75LFaX1i0HDM1nsPLfFTvQyXdKizXjRzZi7SdhTRUMs">
+<meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+<meta name="theme-color" content="#1a237e" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121216" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Markdown Studio">
+<meta property="og:locale" content="en_US">
 <meta property="og:title" content="Markdown Studio — draft with AI, file with confidence">
 <meta property="og:description" content="Free Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings. Windows, Linux, Android, iOS, macOS.">
 <meta property="og:url" content="https://markdownstudio.dev/">
 <meta property="og:image" content="https://markdownstudio.dev/assets/print-preview-court.png">
+<meta property="og:image:width" content="1400">
+<meta property="og:image:height" content="850">
+<meta property="og:image:alt" content="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Markdown Studio — draft with AI, file with confidence">
 <meta name="twitter:description" content="Free Markdown editor with court-ready PDF export. Windows, Linux, Android, iOS, macOS.">
 <meta name="twitter:image" content="https://markdownstudio.dev/assets/print-preview-court.png">
+<meta name="twitter:image:alt" content="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -35,10 +45,35 @@
   "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
   "url": "https://markdownstudio.dev/",
   "downloadUrl": "https://github.com/TheSaltyKorean/md/releases/latest",
+  "installUrl": "https://github.com/TheSaltyKorean/md/releases/latest",
   "screenshot": "https://markdownstudio.dev/assets/print-preview-court.png",
-  "softwareVersion": "1.0.2",
+  "softwareVersion": "1.0.19",
+  "datePublished": "2026-07-21",
   "license": "https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md",
+  "isAccessibleForFree": true,
+  "inLanguage": "en",
+  "codeRepository": "https://github.com/TheSaltyKorean/md",
+  "author": {"@type": "Person", "name": "TheSaltyKorean", "url": "https://github.com/TheSaltyKorean"},
+  "featureList": [
+    "Notion-style block WYSIWYG Markdown editing",
+    "Split view with live preview, raw source, and read-only preview modes",
+    "Print and PDF export in a workspace tab with per-document branding profiles",
+    "Court-filing layout: 12pt double-spaced justified body, case captions, certificates of service",
+    "Fill-in blanks, signature lines and page breaks via a small inline-HTML subset",
+    "Print profiles are plain JSON that an AI assistant can generate",
+    "Multi-document tabs, find and replace, drag and drop, light and dark themes"
+  ],
   "description": "Free cross-platform Markdown viewer and WYSIWYG editor that turns plain-text drafts into polished PDFs, including court-compliant filings: 12pt double-spaced justified body, case captions, certificates of service."
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "Markdown Studio",
+  "url": "https://markdownstudio.dev/",
+  "inLanguage": "en",
+  "publisher": {"@type": "Person", "name": "TheSaltyKorean", "url": "https://github.com/TheSaltyKorean"}
 }
 </script>
 <script type="application/ld+json">
@@ -177,5 +212,56 @@
     <p style="margin-top:6px">Not legal advice; formatting requirements vary by court — always check your local rules.</p>
   </footer>
 </div>
+
+<script>
+/* Download tracking.
+ *
+ * Every download link leaves this site for github.com, so the binaries
+ * themselves are never served from here — GA4 can only see the click. GA4's
+ * built-in "file downloads" enhanced measurement fires for .exe/.zip/.gz but
+ * NOT for .msi/.deb/.apk/.ipa, which would silently under-count exactly the
+ * platforms we care most about. So we emit our own event for every asset link
+ * under a distinct name (`download_click`) rather than reusing GA4's
+ * `file_download`, which would double-count the extensions GA4 already
+ * handles. gtag sends this with sendBeacon, so it survives the navigation.
+ *
+ * Note this counts *intent from the website only*. Downloads straight from the
+ * GitHub releases page, `winget install`, and the in-app updater never touch
+ * this page — the authoritative cumulative totals are the GitHub API's
+ * per-asset `download_count`.
+ */
+(function () {
+  var PLATFORMS = [
+    [/windows/i, 'Windows'],
+    [/linux/i,   'Linux'],
+    [/android/i, 'Android'],
+    [/macos/i,   'macOS'],
+    [/ios/i,     'iOS']
+  ];
+
+  function platformOf(file) {
+    for (var i = 0; i < PLATFORMS.length; i++) {
+      if (PLATFORMS[i][0].test(file)) return PLATFORMS[i][1];
+    }
+    return 'other';
+  }
+
+  document.addEventListener('click', function (e) {
+    var el = e.target;
+    if (!el || typeof el.closest !== 'function') return;
+    var a = el.closest('a[href*="/releases/latest/download/"]');
+    if (!a) return;
+
+    var file = a.pathname.split('/').pop();
+    gtag('event', 'download_click', {
+      file_name: file,
+      file_extension: file.split('.').slice(1).join('.'),
+      platform: platformOf(file),
+      link_url: a.href,
+      link_text: (a.textContent || '').trim()
+    });
+  }, true);
+})();
+</script>
 </body>
 </html>
