@@ -175,27 +175,55 @@ carry `server: cloudflare`).
 | `docs/llms.txt` | Machine-readable site summary for AI assistants. Keep it in sync when pages are added or the feature set changes. |
 | `docs/sitemap.xml` | Hand-maintained. Add new public pages and bump `<lastmod>`. |
 
-### Cloudflare blocks AI crawlers by default — check this
+### Cloudflare's AI settings — configured 2026-08-10, re-check if it regresses
 
-Cloudflare injects a **managed `robots.txt` block** ("BEGIN Cloudflare Managed
-content") into the response. Its default posture is
-`Content-Signal: ai-train=no` plus `Disallow: /` for `ClaudeBot`, `GPTBot`,
-`CCBot`, `Google-Extended`, `Applebot-Extended`, `Bytespider`,
-`meta-externalagent` and `Amazonbot`.
+Cloudflare ships two AI-crawler controls that are **on by default**, and both
+were working against this site. They are zone settings, so they live in the
+dashboard, not in this repo — nothing here can override them.
 
-For an app whose pitch is "draft with AI", that is backwards. Turn the managed
-AI-crawler blocking **off** in the Cloudflare dashboard (zone
-`markdownstudio.dev` → **AI Crawl Control**, and check **Security → Settings**
-for a "Block AI bots" / managed robots.txt toggle) so `docs/robots.txt` is what
-actually gets served. Verify with:
+| Setting | Dashboard path | Was | Now |
+| --- | --- | --- | --- |
+| Managed robots.txt | **AI Crawl Control → Signals →** "Managed robots.txt" toggle | On — Cloudflare overwrote `robots.txt` | **Off** |
+| Block AI training bots | **Overview →** right rail → "Manage AI bot access" → "Block AI training bots" | "Block only on pages with ads" | **"Do not block (allow crawlers)"** |
+
+While Managed robots.txt was on, Cloudflare replaced the origin file with its
+own block ("BEGIN Cloudflare Managed content"), declaring
+`Content-Signal: search=yes,ai-train=no,use=reference` and `Disallow: /` for
+`ClaudeBot`, `GPTBot`, `CCBot`, `Google-Extended`, `Applebot-Extended`,
+`Bytespider`, `meta-externalagent` and `Amazonbot` — i.e. every major AI
+crawler, on a site whose pitch is "draft with AI". With it off,
+`docs/robots.txt` is served verbatim.
+
+Note the crawlers were only ever *robots.txt*-disallowed, never blocked at the
+edge: `ClaudeBot`, `Claude-User`, `GPTBot`, `OAI-SearchBot`, `PerplexityBot`
+and `Googlebot` user agents all still got `200`. It was purely a policy signal
+that well-behaved crawlers obey.
+
+Verify the origin file is the one being served — expect zero `Disallow` lines
+and no `BEGIN Cloudflare Managed content` marker:
 
 ```bash
-curl -s https://markdownstudio.dev/robots.txt
+curl -s https://markdownstudio.dev/robots.txt | grep -cE '^Disallow|BEGIN Cloudflare Managed'
 ```
 
-The AI crawlers are only *robots.txt*-disallowed, not blocked at the edge —
-those user agents still get `200`, so this is purely a policy signal that
-well-behaved crawlers obey.
+### Agent Readiness
+
+Cloudflare's **Agent Readiness → Diagnostics** page scores the site for AI
+agents. As of 2026-08-10 it reports **Level 1 "Quick Wins" 4/5**, with both
+items it marks *High impact* (robots.txt, sitemap) green, along with AI Crawler
+Rules and Content Signals.
+
+The remaining Level 1 item is **Markdown Negotiation** ("Markdown for Agents" —
+serve `text/markdown` to agents that ask for it via `Accept`), which **requires
+a Pro plan**. Skipped deliberately: the docs are already Markdown and GitHub
+Pages serves the raw source at its `.md` URL, and `docs/llms.txt` gives
+assistants a plain-text entry point, so most of the benefit is already there
+for free.
+
+Levels 2 and 3 (agent sign-up on behalf of users, API discovery, agent log-in
+and tool use) score 0 and are **not applicable** — Markdown Studio is a
+downloadable desktop/mobile app, not a hosted service with an API or accounts.
+Don't treat those as gaps.
 
 ### Download tracking
 
