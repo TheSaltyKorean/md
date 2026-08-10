@@ -204,19 +204,34 @@ is confirmed by measurement: no crawler was ever blocked at the edge —
 `Googlebot` user agents all got `200` throughout. The whole problem was a
 policy signal that well-behaved crawlers voluntarily obey.
 
-Verify the origin file is the one being served. Note the `-f`: without it a
-404 or 5xx pipes an error page into `grep`, which reports a reassuring `0` and
-makes an outage look like a pass. The positive `Allow:` count guards against
-an empty body doing the same:
+Verify the origin file is the one being served:
 
 ```bash
 robots=$(curl -fsS https://markdownstudio.dev/robots.txt) && {
-  printf 'blocking directives: %s (want 0)\n' \
-    "$(grep -cE '^Disallow|BEGIN Cloudflare Managed' <<< "$robots")"
-  printf 'allow rules:         %s (want >0)\n' \
-    "$(grep -c '^Allow: /' <<< "$robots")"
+  # Strip comments first. robots.txt explains the Cloudflare marker by name,
+  # so grepping the raw body matches this project's own prose and reports a
+  # permanent false alarm.
+  rules=$(grep -v '^[[:space:]]*#' <<< "$robots")
+
+  printf 'Disallow directives: %s (want 0)\n'    "$(grep -c '^Disallow'  <<< "$rules")"
+  printf 'Allow directives:    %s (want >0)\n'   "$(grep -c '^Allow: /'  <<< "$rules")"
+  printf 'our file, not CF:    %s (want yes)\n' \
+    "$(grep -q '^Sitemap: https://markdownstudio.dev/sitemap.xml' <<< "$rules" \
+       && echo yes || echo NO)"
 } || echo 'FETCH FAILED — unverified; do NOT read this as a pass'
 ```
+
+Three properties, because each covers a different failure:
+
+- **`-f`** — without it a 404 or 5xx pipes an error page into `grep`, which
+  counts zero `Disallow` lines and makes an outage look like a pass.
+- **`Allow` > 0** — an empty body also scores a clean zero on a purely
+  negative test.
+- **The `Sitemap:` line** — this is the real regression detector. If Cloudflare
+  re-enables Managed robots.txt it *replaces* the file wholesale, so this
+  project's own directives disappear. Asserting something that must be present
+  is more durable than grepping for Cloudflare's marker text, which is a
+  comment and could change.
 
 ### Agent Readiness
 
