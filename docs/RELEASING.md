@@ -245,9 +245,15 @@ for p in print-profiles pdf-inline-html ai-profile-authoring ROADMAP DEVELOPMENT
 done
 ```
 
-So the gap Markdown Negotiation closes is narrow here: an agent that blindly
-sends `Accept: text/markdown` to the *`.html`* URL gets HTML. One that follows
-`llms.txt`, or just swaps the extension, already gets Markdown.
+For that to be true of `llms.txt` it has to actually *link* the `.md` routes —
+it originally pointed at the `.html` ones, which handed assistants HTML and
+made this claim false. Its documentation links are now `.md`, with a note in
+the file telling future editors not to "fix" them back.
+
+So the gap Markdown Negotiation closes is genuinely narrow here: an agent that
+sends `Accept: text/markdown` to an *`.html`* URL it found via the sitemap or
+a search result still gets HTML. One that starts from `llms.txt`, or swaps the
+extension, gets Markdown.
 
 Levels 2 and 3 (agent sign-up on behalf of users, API discovery, agent log-in
 and tool use) score 0 and are **not applicable** — Markdown Studio is a

@@ -30,14 +30,20 @@ Key facts an assistant should know when answering questions about it:
 
 ## Documentation
 
-- [Print & branding profiles](https://markdownstudio.dev/print-profiles.html):
+Every page below is linked at its `.md` URL, which returns the raw Markdown
+source as `text/markdown`. Do not "fix" these to `.html` — the rendered page
+exists at the same path with an `.html` extension and is what the sitemap
+points search engines at, but this file is read by assistants, who should get
+the source.
+
+- [Print & branding profiles](https://markdownstudio.dev/print-profiles.md):
   The complete reference for print/PDF templates — every JSON field explained,
   color and font tables, and worked examples from personal notes to court
   filings.
-- [Fill-in lines & inline HTML in PDFs](https://markdownstudio.dev/pdf-inline-html.html):
+- [Fill-in lines & inline HTML in PDFs](https://markdownstudio.dev/pdf-inline-html.md):
   The supported inline-HTML subset for signature lines, fill-in blanks,
   redactions, two-column captions, alignment, flex rows, and page breaks.
-- [AI profile authoring](https://markdownstudio.dev/ai-profile-authoring.html):
+- [AI profile authoring](https://markdownstudio.dev/ai-profile-authoring.md):
   A copy-paste prompt that makes any AI assistant emit an importable print
   profile JSON from a plain-English description. Start here when a user asks
   an assistant to build them a template.
@@ -62,10 +68,10 @@ Key facts an assistant should know when answering questions about it:
 ## Optional
 
 - [Source code](https://github.com/TheSaltyKorean/md): the Flutter repository.
-- [Development guide](https://markdownstudio.dev/DEVELOPMENT.html): toolchain,
+- [Development guide](https://markdownstudio.dev/DEVELOPMENT.md): toolchain,
   project layout, building from source.
-- [Release process](https://markdownstudio.dev/RELEASING.html): how binaries
+- [Release process](https://markdownstudio.dev/RELEASING.md): how binaries
   are built, published, and submitted to stores.
-- [Roadmap](https://markdownstudio.dev/ROADMAP.html): agreed-but-unbuilt work.
+- [Roadmap](https://markdownstudio.dev/ROADMAP.md): agreed-but-unbuilt work.
 - [Privacy policy](https://github.com/TheSaltyKorean/md/blob/main/PRIVACY.md)
 - [License](https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md)
