@@ -13,12 +13,59 @@
 <meta name="theme-color" content="#121216" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-GME1XMYJBH"></script>
+<!-- Site ownership: Google Search Console + Bing Webmaster Tools.
+     Bing only checks the home page, but keeping it site-wide means ownership
+     survives if the verified URL ever changes. Do not remove after
+     verification succeeds — Bing re-checks. -->
+<meta name="google-site-verification" content="75LFaX1i0HDM1nsPLfFTvQyXdKizXjRzZi7SdhTRUMs">
+<meta name="msvalidate.01" content="8DEAB04533412E371647D871FAA101A9">
+
+<!-- Perf: open the connection to the tag host during head parse, not when the
+     async script starts fetching. -->
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+
+<!-- Google Consent Mode v2.
+     This MUST run before gtag.js loads, and the consent defaults MUST be the
+     first commands on the dataLayer — otherwise the first hit fires under the
+     old unconsented behaviour. Commands queue on the dataLayer, so calling
+     config before the library arrives is correct, not a race.
+
+     There is no cookie banner, so the EEA/UK/CH default cannot be "granted":
+     with analytics_storage denied, GA4 still receives cookieless pings and
+     models the gap, which is the defensible posture without explicit consent.
+     Everywhere else analytics is granted. Advertising signals are denied
+     everywhere because this site runs no ads and builds no audiences. -->
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
 
+  gtag('consent', 'default', {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'denied',
+    functionality_storage: 'granted',
+    personalization_storage: 'denied',
+    security_storage: 'granted',
+    region: [
+      'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE',
+      'IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE',
+      'IS','LI','NO','GB','CH'
+    ]
+  });
+
+  gtag('consent', 'default', {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'granted',
+    functionality_storage: 'granted',
+    personalization_storage: 'denied',
+    security_storage: 'granted'
+  });
+
+  gtag('js', new Date());
   gtag('config', 'G-GME1XMYJBH');
 </script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GME1XMYJBH"></script>

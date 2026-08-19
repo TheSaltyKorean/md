@@ -3,19 +3,60 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-GME1XMYJBH"></script>
+<!-- Perf: open the connection to the tag host during head parse, not when the
+     async script starts fetching. -->
+<link rel="preconnect" href="https://www.googletagmanager.com" crossorigin>
+<link rel="dns-prefetch" href="https://www.googletagmanager.com">
+
+<!-- Google Consent Mode v2.
+     This MUST run before gtag.js loads, and the consent defaults MUST be the
+     first commands on the dataLayer — otherwise the first hit fires under the
+     old unconsented behaviour. Commands queue on the dataLayer, so calling
+     config before the library arrives is correct, not a race.
+
+     There is no cookie banner, so the EEA/UK/CH default cannot be "granted":
+     with analytics_storage denied, GA4 still receives cookieless pings and
+     models the gap, which is the defensible posture without explicit consent.
+     Everywhere else analytics is granted. Advertising signals are denied
+     everywhere because this site runs no ads and builds no audiences. -->
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
 
+  gtag('consent', 'default', {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'denied',
+    functionality_storage: 'granted',
+    personalization_storage: 'denied',
+    security_storage: 'granted',
+    region: [
+      'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE',
+      'IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE',
+      'IS','LI','NO','GB','CH'
+    ]
+  });
+
+  gtag('consent', 'default', {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'granted',
+    functionality_storage: 'granted',
+    personalization_storage: 'denied',
+    security_storage: 'granted'
+  });
+
+  gtag('js', new Date());
   gtag('config', 'G-GME1XMYJBH');
 </script>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-GME1XMYJBH"></script>
 <title>Markdown Studio — free Markdown editor with court-ready PDF export</title>
 <meta name="description" content="Free cross-platform Markdown editor that turns plain-text drafts into polished PDFs — including court-compliant filings for pro se litigants. WYSIWYG editing, print profiles, AI-friendly. Windows, Linux, Android, iOS, macOS.">
 <link rel="canonical" href="https://markdownstudio.dev/">
 <meta name="google-site-verification" content="75LFaX1i0HDM1nsPLfFTvQyXdKizXjRzZi7SdhTRUMs">
+<meta name="msvalidate.01" content="8DEAB04533412E371647D871FAA101A9">
 <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
 <meta name="theme-color" content="#1a237e" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#121216" media="(prefers-color-scheme: dark)">
@@ -108,7 +149,7 @@
   .btn{display:inline-block;padding:12px 22px;border-radius:10px;background:var(--btn);color:var(--btnfg);text-decoration:none;font-weight:600}
   .btn.alt{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
   .note{font-size:.85rem;color:var(--muted);text-align:center}
-  .shot{width:100%;border-radius:12px;border:1px solid var(--border);margin:28px 0 6px;display:block}
+  .shot{width:100%;height:auto;border-radius:12px;border:1px solid var(--border);margin:28px 0 6px;display:block}
   .cap{font-size:.9rem;color:var(--muted);text-align:center;margin-bottom:24px}
   section{padding:36px 0}
   h2{font-size:1.5rem;margin-bottom:16px}
@@ -140,12 +181,14 @@
   </header>
 
   <img class="shot" src="assets/print-preview-court.png"
+       width="1400" height="850" fetchpriority="high" decoding="async"
        alt="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
   <p class="cap">A plain-Markdown motion, printed with the built-in <strong>Court Filing</strong>
   profile: centered court header, margin-to-margin caption, 12pt double-spaced justified body,
   certificate of service on its own page.
-  (<a href="samples/motion-for-continuance.md">source</a> →
-  <a href="samples/motion-for-continuance.pdf">PDF</a>)</p>
+  (<a href="samples/motion-for-continuance.html">read the Markdown source</a> ·
+  <a href="samples/motion-for-continuance.md">raw .md</a> →
+  <a href="samples/motion-for-continuance.pdf">the printed PDF</a>)</p>
 
   <section>
     <h2>Why it exists</h2>
@@ -169,6 +212,7 @@
   </section>
 
   <img class="shot" src="assets/split-view.png"
+       width="1400" height="850" loading="lazy" decoding="async"
        alt="Split view showing Markdown source with a floating format toolbar next to the live preview">
   <p class="cap">Split view — raw Markdown with the floating format toolbar, live preview beside it.</p>
 
