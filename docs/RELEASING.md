@@ -275,6 +275,68 @@ and tool use) score 0 and are **not applicable** — Markdown Studio is a
 downloadable desktop/mobile app, not a hosted service with an API or accounts.
 Don't treat those as gaps.
 
+### Analytics & search-engine tagging
+
+Three measurement systems run on the site, plus two search consoles. They are
+**not** interchangeable — each sees something the others cannot.
+
+| System | ID / key | Loaded by | Sees |
+| --- | --- | --- | --- |
+| Google Analytics 4 | `G-GME1XMYJBH` | inline tag in `index.html` + `_includes/head-custom.html` | Page views, events, `download_click`. Cookie-based (region-gated, below). |
+| Cloudflare Web Analytics | — | **edge-injected, no code in this repo** | Cookieless page views and Core Web Vitals for every visitor. |
+| Google Search Console | `google-site-verification` meta | both head blocks | Google impressions, clicks, queries, index coverage. |
+| Bing Webmaster Tools | `msvalidate.01` meta | both head blocks | Bing/Copilot impressions, clicks, AI-citation data. |
+| IndexNow | `0f87e00326bb915ddcf83a1d69619b04` | `tool/indexnow.sh` | Push notification of changed URLs to Bing. Write-only; no reporting. |
+
+#### Cloudflare Web Analytics is already on — do not add a snippet
+
+It was enabled a month before this section was written, using **Automatic
+setup**: Cloudflare injects `beacon.min.js` at the edge for browser requests.
+Nothing in this repo loads it, and nothing should — pasting the JS snippet in
+as well would double-count every page view.
+
+This is invisible to `curl`, which is misleading. The origin HTML contains no
+beacon, so a `curl | grep cloudflareinsights` returns nothing and looks broken.
+Confirm it in a real browser instead: load the site with devtools open and look
+for `static.cloudflareinsights.com/beacon.min.js` followed by a `POST` to
+`/cdn-cgi/rum` returning `204`.
+
+#### Google Consent Mode v2
+
+`gtag('consent', 'default', …)` runs **before** `gtag.js` loads and is the first
+thing pushed to the dataLayer. Order matters: defaults set after the first hit
+do not apply to it.
+
+There is no cookie banner, so the EEA/UK/CH default cannot be `granted`. Those
+regions get `analytics_storage: 'denied'`, under which GA4 still receives
+cookieless pings and models the gap — the defensible posture absent explicit
+consent. Everywhere else `analytics_storage` is `granted`. All three advertising
+signals are `denied` everywhere, because the site runs no ads and builds no
+audiences.
+
+If a consent banner is ever added, it must call `gtag('consent', 'update', …)`
+on the user's choice; the defaults here are only the starting state.
+
+#### IndexNow
+
+`bash tool/indexnow.sh` submits the sitemap's URLs to IndexNow, which feeds
+**Bing** (plus Yandex, Naver, Seznam). **Google does not consume IndexNow** — it
+still finds changes by crawling the sitemap, so this is purely the Bing-side
+fast path.
+
+Ownership is proven by `docs/0f87e00326bb915ddcf83a1d69619b04.txt`, whose only content is the key.
+**Do not delete that file**; IndexNow refetches it on every submission and
+rejects the batch with `403` if it is missing. The script checks the key file is
+reachable before submitting, so a deleted key fails loudly instead of silently
+no-oping.
+
+```bash
+bash tool/indexnow.sh                        # everything in the sitemap
+bash tool/indexnow.sh / /print-profiles.html # just these
+```
+
+Worth running after any release that changes site content.
+
 ### Download tracking
 
 There are two independent sources, and they measure different things:
