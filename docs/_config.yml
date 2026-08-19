@@ -9,9 +9,7 @@
 
 title: Markdown Studio
 description: >-
-  Free cross-platform Markdown editor and viewer with a Notion-style WYSIWYG,
-  and print/PDF profiles that produce polished documents — branded reports,
-  technical specs, and court-compliant filings.
+  Free cross-platform Markdown editor and viewer with a Notion-style WYSIWYG and print/PDF profiles — polished reports, technical specs, and court filings.
 url: https://markdownstudio.dev
 baseurl: ""
 lang: en-US
@@ -43,16 +41,16 @@ defaults:
     values:
       description: >-
         Complete reference for Markdown Studio print and branding profiles:
-        every JSON field explained, colour and font tables, and worked examples
-        from personal notes to court-ready filings.
+        every JSON field, colour and font tables, and worked examples from notes
+        to court filings.
 
   - scope:
       path: pdf-inline-html.md
     values:
       description: >-
-        The inline-HTML subset Markdown Studio's PDF renderer understands —
-        signature lines, fill-in blanks, redactions, two-column case captions,
-        alignment, flex rows, and forced page breaks.
+        The inline-HTML subset Markdown Studio's PDF renderer understands:
+        signature lines, fill-in blanks, redactions, two-column captions, and
+        forced page breaks.
 
   - scope:
       path: ai-profile-authoring.md
