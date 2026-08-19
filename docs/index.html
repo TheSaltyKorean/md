@@ -149,6 +149,7 @@
   .btn{display:inline-block;padding:12px 22px;border-radius:10px;background:var(--btn);color:var(--btnfg);text-decoration:none;font-weight:600}
   .btn.alt{background:transparent;color:var(--accent);border:1.5px solid var(--accent)}
   .note{font-size:.85rem;color:var(--muted);text-align:center}
+  picture{display:block}
   .shot{width:100%;height:auto;border-radius:12px;border:1px solid var(--border);margin:28px 0 6px;display:block}
   .cap{font-size:.9rem;color:var(--muted);text-align:center;margin-bottom:24px}
   section{padding:36px 0}
@@ -180,9 +181,16 @@
     <p class="note">Windows (MSI / setup.exe / portable) · Linux (.deb / tar.gz) · Android APK · macOS · iOS — free for non-commercial use</p>
   </header>
 
-  <img class="shot" src="assets/print-preview-court.png"
-       width="1400" height="850" fetchpriority="high" decoding="async"
-       alt="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
+  <picture>
+    <source type="image/webp"
+            srcset="assets/print-preview-court-460.webp   460w,
+                    assets/print-preview-court-920.webp   920w,
+                    assets/print-preview-court-1400.webp 1400w"
+            sizes="(max-width: 960px) calc(100vw - 40px), 920px">
+    <img class="shot" src="assets/print-preview-court.png"
+         width="1400" height="850" fetchpriority="high" decoding="async"
+         alt="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
+  </picture>
   <p class="cap">A plain-Markdown motion, printed with the built-in <strong>Court Filing</strong>
   profile: centered court header, margin-to-margin caption, 12pt double-spaced justified body,
   certificate of service on its own page.
@@ -211,9 +219,16 @@
     </div>
   </section>
 
-  <img class="shot" src="assets/split-view.png"
-       width="1400" height="850" loading="lazy" decoding="async"
-       alt="Split view showing Markdown source with a floating format toolbar next to the live preview">
+  <picture>
+    <source type="image/webp"
+            srcset="assets/split-view-460.webp   460w,
+                    assets/split-view-920.webp   920w,
+                    assets/split-view-1400.webp 1400w"
+            sizes="(max-width: 960px) calc(100vw - 40px), 920px">
+    <img class="shot" src="assets/split-view.png"
+         width="1400" height="850" loading="lazy" decoding="async"
+         alt="Split view showing Markdown source with a floating format toolbar next to the live preview">
+  </picture>
   <p class="cap">Split view — raw Markdown with the floating format toolbar, live preview beside it.</p>
 
   <section>

@@ -17,9 +17,17 @@
 User-agent: *
 Allow: /
 
-# Content signals (Cloudflare / IETF aipref style). We allow search indexing,
-# AI grounding/RAG, and model training — all of it is public documentation.
-Content-Signal: search=yes,ai-input=yes,ai-train=yes,use=full
+# NOTE: a `Content-Signal:` directive used to sit here declaring
+# search=yes,ai-input=yes,ai-train=yes,use=full. It was removed on 2026-08-19
+# because it is not an RFC 9309 directive: robots.txt validators (Lighthouse
+# among them) report the whole file as invalid over it, which cost the site's
+# Lighthouse SEO score. Conforming crawlers ignore unknown directives, so it
+# bought nothing that the explicit per-crawler `Allow:` rules below do not
+# already say — and those are what crawlers actually obey.
+#
+# The spec-correct home for that signal is the `Content-Signal` HTTP response
+# header, which GitHub Pages cannot set. It could be added with a Cloudflare
+# response-header Transform Rule if the declaration is ever wanted back.
 
 # ---------------------------------------------------------------------------
 # AI crawlers — explicitly allowed
