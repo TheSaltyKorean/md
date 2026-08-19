@@ -7,8 +7,8 @@ rationale. Update this whenever a new rule or significant decision is made.
 
 | # | Rule | Why |
 |---|------|-----|
-| R1 | **Run a Codex review loop on a PR before every merge; only merge after Codex's all-clear.** | Codex acts as the gatekeeper reviewer. Merging without it skips required review. |
-| R2 | **Codex loop mechanics:** tag `@codex` in PR comments, poll the PR ~every 5 min, resolve its feedback, re-tag, repeat until it reports no issues. Codex needs a PR to run. | This is how the Codex GitHub integration is driven on this repo. |
+| R1 | **Open a PR and let CI pass before merging.** Branch protection requires a PR and the `Analyze & test` check; no direct pushes to `main`. | User decision (2026-08-19). |
+| R2 | **The Codex review loop is retired** (2026-08-19, owner's request). Do not tag `@codex review`; do not reintroduce it. `tool/codex-gate.sh` / `codex-merge.sh` remain on disk, unused. | Superseded R1/R2/R10. Historical entries in the status log below describe the era when it applied and stay accurate as history. |
 | R3 | **Build tooling goes under `C:\git`, never the `C:\` root** (e.g. Flutter SDK at `C:\git\flutter-sdk`). | Keep the drive root clean / tooling co-located with projects. |
 | R4 | **Must remain cross-platform:** Linux, Windows, Android, iOS (+ macOS), for submission to all app stores. | Core product requirement. |
 | R5 | **Material Design with light AND dark themes.** | Core product requirement. |
@@ -16,7 +16,7 @@ rationale. Update this whenever a new rule or significant decision is made.
 | R7 | **Editor is block/Notion-style WYSIWYG** with an **optional split view** (source + live preview). | Explicit user requirement. |
 | R8 | **Prune branches after every merge**: delete the merged PR's remote branch and `git remote prune origin`. Never delete branches with open PRs or unmerged work. | User instruction (2026-07-04); keeps the branch list to only live work. |
 | R9 | **Print preview opens in a workspace tab, never a modal dialog.** | User instruction (2026-07-04); the preview must coexist with editing, not block it. |
-| R10 | **Resolve Codex review threads as their fixes land** (GitHub "resolve conversation"), every round. | User instruction (2026-07-05); addressed comments must not dangle. |
+| R10 | *(retired 2026-08-19 with the Codex loop — was: resolve Codex review threads as their fixes land.)* | Kept as a numbered placeholder so R11/R12 references elsewhere still line up. |
 | R11 | **Microsoft Store publishing is ON HOLD** — don't reserve the name or publish. Owner may transfer the app to their business (ISV Success program needs a published app; a free app qualifies per their Microsoft rep); awaiting rep's answer on whether the consumer Store counts. If transferred: IP assignment/license first, and revisit the personal Venmo link. | User decision (2026-07-06). |
 | R12 | **Never lose/regenerate the Android upload keystore** (password manager only; cert SHA-256 …AE:CA:61:3F). | A new keystore breaks in-place updates for all installed users. |
 

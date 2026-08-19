@@ -39,52 +39,16 @@ work is tracked in `docs/ROADMAP.md`. High level:
 
 ## Standing rules (from the user — always follow)
 
-1. **Codex review loop before every merge — mandatory, never skip.** A PR must
-   pass a Codex review loop *before* it is merged. Never merge until Codex has
-   given a literal all-clear (or the user has explicitly accepted open findings —
-   see below). This is now enforced by **discipline, not machinery**: the
-   `codex-gate` CI check and the local PreToolUse hook have been removed at the
-   user's request. The rule still stands — do not treat the absence of a gate as
-   permission to skip the loop.
-   - Codex requires a **PR** to run (it cannot review a bare branch). So: branch,
-     commit, open a PR.
-   - **The loop:** tag **`@codex review`** in a PR comment → **poll the PR every
-     ~5 minutes** → address/resolve its feedback (push fixes) → tag
-     `@codex review` again on the new head → repeat **until Codex signals no
-     issues** (see the all-clear definition below).
-   - **"All-clear" means Codex gave a clean review on the current head.** Codex
-     signals this in one of two ways: a literal 👍 (`+1`) reaction on the
-     `@codex review` request, **or** a clean-review *comment* (e.g. "Codex
-     Review: Didn't find any major issues") whose **"Reviewed commit:"** SHA is
-     the current head. A Codex *review* (even a `COMMENTED` one) with open
-     findings is NOT an all-clear. `tool/codex-gate.sh <PR>` is kept as a
-     **convenience checker** — it prints `GREEN` only on a genuine all-clear
-     bound to the head; use it to confirm before merging. Report honestly — e.g.
-     "merged with N accepted findings", never "all-clear", when findings remain.
-   - The all-clear = a **`@codex review` request newer than the PR head commit**,
-     with no later findings, **and** either (a) a literal 👍 (`+1`) reaction from
-     the Codex bot on that request, or (b) a Codex-bot clean-review comment
-     ("…find any major issues…") that names the **current head SHA** in its
-     "Reviewed commit:" line. Path (b) binds to the exact head SHA; only the
-     Codex bot can author such a comment.
-   - **Merging:** once all-clear, merge with `gh pr merge <PR> --merge` (or
-     `bash tool/codex-merge.sh <PR>`, which re-checks the all-clear first).
-     Branch protection still requires the **`Analyze & test`** check and a PR
-     (no direct pushes to `main`), so let CI pass before merging.
-   - **Accepted findings:** if the user *explicitly* decides to merge with an
-     open finding, record that decision on the PR, then merge — and say so
-     honestly ("merged with N accepted findings"). Never accept findings without
-     explicit user approval, and never re-review only part of a change — re-run
-     Codex on the **final** head before merge so nothing slips through
-     unreviewed (this exact gap shipped a P1 once; don't repeat it).
-   - **Resolve the review threads** (GitHub "resolve conversation") for every
-     finding in the same round its fix is pushed — don't leave addressed
-     comments dangling (user rule, 2026-07-05). Note the bot's clean verdict
-     arrives as an *issue comment*, and old inline comments get re-anchored
-     to new heads — check timestamps before treating one as a new finding.
-     If Codex raises a **false positive**, rebut it on the PR with evidence
-     instead of changing correct code (precedent: PR #21's "String has no
-     operator *").
+1. **Open a PR and let CI pass before merging.** Branch protection requires a
+   PR and the **`Analyze & test`** check — no direct pushes to `main`. Branch,
+   commit, open a PR, wait for the checks, then merge with
+   `gh pr merge <PR> --merge`.
+   - **The Codex review loop was retired on 2026-08-19 at the owner's request.**
+     It is no longer required and should not be reintroduced. Do not tag
+     `@codex review`, and do not treat its absence as a gap.
+   - `tool/codex-gate.sh` and `tool/codex-merge.sh` are left on disk but are
+     unused. Nothing calls them.
+
 2. **Prune branches after every merge.** As soon as a PR is merged, delete its
    remote branch (`git push origin --delete <branch>`, or `gh pr merge`'s
    `--delete-branch` flag) and run `git remote prune origin` (plus delete any
@@ -200,7 +164,7 @@ fvm flutter create --org com.markdownstudio --project-name markdown_studio \
 
 - `flutter analyze` clean and `flutter test` green.
 - Cross-platform preserved; Material + light/dark intact.
-- Open a PR, run the **Codex loop**, get the all-clear, **then** merge.
+- Open a PR and let the **`Analyze & test`** check pass, **then** merge.
 - After the merge: **delete the PR branch and prune** (`git remote prune
   origin`) — see standing rule 2.
 

@@ -103,8 +103,11 @@ Published binaries are built by CI — see [RELEASING.md](RELEASING.md).
 `.github/workflows/ci.yml` runs on every push/PR: analyze + tests, then
 builds Android (APK + AAB), Linux, Windows, iOS (no-codesign) and macOS on
 their respective runners; the Android, Linux and Windows jobs upload build
-artifacts. Per project policy, every PR also runs a **Codex review loop and
-must get the all-clear before merge** (see `CLAUDE.md`).
+artifacts. Branch protection requires a PR and a passing **`Analyze & test`**
+check before merge — no direct pushes to `main` (see `CLAUDE.md`).
+
+The project previously also required a Codex review loop on every PR; that was
+retired on 2026-08-19 and should not be reintroduced.
 
 ## Security & known limitations
 
