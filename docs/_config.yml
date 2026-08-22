@@ -66,6 +66,9 @@ defaults:
       path: samples/motion-for-continuance.md
     values:
       title: Sample court motion in Markdown
+      # The sample is verbatim legal text with no heading of its own, so the
+      # layout has no <h1> to render. See _layouts/default.html.
+      page_heading: Sample court motion in Markdown
       description: >-
         A complete motion for continuance written in Markdown and printed
         through Markdown Studio's Court Filing profile — source, raw .md, and
