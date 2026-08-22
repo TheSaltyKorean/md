@@ -83,3 +83,25 @@
     y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
   })(window, document, "clarity", "script", "y6hag03dir");
 </script>
+
+<!-- The site title used to be an <h1> in the theme layout, which gave every
+     page two h1 elements. _layouts/default.html now renders it as
+     <div class="site-title">; these rules reproduce Primer's markdown-body h1
+     styling so the change is invisible. -->
+<style>
+  .markdown-body .site-title {
+    margin: 0 0 16px;
+    padding-bottom: 0.3em;
+    font-size: 2em;
+    font-weight: 600;
+    line-height: 1.25;
+    border-bottom: 1px solid #eaecef;
+  }
+  .markdown-body .site-title a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .markdown-body .site-title a:hover {
+    text-decoration: underline;
+  }
+</style>
