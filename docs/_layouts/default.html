@@ -31,6 +31,16 @@
       <div class="site-title"><a href="{{ "/" | absolute_url }}">{{ site.title }}</a></div>
       {% endif %}
 
+      {%- comment -%}
+        Pages whose Markdown has no heading of its own (the court-filing sample
+        is verbatim legal text) would otherwise render with no <h1> at all.
+        `page_heading` in _config.yml gives them one without editing the source
+        file, which doubles as the input for the published sample PDF.
+      {%- endcomment -%}
+      {% if page.page_heading %}
+      <h1>{{ page.page_heading }}</h1>
+      {% endif %}
+
       {{ content }}
 
       {% if site.github.private != true and site.github.license %}
