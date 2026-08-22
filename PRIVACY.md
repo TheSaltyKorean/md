@@ -42,14 +42,26 @@ policies.
 ## The website (markdownstudio.dev)
 
 The project's website — a separate, static marketing and documentation site —
-uses **Google Analytics 4** to measure aggregate visits (such as pages viewed,
-approximate region, and device/browser type) so we can see which pages are
-useful. This applies only to the website, **not** the application, which sends
-no analytics as described above. Google Analytics sets cookies and processes
-this data under [Google's privacy policy](https://policies.google.com/privacy);
-you can opt out with the
-[Google Analytics opt-out add-on](https://tools.google.com/dlpage/gaoptout) or
-by blocking analytics cookies in your browser.
+uses three measurement tools so we can see which pages are useful. All of this
+applies only to the website, **not** the application, which sends no analytics
+as described above.
+
+- **Google Analytics 4** — aggregate visits (pages viewed, approximate region,
+  device/browser type). It sets cookies and processes this data under
+  [Google's privacy policy](https://policies.google.com/privacy). Google
+  Consent Mode is configured so that visitors in the EEA, UK and Switzerland
+  are measured without analytics storage by default. Opt out with the
+  [Google Analytics opt-out add-on](https://tools.google.com/dlpage/gaoptout)
+  or by blocking analytics cookies in your browser.
+- **Microsoft Clarity** — heatmaps and session playback, showing how visitors
+  scroll and click on a page. Clarity masks text input by default and sets its
+  own first-party cookies (`_clck`, `_clsk`); it is covered by the
+  [Microsoft privacy statement](https://privacy.microsoft.com/privacystatement).
+  Blocking cookies for this site, or a tracker-blocking extension, stops it.
+- **Cloudflare Web Analytics / RUM** — cookieless page-performance measurement
+  at the CDN edge. It stores no identifiers in your browser.
+
+Nothing here is used for advertising, and no audiences or profiles are built.
 
 Questions: open an issue at
 <https://github.com/TheSaltyKorean/md/issues>.
