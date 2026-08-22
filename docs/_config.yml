@@ -59,6 +59,18 @@ defaults:
         A copy-paste prompt that makes any AI assistant generate an importable
         Markdown Studio print profile from a plain-English description.
 
+  # The sample motion has no heading of its own, so jekyll-titles-from-headings
+  # cannot title it and it inherits the site title + site description — 160
+  # characters, flagged by Bing's Site Scan as "title too long". Set both here.
+  - scope:
+      path: samples/motion-for-continuance.md
+    values:
+      title: Sample court motion in Markdown
+      description: >-
+        A complete motion for continuance written in Markdown and printed
+        through Markdown Studio's Court Filing profile — source, raw .md, and
+        the finished PDF.
+
   - scope:
       path: ROADMAP.md
     values:

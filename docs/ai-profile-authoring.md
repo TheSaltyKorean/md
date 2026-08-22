@@ -1,4 +1,4 @@
-# AI profile authoring — hand a template to your assistant
+# AI profile authoring with any AI assistant
 
 This page lets you **describe a template in plain English and have any AI
 assistant generate an importable profile** for Markdown Studio's Print / Export
