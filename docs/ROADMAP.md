@@ -1,7 +1,7 @@
 # Roadmap
 
 Forward-looking work that is agreed on but not yet built. Past work lives in
-the **Status log** in [`MEMORY.md`](../MEMORY.md); this file is the other
+the **Status log** in [`MEMORY.md`](https://github.com/TheSaltyKorean/md/blob/main/MEMORY.md); this file is the other
 direction — what we still owe.
 
 Each item records the *why*, the concrete blockers, and a staged plan, so a
