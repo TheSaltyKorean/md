@@ -50,7 +50,7 @@ import 'package:markdown_studio/widgets/preview_find_view.dart';
 import 'package:markdown_studio/widgets/preview_view.dart';
 import 'package:markdown_studio/widgets/print_preview_view.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:pdf/pdf.dart' show PdfColors, PdfPageFormat;
+import 'package:pdf/pdf.dart' show PdfColor, PdfColors, PdfPageFormat;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -380,7 +380,8 @@ void main() {
         isTrue);
     expect(
         FileAssociationService.isInstalledPath(
-          exe: r'C:\git\md\build\windows\x64\runner\Release\markdown_studio.exe',
+          exe:
+              r'C:\git\md\build\windows\x64\runner\Release\markdown_studio.exe',
           installRoots: const [perUser, pf],
           separator: r'\',
         ),
@@ -3478,6 +3479,105 @@ void main() {
 
     final reloaded = WorkspaceController(prefs);
     expect(reloaded.autoReload, isFalse);
+  });
+
+  test('A raw-HTML <table> renders as a real table, not literal markup', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    const markdown = '''
+Before the table.
+
+<table>
+<thead><tr><th>Category</th><th style="text-align:center;">Legal in TX</th></tr></thead>
+<tbody>
+<tr><td>Section 47 app</td><td style="background:#f2ff49;color:#111344;font-weight:700;text-align:center;">Yes</td></tr>
+<tr><td>Commercial online</td><td style="background:#fbffcc;">No &mdash; not licensed</td></tr>
+<tr><td><strong>Card houses</strong></td><td>Yes</td></tr>
+</tbody>
+</table>
+
+After the table.
+''';
+    final widgets = builder.build(markdown);
+    final all = _walk(widgets).toList();
+    final text = _literalText(all);
+
+    // The markup is gone; the content is there.
+    expect(text, isNot(contains('<td')));
+    expect(text, isNot(contains('<tr')));
+    expect(text, isNot(contains('<table')));
+    expect(text, isNot(contains('<strong')));
+    expect(text, contains('Section 47 app'));
+    expect(text, contains('Card houses'));
+    // Entities are decoded like anywhere else in prose.
+    expect(text, contains('No — not licensed'));
+    // Prose around the block still renders.
+    expect(text, contains('Before the table.'));
+    expect(text, contains('After the table.'));
+
+    final tables = all.whereType<pw.Table>().toList();
+    expect(tables, hasLength(1));
+    // <thead> + two-column rows, header included.
+    expect(tables.single.children, hasLength(4));
+    expect(tables.single.children.first.children, hasLength(2));
+    // The header keeps its brand fill.
+    expect(tables.single.children.first.decoration, isNotNull);
+    // A cell background stretches to the full row height.
+    expect(tables.single.defaultVerticalAlignment,
+        pw.TableCellVerticalAlignment.full);
+  });
+
+  test('Raw-HTML table cells honour background, colour, weight and alignment',
+      () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    const markdown = '''
+<table>
+<tr><td>plain</td><td style="background:#f2ff49;color:#111344;font-weight:700;text-align:center;">HIT</td></tr>
+</table>
+''';
+    final table = _walk(builder.build(markdown)).whereType<pw.Table>().single;
+    final cells = table.children.single.children;
+    expect(cells, hasLength(2));
+
+    // The plain cell gets no fill wrapper; the styled one does.
+    expect(cells.first, isA<pw.Padding>());
+    final filled = cells.last;
+    expect(filled, isA<pw.Container>());
+    expect((filled as pw.Container).decoration, isNotNull);
+
+    final rich = _allWidgets(filled).whereType<pw.RichText>().single;
+    expect(rich.textAlign, pw.TextAlign.center);
+    final span = rich.text as pw.TextSpan;
+    final style = (span.children!.first as pw.TextSpan).style!;
+    expect(style.color, const PdfColor.fromInt(0xFF111344));
+    // Weight is carried by the font face, not a fontWeight attribute.
+    expect(style.font!.fontName, contains('Bold'));
+  });
+
+  test('Raw-HTML tables survive legal mode and A4 pagination', () async {
+    const court = PrintProfile.courtFiling;
+    final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
+    final rows = List.generate(
+        40,
+        (i) =>
+            '<tr><td>Exhibit $i</td><td style="text-align:right;">Page $i</td></tr>');
+    final markdown = '<table>\n${rows.join('\n')}\n</table>\n';
+    final widgets = builder.build(markdown);
+    final text = _literalText(_walk(widgets));
+    expect(text, isNot(contains('<td')));
+    expect(text, contains('Exhibit 39'));
+    // A long table still paginates rather than overflowing a page.
+    await _renderA4(widgets);
+  });
+
+  test('A <table> inside a code fence stays literal', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.personal, fonts: _standardFonts());
+    const markdown = '```html\n<table><tr><td>x</td></tr></table>\n```\n';
+    final widgets = builder.build(markdown);
+    expect(_walk(widgets).whereType<pw.Table>(), isEmpty);
+    expect(_literalText(_walk(widgets)), contains('<table>'));
   });
 }
 

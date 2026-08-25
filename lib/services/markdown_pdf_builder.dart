@@ -109,7 +109,16 @@ class MarkdownPdfBuilder {
       }
     }
 
-    nodes.forEach(walk);
+    for (final node in nodes) {
+      // A raw-HTML <table> reaches build() as unparsed text, so parse it here
+      // too — otherwise its remote images would never be pre-fetched and would
+      // render as placeholders.
+      final raw = _rawHtmlText(node);
+      if (raw != null) {
+        _splitHtmlTables(raw).whereType<md.Element>().forEach(walk);
+      }
+      walk(node);
+    }
     return urls;
   }
 
@@ -207,10 +216,10 @@ class MarkdownPdfBuilder {
       // after a break must still split across pages); div fragments render
       // atomically as usual.
       Iterable<pw.Widget> segment(String seg) sync* {
-        if (profile.legalMode && !_divOpen.hasMatch(seg)) {
+        if (profile.legalMode && !_atomicRawHtml(seg)) {
           yield* _flowParagraph([md.Text(seg)]);
         } else {
-          yield _divBlock(seg) ?? _paragraph([md.Text(seg)]);
+          yield _rawHtmlBlock(seg) ?? _paragraph([md.Text(seg)]);
         }
       }
 
@@ -253,8 +262,8 @@ class MarkdownPdfBuilder {
   /// takes the unchanged [_block] path; non-legal documents never come here.
   Iterable<pw.Widget>? _legalFlow(md.Node node) {
     if (node is md.Text) {
-      // Raw-HTML blocks (caption rows, signature lines) stay atomic.
-      if (_divOpen.hasMatch(node.text)) return null;
+      // Raw-HTML blocks (caption rows, signature lines, tables) stay atomic.
+      if (_atomicRawHtml(node.text)) return null;
       return _flowParagraph([node]);
     }
     if (node is! md.Element) return null;
@@ -263,7 +272,7 @@ class MarkdownPdfBuilder {
       if (pc.any((c) => c is md.Element && c.tag == 'img')) return null;
       if (pc.isNotEmpty &&
           pc.every((c) => c is md.Text) &&
-          _divOpen.hasMatch(node.textContent)) {
+          _atomicRawHtml(node.textContent)) {
         return null;
       }
       return _flowParagraph(pc);
@@ -334,7 +343,7 @@ class MarkdownPdfBuilder {
   /// The raw text of a block package:markdown left as HTML — a text node, or
   /// a paragraph whose children are pure text (the same guard [_block] uses so
   /// inline-code samples are never treated as markup). Null otherwise.
-  String? _rawHtmlText(md.Node node) {
+  static String? _rawHtmlText(md.Node node) {
     if (node is md.Text) return node.text;
     if (node is md.Element && node.tag == 'p') {
       final pc = node.children ?? const <md.Node>[];
@@ -343,6 +352,242 @@ class MarkdownPdfBuilder {
       }
     }
     return null;
+  }
+
+  /// Whether a raw-HTML block renders as its own atomic widget (a `<div>`
+  /// caption/signature line or a `<table>`) rather than as flowing legal body
+  /// text.
+  static bool _atomicRawHtml(String raw) =>
+      _divOpen.hasMatch(raw) || _tableOpen.hasMatch(raw);
+
+  // --- Raw-HTML <table> blocks ------------------------------------------------
+
+  static final _tableOpen = RegExp(r'<table\b[^>]*>', caseSensitive: false);
+  static final _tableTag =
+      RegExp(r'<(/?)table\b[^>]*?(/?)>', caseSensitive: false);
+  static final _tableSection = RegExp(
+      r'<(thead|tbody|tfoot)\b[^>]*>([\s\S]*?)</\1\s*>',
+      caseSensitive: false);
+  static final _tableRow =
+      RegExp(r'<tr\b[^>]*>([\s\S]*?)</tr\s*>', caseSensitive: false);
+  static final _tableCell =
+      RegExp(r'<(t[dh])\b([^>]*)>([\s\S]*?)</\1\s*>', caseSensitive: false);
+
+  /// A `style` attribute's declaration text (what sits inside the quotes), or
+  /// null when the attribute is absent. Shared by [_styleDecls] (which parses a
+  /// whole tag's attribute text) and the table-cell parser (which carries the
+  /// declarations along on the parsed element).
+  static final _styleAttr =
+      RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''', caseSensitive: false);
+
+  static String? _styleText(String attrs) {
+    final m = _styleAttr.firstMatch(attrs);
+    return m == null ? null : (m.group(2) ?? m.group(3) ?? '');
+  }
+
+  /// The `name="value"` pairs of a tag's attribute text (double, single, or
+  /// unquoted values; names lower-cased).
+  static final _attrPair = RegExp(
+      r'''([A-Za-z_:][-\w:.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s"'>]+))''');
+
+  static Map<String, String> _htmlAttrs(String attrs) {
+    final out = <String, String>{};
+    for (final m in _attrPair.allMatches(attrs)) {
+      out[m.group(1)!.toLowerCase()] =
+          m.group(3) ?? m.group(4) ?? m.group(5) ?? '';
+    }
+    return out;
+  }
+
+  /// The inline HTML tags a table cell may carry, mapped to the markdown
+  /// element [_inline] already knows how to style. `<span>`, `<br>` and HTML
+  /// entities are deliberately absent — those stay as text, where
+  /// [_renderTextWithSpans] handles them.
+  static const _cellInlineTags = <String, String>{
+    'b': 'strong',
+    'strong': 'strong',
+    'i': 'em',
+    'em': 'em',
+    'cite': 'em',
+    'u': 'u',
+    'ins': 'u',
+    's': 'del',
+    'strike': 'del',
+    'del': 'del',
+    'code': 'code',
+    'a': 'a',
+  };
+
+  static final _cellInlineTag = RegExp(
+      r'<(img|b|strong|i|em|cite|u|ins|s|strike|del|code|a)\b([^>]*?)(/?)>',
+      caseSensitive: false);
+
+  /// Convert the inline HTML inside a raw-HTML table cell into markdown nodes
+  /// so `<strong>`/`<em>`/`<code>`/`<a>`/`<img>` render through the normal
+  /// inline pipeline instead of printing as literal tags. Everything else —
+  /// `<span>` labels, `<br>`, entities — is left as text for
+  /// [_renderTextWithSpans], which already understands it. Stray or unbalanced
+  /// tags are dropped rather than leaked.
+  static List<md.Node> _cellNodes(String html) {
+    final out = <md.Node>[];
+    void addText(String s) {
+      if (s.isNotEmpty) out.add(md.Text(s));
+    }
+
+    var i = 0;
+    while (i < html.length) {
+      final m = _cellInlineTag.firstMatch(html.substring(i));
+      if (m == null) {
+        addText(html.substring(i));
+        break;
+      }
+      addText(html.substring(i, i + m.start));
+      final name = m.group(1)!.toLowerCase();
+      final attrs = m.group(2) ?? '';
+      final selfClosing = m.group(3) == '/';
+      final tagEnd = i + m.end;
+      if (name == 'img') {
+        out.add(md.Element.empty('img')..attributes.addAll(_htmlAttrs(attrs)));
+        i = tagEnd;
+        continue;
+      }
+      if (selfClosing) {
+        i = tagEnd; // structural self-closing tag — no content to render
+        continue;
+      }
+      final close = _matchInlineTag(html, name, tagEnd);
+      if (close == null) {
+        i = tagEnd; // unbalanced opener — drop the tag, keep the text
+        continue;
+      }
+      final el = md.Element(
+          _cellInlineTags[name]!, _cellNodes(html.substring(tagEnd, close.$1)));
+      if (name == 'a') el.attributes.addAll(_htmlAttrs(attrs));
+      out.add(el);
+      i = close.$2;
+    }
+    return out;
+  }
+
+  /// (closeStart, closeEnd) of the `</name>` balancing an opening tag that ends
+  /// at [from], accounting for same-name nesting; null if unbalanced.
+  static (int, int)? _matchInlineTag(String s, String name, int from) {
+    final re = RegExp('<(/?)$name' r'\b[^>]*?(/?)>', caseSensitive: false);
+    var depth = 1;
+    for (final m in re.allMatches(s, from)) {
+      if (m.group(1) == '/') {
+        depth--;
+        if (depth == 0) return (m.start, m.end);
+      } else if (m.group(2) != '/') {
+        depth++;
+      }
+    }
+    return null;
+  }
+
+  /// Parse the *contents* of a raw-HTML `<table>` into the same element tree
+  /// package:markdown builds for a pipe table, so [_table] renders it
+  /// unchanged. Each cell keeps its `style` declarations in
+  /// `attributes['style']` — the per-cell background, colour, weight and
+  /// alignment that pipe-table syntax cannot express. Rows inside a `<thead>`
+  /// (or, in a sectionless table, a leading all-`<th>` row) become the header.
+  static md.Element _htmlTableElement(String inner) {
+    final headRows = <md.Node>[];
+    final bodyRows = <md.Node>[];
+
+    void addRows(String chunk, {required bool head}) {
+      for (final r in _tableRow.allMatches(chunk)) {
+        final cells = <md.Node>[];
+        var allHeaderCells = true;
+        for (final c in _tableCell.allMatches(r.group(1)!)) {
+          final tag = c.group(1)!.toLowerCase();
+          if (tag != 'th') allHeaderCells = false;
+          final el = md.Element(tag, _cellNodes(c.group(3)!));
+          final style = _styleText(c.group(2)!);
+          if (style != null) el.attributes['style'] = style;
+          cells.add(el);
+        }
+        if (cells.isEmpty) continue;
+        // A sectionless table still has a header when its first row is all
+        // <th> — the common hand-written shape.
+        final isHead =
+            head || (allHeaderCells && headRows.isEmpty && bodyRows.isEmpty);
+        (isHead ? headRows : bodyRows).add(md.Element('tr', cells));
+      }
+    }
+
+    final sections = _tableSection.allMatches(inner).toList();
+    if (sections.isEmpty) {
+      addRows(inner, head: false);
+    } else {
+      for (final s in sections) {
+        addRows(s.group(2)!, head: s.group(1)!.toLowerCase() == 'thead');
+      }
+    }
+    return md.Element('table', [
+      if (headRows.isNotEmpty) md.Element('thead', headRows),
+      if (bodyRows.isNotEmpty) md.Element('tbody', bodyRows),
+    ]);
+  }
+
+  /// (closeStart, closeEnd) of the `</table>` balancing the `<table>` whose
+  /// opening tag ends at [from]; null if unbalanced.
+  static (int, int)? _matchTable(String s, int from) {
+    var depth = 1;
+    for (final m in _tableTag.allMatches(s, from)) {
+      if (m.group(1) == '/') {
+        depth--;
+        if (depth == 0) return (m.start, m.end);
+      } else if (m.group(2) != '/') {
+        depth++;
+      }
+    }
+    return null;
+  }
+
+  /// Split a raw-HTML block into its ordered parts: every complete
+  /// `<table>…</table>` as a parsed [md.Element], and the text around them as
+  /// [String]s. Returns an empty list when [raw] holds no complete table, so
+  /// callers fall through to their usual handling.
+  static List<Object> _splitHtmlTables(String raw) {
+    if (!_tableOpen.hasMatch(raw)) return const [];
+    final parts = <Object>[];
+    var i = 0;
+    while (i < raw.length) {
+      final open = _tableOpen.firstMatch(raw.substring(i));
+      if (open == null) break;
+      final openStart = i + open.start;
+      final openEnd = i + open.end;
+      final close = _matchTable(raw, openEnd);
+      if (close == null) break; // unterminated — leave the rest to the caller
+      final before = raw.substring(i, openStart).trim();
+      if (before.isNotEmpty) parts.add(before);
+      parts.add(_htmlTableElement(raw.substring(openEnd, close.$1)));
+      i = close.$2;
+    }
+    if (parts.isEmpty) return const [];
+    final tail = raw.substring(i).trim();
+    if (tail.isNotEmpty) parts.add(tail);
+    return parts;
+  }
+
+  /// Render a block package:markdown left as raw HTML: a `<table>` (with any
+  /// prose around it) or the `<div>` signature lines/captions. Null when the
+  /// block is neither, so the caller falls back to a plain paragraph.
+  pw.Widget? _rawHtmlBlock(String raw) {
+    final parts = _splitHtmlTables(raw);
+    if (parts.isEmpty) return _divBlock(raw);
+    final widgets = [
+      for (final part in parts)
+        if (part is md.Element)
+          _table(part)
+        else
+          _divBlock(part as String) ?? _paragraph([md.Text(part)])
+    ];
+    return widgets.length == 1
+        ? widgets.first
+        : pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start, children: widgets);
   }
 
   // --- Inline-styled <div> blocks (signature lines & labels) ------------------
@@ -593,13 +838,16 @@ class MarkdownPdfBuilder {
 
   /// Declarations from a style attribute, in source order (so shorthand vs
   /// longhand precedence can follow CSS "later wins" rules).
-  List<MapEntry<String, String>> _styleDecls(String attrs) {
-    final m =
-        RegExp(r'''style\s*=\s*("([^"]*)"|'([^']*)')''', caseSensitive: false)
-            .firstMatch(attrs);
+  List<MapEntry<String, String>> _styleDecls(String attrs) =>
+      _declsFrom(_styleText(attrs));
+
+  /// Declarations from raw CSS declaration text (`a: b; c: d`), in source
+  /// order — the shared half of [_styleDecls] and the per-cell styles the
+  /// raw-HTML table parser carries on its elements.
+  static List<MapEntry<String, String>> _declsFrom(String? css) {
     final out = <MapEntry<String, String>>[];
-    if (m == null) return out;
-    for (final decl in (m.group(2) ?? m.group(3) ?? '').split(';')) {
+    if (css == null) return out;
+    for (final decl in css.split(';')) {
       final i = decl.indexOf(':');
       if (i <= 0) continue;
       out.add(MapEntry(decl.substring(0, i).trim().toLowerCase(),
@@ -812,6 +1060,11 @@ class MarkdownPdfBuilder {
             (m) => charOf(int.tryParse(m.group(1)!, radix: 16)))
         .replaceAllMapped(
             RegExp(r'&#(\d+);'), (m) => charOf(int.tryParse(m.group(1)!)))
+        // Named typographic entities. Deliberately excludes the five that the
+        // ordered replacements below handle, so `&amp;lt;` still decodes to
+        // the literal "&lt;".
+        .replaceAllMapped(RegExp(r'&([a-zA-Z][a-zA-Z0-9]*);'),
+            (m) => _namedEntities[m.group(1)!] ?? m.group(0)!)
         .replaceAll('&lt;', '<')
         .replaceAll('&gt;', '>')
         .replaceAll('&quot;', '"')
@@ -820,6 +1073,62 @@ class MarkdownPdfBuilder {
         .replaceAll('&nbsp;', ' ')
         .replaceAll('&amp;', '&'); // amp last so "&amp;lt;" -> "&lt;"
   }
+
+  /// Named HTML entities beyond the five decoded in order below — the
+  /// typographic punctuation and symbols that show up in exported HTML
+  /// (`&mdash;`, curly quotes, `&hellip;`). An unlisted entity is left
+  /// verbatim rather than silently dropped.
+  static const _namedEntities = <String, String>{
+    'mdash': '\u2014',
+    'ndash': '\u2013',
+    'minus': '\u2212',
+    'hellip': '\u2026',
+    'lsquo': '\u2018',
+    'rsquo': '\u2019',
+    'sbquo': '\u201A',
+    'ldquo': '\u201C',
+    'rdquo': '\u201D',
+    'bdquo': '\u201E',
+    'laquo': '\u00AB',
+    'raquo': '\u00BB',
+    'bull': '\u2022',
+    'middot': '\u00B7',
+    'dagger': '\u2020',
+    'Dagger': '\u2021',
+    'permil': '\u2030',
+    'prime': '\u2032',
+    'Prime': '\u2033',
+    'times': '\u00D7',
+    'divide': '\u00F7',
+    'plusmn': '\u00B1',
+    'deg': '\u00B0',
+    'ne': '\u2260',
+    'le': '\u2264',
+    'ge': '\u2265',
+    'larr': '\u2190',
+    'rarr': '\u2192',
+    'harr': '\u2194',
+    'copy': '\u00A9',
+    'reg': '\u00AE',
+    'trade': '\u2122',
+    'sect': '\u00A7',
+    'para': '\u00B6',
+    'euro': '\u20AC',
+    'pound': '\u00A3',
+    'yen': '\u00A5',
+    'cent': '\u00A2',
+    'frac12': '\u00BD',
+    'frac14': '\u00BC',
+    'frac34': '\u00BE',
+    'sup2': '\u00B2',
+    'sup3': '\u00B3',
+    'ensp': ' ',
+    'emsp': ' ',
+    'thinsp': ' ',
+    'shy': '',
+    'zwnj': '',
+    'zwj': '',
+  };
 
   /// The bundled fonts have no distinct ballot-box glyphs, so checked (☑/☒) and
   /// unchecked (☐) boxes render identically (both look "marked"). Map them to
@@ -984,7 +1293,7 @@ class MarkdownPdfBuilder {
 
   pw.Widget? _block(md.Node node) {
     if (node is md.Text) {
-      return _divBlock(node.text) ?? _paragraph([node]);
+      return _rawHtmlBlock(node.text) ?? _paragraph([node]);
     }
     if (node is! md.Element) return null;
 
@@ -1007,8 +1316,8 @@ class MarkdownPdfBuilder {
         // (no inline children). Otherwise an inline-code example like
         // `<div></div>` would be flattened by textContent and mis-rendered.
         if (pc.isNotEmpty && pc.every((c) => c is md.Text)) {
-          final div = _divBlock(node.textContent);
-          if (div != null) return div;
+          final html = _rawHtmlBlock(node.textContent);
+          if (html != null) return html;
         }
         return _paragraph(pc);
       case 'hr':
@@ -1372,6 +1681,38 @@ class MarkdownPdfBuilder {
     return false;
   }
 
+  /// Whether [table] holds content the plain-text column weighting can't
+  /// measure — a DIRECT cell image (what the renderer draws), inline code at
+  /// any depth, or an inline-HTML `<span>`/`<div>` fill-in widget — in which
+  /// case the table keeps the pdf package's intrinsic column sizing.
+  static bool _tableIsComplex(md.Element table) {
+    for (final section in table.children ?? const <md.Node>[]) {
+      if (section is! md.Element) continue;
+      for (final row in section.children ?? const <md.Node>[]) {
+        if (row is! md.Element || row.tag != 'tr') continue;
+        for (final cell in row.children ?? const <md.Node>[]) {
+          if (cell is! md.Element) continue;
+          final children = cell.children ?? const <md.Node>[];
+          if (children.whereType<md.Element>().any((e) => e.tag == 'img') ||
+              _hasInlineCode(children) ||
+              _htmlWidgetTag.hasMatch(cell.textContent)) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  /// A cell's own CSS declarations. Only a cell parsed from a raw-HTML
+  /// `<table>` carries any — a pipe-table cell has no attributes, so this is
+  /// empty and every styling lookup below falls back to the defaults.
+  static Map<String, String> _cellStyle(md.Element cell) {
+    final css = cell.attributes['style'];
+    if (css == null) return const {};
+    return {for (final e in _declsFrom(css)) e.key: e.value};
+  }
+
   pw.Widget _table(md.Element table) {
     final rows = <pw.TableRow>[];
     // Longest cell text seen per column index — drives content-weighted column
@@ -1384,7 +1725,13 @@ class MarkdownPdfBuilder {
     // own intrinsic width (a fixed-width fill-in, an image, a literal code
     // snippet), which the plain-text flex weighting can't measure — so a
     // complex table keeps the pdf package's default intrinsic column sizing.
-    var isComplex = false;
+    // Decided up front (not as cells are built) because a cell's own layout
+    // depends on it: only a flex-sized column has a definite width for a
+    // `text-align` cell to stretch into.
+    final isComplex = _tableIsComplex(table);
+    // Cell backgrounds only look right when every cell fills the row height,
+    // which costs an extra layout pass — so ask for it only where it's used.
+    var anyCellFill = false;
     for (final section in table.children ?? const <md.Node>[]) {
       if (section is! md.Element) continue;
       final isHead = section.tag == 'thead';
@@ -1403,6 +1750,17 @@ class MarkdownPdfBuilder {
           // in the cell: a pw.Table row cannot split across pages, so the
           // combined stack must stay within one page.
           final children = cell.children ?? const <md.Node>[];
+          // Per-cell styling from a raw-HTML `<table>` (pipe tables carry no
+          // attributes, so these are all null there): a background fill, the
+          // text colour/weight, and the column alignment.
+          final cellStyle = _cellStyle(cell);
+          final cellFill = _cssColor(
+              cellStyle['background-color'] ?? cellStyle['background']);
+          final cellColor = _cssColor(cellStyle['color']);
+          final cellWeight = (cellStyle['font-weight'] ?? '').toLowerCase();
+          final cellBold =
+              cellWeight == 'bold' || (int.tryParse(cellWeight) ?? 0) >= 600;
+          final cellAlign = _textAlign(cellStyle['text-align']);
           final imageCount = children
               .whereType<md.Element>()
               .where((e) => e.tag == 'img')
@@ -1431,11 +1789,14 @@ class MarkdownPdfBuilder {
                 .any((n) => n is md.Element || n.textContent.trim().isNotEmpty);
             if (visible) {
               parts.add(pw.RichText(
+                textAlign: cellAlign ?? pw.TextAlign.left,
                 text: pw.TextSpan(
                   children: _inline(
                     List.of(run),
-                    boldDefault: isHead,
-                    forceColor: isHead ? PdfColors.white : null,
+                    boldDefault: isHead || cellBold,
+                    // A cell's own colour wins over the header's forced white;
+                    // an unstyled header cell keeps it.
+                    forceColor: cellColor ?? (isHead ? PdfColors.white : null),
                     sizeOverride: 10.5,
                   ),
                 ),
@@ -1462,27 +1823,25 @@ class MarkdownPdfBuilder {
           final len = cell.textContent.trim().length;
           colMaxLen.update(colIdx, (v) => v > len ? v : len,
               ifAbsent: () => len);
-          // Keep intrinsic sizing when a cell renders content the text-length
-          // proxy can't measure: a DIRECT image (what the renderer draws),
-          // inline code at any depth, or an inline-HTML span/div fill-in widget.
-          if (!isComplex &&
-              (children.whereType<md.Element>().any((e) => e.tag == 'img') ||
-                  _hasInlineCode(children) ||
-                  _htmlWidgetTag.hasMatch(cell.textContent))) {
-            isComplex = true;
+          pw.Widget content = parts.length == 1
+              ? parts.first
+              : pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: parts,
+                );
+          // An alignment only bites once the content fills the column, and a
+          // column only has a definite width when it is flex-sized.
+          if (cellAlign != null && !isComplex) {
+            content = pw.SizedBox(width: double.infinity, child: content);
           }
-          cells.add(
-            pw.Padding(
-              padding:
-                  const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              child: parts.length == 1
-                  ? parts.first
-                  : pw.Column(
-                      crossAxisAlignment: pw.CrossAxisAlignment.start,
-                      children: parts,
-                    ),
-            ),
+          final padded = pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            child: content,
           );
+          if (cellFill != null) anyCellFill = true;
+          cells.add(cellFill == null
+              ? padded
+              : pw.Container(color: cellFill, child: padded));
         }
         rows.add(
           pw.TableRow(
@@ -1512,6 +1871,11 @@ class MarkdownPdfBuilder {
       padding: const pw.EdgeInsets.only(bottom: 8),
       child: pw.Table(
         border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.5),
+        // A filled cell must cover its whole row, not just its own text, so a
+        // table with backgrounds stretches every cell to the row height.
+        defaultVerticalAlignment: anyCellFill
+            ? pw.TableCellVerticalAlignment.full
+            : pw.TableCellVerticalAlignment.top,
         columnWidths: columnWidths,
         defaultColumnWidth: isComplex
             ? const pw.IntrinsicColumnWidth()

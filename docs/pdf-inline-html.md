@@ -25,6 +25,7 @@ AI assistant can read and edit.
 | `<div style="text-align:center">…</div>` | Aligned block text |
 | `<div style="display:flex">…</div>` | Divs laid out side by side (a row) |
 | `<div style="page-break-before:always"></div>` | Forces a new page |
+| `<table>…</table>` | A table, with per-cell colours and alignment |
 
 ## Fill-in blanks (inline `<span>`)
 
@@ -103,6 +104,45 @@ A `<div>` on its own line(s) is a block-level element:
   row, and children inside a row shrink to fit rather than overflowing.
   Inner `<b>` tags and HTML entities are handled.
 
+## Tables (`<table>`)
+
+Markdown's pipe tables can't colour a cell, centre a column, or bold one
+entry — so a raw-HTML `<table>` renders through the same table renderer,
+honouring a small set of per-cell styles:
+
+```markdown
+<table>
+<thead><tr><th>Category</th><th style="text-align:center;">Legal in TX</th></tr></thead>
+<tbody>
+<tr><td>Section 47 time-charge app</td><td style="background:#f2ff49; font-weight:700; text-align:center;">Yes</td></tr>
+<tr><td>Regulated commercial online</td><td style="text-align:center;">No &mdash; not licensed</td></tr>
+</tbody>
+</table>
+```
+
+Details the renderer honours:
+
+- **Structure** — `<thead>` / `<tbody>` / `<tfoot>` sections, or a bare list of
+  `<tr>`s. With no sections, a leading row of all-`<th>` cells becomes the
+  header. Header rows get the profile's brand fill and white text, exactly
+  like a pipe table's header.
+- **Cell styles** — `background` / `background-color` (the fill stretches to
+  the full row height), `color`, `font-weight` (`bold` or numeric ≥ 600), and
+  `text-align`. A cell's own colour overrides the header's white.
+- **Cell content** — `<strong>`/`<b>`, `<em>`/`<i>`, `<u>`/`<ins>`,
+  `<del>`/`<s>`, `<code>`, `<a>`, `<img>`, plus Markdown-style `<span>`
+  labels, `<br>` and HTML entities. Stray or unbalanced tags are dropped
+  rather than leaked.
+- **Prose around it** — text sharing the block with the table (before or
+  after) still renders as its own paragraph.
+- **Not supported** — `colspan` / `rowspan` (each cell occupies one grid
+  slot), nested tables, per-row or per-column styling that isn't on the cell,
+  and CSS beyond the four properties above. A `<table>` inside a fenced code
+  block stays literal, as always.
+
+A pipe table remains the better choice when you don't need any of this — it's
+far easier to edit. Reach for HTML only for the cells Markdown can't express.
+
 ## Page breaks
 
 A **bare** `<div>` (empty or self-closing) or `<hr>` carrying a page-break
@@ -149,6 +189,8 @@ rows, signature lines, quotes, tables and images never split.
   applied to that inner element. Style the plain text directly instead.
 - **Entities in code.** HTML entities are decoded in prose but left verbatim
   inside code spans and code blocks (by design).
+- **Table spans.** `colspan` and `rowspan` are ignored — every cell takes one
+  grid slot, so a table that relies on merged cells comes out misaligned.
 - **Everything else is text.** HTML tags outside this subset are not
   interpreted by the PDF renderer.
 
