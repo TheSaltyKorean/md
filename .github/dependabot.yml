@@ -1,0 +1,25 @@
+version: 2
+
+# Scoped to GitHub Actions on purpose.
+#
+# The `pub` ecosystem is deliberately left out: several dependencies here are
+# pinned or overridden for reasons Dependabot can't see — file_picker is held
+# at 10.x by appflowy_editor's API (issue #2), `intl` and
+# `path_provider_foundation` are dependency_overrides, and the whole tree is
+# constrained by the Flutter 3.41.9 pin in .fvmrc. Version-bump PRs against
+# those would be noise that has to be closed by hand. Dependabot *security*
+# alerts still cover pub packages; this file only controls version updates.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    # One PR for the routine bumps; a major version gets its own PR, since
+    # those carry the runtime/behaviour changes worth reviewing alone.
+    groups:
+      actions-minor:
+        update-types:
+          - minor
+          - patch
