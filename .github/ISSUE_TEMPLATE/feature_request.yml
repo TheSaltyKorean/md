@@ -1,0 +1,46 @@
+name: ✨ Feature request
+description: Suggest a capability or an improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please skim [the roadmap](https://markdownstudio.dev/ROADMAP.html)
+        first — it may already be planned, or deliberately out of scope.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the situation, not the solution. What are you writing, and
+        where does the app get in the way today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Printing / PDF export
+        - Print & branding profiles
+        - Editor (WYSIWYG / Split / Raw / Preview)
+        - File handling
+        - Platform support / packaging
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you've tried
+      description: Including other tools — knowing what already works helps set the bar.

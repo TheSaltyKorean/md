@@ -1,0 +1,10 @@
+# Questions and half-formed ideas have nowhere else to go while Discussions
+# are off, so a blank issue stays available alongside the two templates.
+blank_issues_enabled: true
+contact_links:
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/TheSaltyKorean/md/security/advisories/new
+    about: Please report vulnerabilities privately, not in a public issue. See SECURITY.md.
+  - name: 📖 Documentation and guides
+    url: https://markdownstudio.dev/
+    about: Print profiles, inline HTML, AI profile authoring, and the roadmap.
