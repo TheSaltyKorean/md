@@ -70,6 +70,13 @@ work is tracked in `docs/ROADMAP.md`. High level:
    are write-only, not a backup). A new keystore changes the signing
    certificate and breaks in-place updates for every installed user.
    Cert SHA-256 ends in `…AE:CA:61:3F`.
+9. **Bump the version on every material change.** Any change to app behaviour
+   — a bug fix, a rendering change, a new feature — carries its
+   `version:` bump in `pubspec.yaml` (`x.y.z+buildNumber`, both parts) **in
+   the same PR**. Don't wait to be asked, and don't leave it for release
+   time: an unbumped build is indistinguishable from the last release, so
+   the in-app updater reports "no update found" and users never get the fix.
+   Docs-only / CI-only / website-only changes don't need one.
 
 ## Distribution & publishing state (as of 2026-08-05)
 
@@ -163,6 +170,7 @@ fvm flutter create --org com.markdownstudio --project-name markdown_studio \
 ## Definition of done (every change)
 
 - `flutter analyze` clean and `flutter test` green.
+- `version:` bumped in `pubspec.yaml` if app behaviour changed (rule 9).
 - Cross-platform preserved; Material + light/dark intact.
 - Open a PR and let the **`Analyze & test`** check pass, **then** merge.
 - After the merge: **delete the PR branch and prune** (`git remote prune
