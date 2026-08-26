@@ -66,6 +66,16 @@
     y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
   })(window, document, "clarity", "script", "y6hag03dir");
 </script>
+<!-- Google Preferred Sources button (news.google.com/swg/js/v1/publisher.js).
+     Two lines per Google's docs: this loader, plus the
+     [google-add-preferred-source-btn] element in the footer. The button lets a
+     signed-in reader mark markdownstudio.dev as a preferred source, which
+     surfaces this site more often in their Google Search "Top stories" and
+     Preferred sources results. The script renders and localises the button
+     itself; it draws nothing if the API is unavailable, so the footer simply
+     stays empty rather than breaking. -->
+<link rel="dns-prefetch" href="https://news.google.com">
+<script async src="https://news.google.com/swg/js/v1/publisher.js"></script>
 <title>Markdown Studio — free Markdown editor with court-ready PDF export</title>
 <meta name="description" content="Free cross-platform Markdown editor that turns drafts into polished PDFs — including court-ready filings. WYSIWYG editing, print profiles, AI-friendly.">
 <link rel="canonical" href="https://markdownstudio.dev/">
@@ -177,6 +187,15 @@
   a{color:var(--accent)}
   footer{padding:40px 0 56px;color:var(--muted);font-size:.9rem;text-align:center}
   code{background:var(--card);padding:2px 6px;border-radius:6px;font-size:.9em}
+  /* Google renders the preferred-sources button from a static data-theme, so
+     ship both and let the media query pick — the site follows the OS theme
+     and has no JS theme toggle. */
+  .prefsrc{margin-bottom:18px;display:flex;justify-content:center}
+  .prefsrc-dark{display:none}
+  @media (prefers-color-scheme: dark){
+    .prefsrc-light{display:none}
+    .prefsrc-dark{display:flex}
+  }
 </style>
 </head>
 <body>
@@ -279,6 +298,8 @@
   </section>
 
   <footer>
+    <div class="prefsrc prefsrc-light"><div google-add-preferred-source-btn data-lang="en"></div></div>
+    <div class="prefsrc prefsrc-dark"><div google-add-preferred-source-btn data-theme="dark" data-lang="en"></div></div>
     <p>Markdown Studio · <a href="https://github.com/TheSaltyKorean/md">GitHub</a> ·
     <a href="https://github.com/TheSaltyKorean/md/blob/main/PRIVACY.md">Privacy</a> ·
     <a href="https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md">License</a> ·
