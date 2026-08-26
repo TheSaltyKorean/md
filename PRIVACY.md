@@ -61,6 +61,13 @@ as described above.
 - **Cloudflare Web Analytics / RUM** — cookieless page-performance measurement
   at the CDN edge. It stores no identifiers in your browser.
 
+The site's footer also embeds Google's **Preferred Sources** button
+(`news.google.com/swg/js/v1/publisher.js`), which lets a signed-in reader mark
+markdownstudio.dev as a preferred source in their own Google Search settings.
+It is a Google-hosted widget, so loading it tells Google the page was viewed,
+and it is governed by [Google's privacy policy](https://policies.google.com/privacy).
+It sets nothing itself unless you click it, and it is not used for measurement.
+
 Nothing here is used for advertising, and no audiences or profiles are built.
 
 Questions: open an issue at
