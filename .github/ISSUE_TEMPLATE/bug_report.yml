@@ -1,0 +1,94 @@
+name: 🐞 Bug report
+description: Something in the app behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please check you're on the
+        [latest release](https://github.com/TheSaltyKorean/md/releases/latest)
+        first — the fix may already be shipped.
+
+        **Do not attach a real court filing or any document with personal
+        details in it.** Reduce it to a minimal example that still reproduces
+        the problem.
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: Help → About shows it.
+      placeholder: "1.0.20"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - Android
+        - macOS
+        - iOS
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS version and install method
+      description: How you installed it — MSI, setup.exe, portable zip, winget, .deb, tar.gz, APK.
+      placeholder: "Windows 11 24H2, installed via winget"
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Printing / PDF export
+        - Print & branding profiles
+        - Editor (WYSIWYG / Split / Raw / Preview)
+        - Opening or saving files
+        - Tabs, find & replace, or other editor UI
+        - Themes and appearance
+        - In-app updater
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a document containing ...
+        2. Switch to Preview and choose the Court Filing profile
+        3. The heading renders as ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: source
+    attributes:
+      label: Minimal Markdown that reproduces it
+      description: >
+        For a rendering or printing bug this is the single most useful thing you
+        can provide. Paste it here, or attach the `.md` file (and the printed
+        PDF if you have it) in the next box.
+      render: markdown
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots, PDFs, or anything else
+      description: Drag files in here. Redact anything private first.
