@@ -99,6 +99,13 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
 String _literalText(Iterable<pw.Widget> ws) {
   final sb = StringBuffer();
   void walkSpan(pw.InlineSpan s) {
+    // A flowed list item's marker lives in a fixed-width box widget, not a
+    // TextSpan, but it is still text the reader sees.
+    if (s is pw.WidgetSpan) {
+      final child = s.child;
+      if (child is ListMarkerBox) sb.write(child.text);
+      return;
+    }
     if (s is pw.TextSpan) {
       if (s.text != null) sb.write(s.text);
       for (final c in s.children ?? const <pw.InlineSpan>[]) {

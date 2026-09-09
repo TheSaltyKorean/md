@@ -20,6 +20,61 @@ class _FlowGap extends pw.SizedBox {
   _FlowGap(double gap) : super(height: gap);
 }
 
+/// The leading box of a flowed list item: the first-line indent plus the
+/// marker, as a single zero-height [pw.Widget] embedded in a [pw.WidgetSpan].
+///
+/// Two problems this solves. **Justification**: `RichText` justifies a line by
+/// inserting `(totalWidth - wordsWidth) / (spans.length - 1)` between *every*
+/// span, so an indent spacer and a marker as two separate spans drift apart on
+/// a stretched line — the marker slides right and the gap after it widens, and
+/// "9." and "10." no longer start at the same x. Collapsing both into one span
+/// pins the marker at exactly [textOffset] on every item. **Baseline**: the box
+/// reports zero height and paints the marker directly on the canvas at its own
+/// origin, which `RichText` places on the line's baseline — so the line metrics
+/// are identical to the plain spacer this replaces, and the marker sits on the
+/// same baseline as the text beside it. (A `pw.Text` inside the box would
+/// instead hang its own descent above the baseline.)
+class ListMarkerBox extends pw.Widget {
+  ListMarkerBox({
+    required this.text,
+    required this.style,
+    required this.width,
+    required this.textOffset,
+  });
+
+  final String text;
+  final pw.TextStyle style;
+
+  /// Total advance of the box: the first-line indent plus the marker column.
+  final double width;
+
+  /// Where the marker is drawn inside the box (the first-line indent).
+  final double textOffset;
+
+  @override
+  void layout(pw.Context context, pw.BoxConstraints constraints,
+      {bool parentUsesSize = false}) {
+    box = PdfRect(0, 0, width, 0);
+  }
+
+  @override
+  void paint(pw.Context context) {
+    super.paint(context);
+    final font = style.font?.getFont(context);
+    if (font == null) return;
+    // Drop anything the font can't encode (a bullet in a Latin-1 base-14 font,
+    // say) rather than throwing — RichText silently skips unsupported runes
+    // too, and this marker must never be the thing that fails an export.
+    final drawable =
+        String.fromCharCodes(text.runes.where(font.isRuneSupported));
+    if (drawable.isEmpty) return;
+    context.canvas
+      ..setFillColor(style.color)
+      ..drawString(font, style.fontSize ?? 12, drawable,
+          box!.left + textOffset, box!.bottom);
+  }
+}
+
 class _UnderlineSyntax extends md.InlineSyntax {
   _UnderlineSyntax() : super(r'<u>([\s\S]*?)</u>');
 
@@ -139,6 +194,13 @@ class MarkdownPdfBuilder {
   /// and justifies like any other span (see [_bodyRich]).
   double get _firstLineIndentPt =>
       profile.firstLineIndentIn <= 0 ? 0 : profile.firstLineIndentIn * 72.0;
+
+  /// Width (pt) of the fixed box that carries a flowed list item's marker,
+  /// measured from the first-line indent. Wide enough for a two-digit ordered
+  /// marker ("13.") plus a tab-like gap, so every item's text starts at the same
+  /// x (0.5in indent + 0.5in box = text at 1.0in). Bullets need far less, so
+  /// they get a quarter inch.
+  double _markerBoxPt(bool ordered) => (ordered ? 0.5 : 0.25) * 72.0;
 
   /// Extra inter-line leading (pt) for a run at [size], derived from the
   /// profile's line-spacing multiple. 1.0 keeps the historical 2.5pt base
@@ -324,10 +386,18 @@ class MarkdownPdfBuilder {
       }
     }
     final marker = ordered ? '$index.' : '•';
+    // One fixed-width span holds both the first-line indent and the marker, so
+    // justification can never move the marker or widen the gap after it (see
+    // [ListMarkerBox]).
     final spans = <pw.InlineSpan>[
-      if (_firstLineIndentPt > 0)
-        pw.WidgetSpan(child: pw.SizedBox(width: _firstLineIndentPt)),
-      pw.TextSpan(text: '$marker  ', style: _textStyle()),
+      pw.WidgetSpan(
+        child: ListMarkerBox(
+          text: marker,
+          style: _textStyle(),
+          width: _firstLineIndentPt + _markerBoxPt(ordered),
+          textOffset: _firstLineIndentPt,
+        ),
+      ),
       ..._inline(inlineNodes),
     ];
     final rich = pw.RichText(

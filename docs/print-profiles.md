@@ -157,6 +157,12 @@ Every key below is optional **except `id` and `name`**. Types are JSON types.
 | `justifyBody` | bool | `false` | — | Justify body paragraphs (flush left *and* right) instead of ragged-right. |
 | `lineSpacingMultiple` | double | `1.0` | `1.0`–`2.0` | Line-height multiple for body text. `1.0` = single (the classic look), `1.5` = one-and-a-half, `2.0` = double. |
 | `firstLineIndentIn` | double | `0.0` | `0.0`–`1.0` | First-line indent for body paragraphs, in **inches** (e.g. `0.5`). `0` = none. |
+
+In `legalMode` a list item flows as a paragraph with its marker inline. The
+indent and the marker share one fixed-width box — the marker sits at
+`firstLineIndentIn` and the item text starts a further **0.5in** after it for
+numbered lists (**0.25in** for bullets) — so markers line up down the page no
+matter how hard a first line is justified.
 | `centerHeadings` | bool | `false` | — | Centre headings horizontally (pleading captions / titles). |
 
 ---
