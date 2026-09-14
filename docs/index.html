@@ -182,6 +182,17 @@
   .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px}
   .card h3{font-size:1.05rem;margin-bottom:6px}
   .card p{font-size:.95rem;color:var(--muted)}
+  /* Cards read as clickable whether or not they are, so every card that has a
+     destination is a link across its whole surface — clicking the body, not
+     just the heading, is what visitors actually try (Clarity dead clicks). */
+  a.card{display:block;text-decoration:none;color:inherit}
+  a.card h3{color:var(--accent)}
+  a.card:hover,a.card:focus-visible{border-color:var(--accent)}
+  a.card:hover h3,a.card:focus-visible h3{text-decoration:underline}
+  /* Same for the screenshots: a big bordered product shot invites a click to
+     enlarge, so make that click open the full-resolution image. */
+  a.shotlink{display:block}
+  a.shotlink:hover .shot,a.shotlink:focus-visible .shot{border-color:var(--accent)}
   table{width:100%;border-collapse:collapse;font-size:.95rem}
   td,th{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left}
   a{color:var(--accent)}
@@ -214,6 +225,8 @@
     <p class="note">Windows (MSI / setup.exe / portable) · Linux (.deb / tar.gz) · Android APK · macOS · iOS — free for non-commercial use</p>
   </header>
 
+  <a class="shotlink" href="assets/print-preview-court.png"
+     title="Open the full-size screenshot">
   <picture>
     <source type="image/webp"
             srcset="assets/print-preview-court-460.webp   460w,
@@ -224,6 +237,7 @@
          width="1400" height="850" fetchpriority="high" decoding="async"
          alt="A Markdown motion rendered as a court-compliant PDF in Markdown Studio's print preview">
   </picture>
+  </a>
   <p class="cap">A plain-Markdown motion, printed with the built-in <strong>Court Filing</strong>
   profile: centered court header, margin-to-margin caption, 12pt double-spaced justified body,
   certificate of service on its own page.
@@ -243,15 +257,17 @@
   <section>
     <h2>Highlights</h2>
     <div class="grid">
-      <div class="card"><h3>Four view modes</h3><p>Notion-style WYSIWYG editing, split source + live preview, raw source, and read-only preview.</p></div>
-      <div class="card"><h3>Print &amp; PDF studio</h3><p>Per-document branding profiles — fonts, colors, logos, headers/footers, watermarks — in a print-preview tab. Profiles are plain JSON an AI can generate.</p></div>
-      <div class="card"><h3>Court-filing mode</h3><p>Uniform 12pt, double-spaced, justified, first-line indents, monochrome; text flows continuously across pages like a real pleading.</p></div>
-      <div class="card"><h3>Forms in Markdown</h3><p>Fill-in blanks, signature lines, two-column captions, and forced page breaks via a small inline-HTML subset.</p></div>
-      <div class="card"><h3>Editor comforts</h3><p>Multi-document tabs, find &amp; replace, drag &amp; drop, auto-reload of external changes, light/dark themes.</p></div>
-      <div class="card"><h3>Free &amp; source-available</h3><p>PolyForm Noncommercial license — free for personal, research, and other non-commercial use, with the full source on GitHub.</p></div>
+      <a class="card" href="assets/split-view.png"><h3>Four view modes</h3><p>Notion-style WYSIWYG editing, split source + live preview, raw source, and read-only preview.</p></a>
+      <a class="card" href="print-profiles.html"><h3>Print &amp; PDF studio</h3><p>Per-document branding profiles — fonts, colors, logos, headers/footers, watermarks — in a print-preview tab. Profiles are plain JSON an AI can generate.</p></a>
+      <a class="card" href="samples/motion-for-continuance.pdf"><h3>Court-filing mode</h3><p>Uniform 12pt, double-spaced, justified, first-line indents, monochrome; text flows continuously across pages like a real pleading.</p></a>
+      <a class="card" href="pdf-inline-html.html"><h3>Forms in Markdown</h3><p>Fill-in blanks, signature lines, two-column captions, and forced page breaks via a small inline-HTML subset.</p></a>
+      <a class="card" href="https://github.com/TheSaltyKorean/md#highlights"><h3>Editor comforts</h3><p>Multi-document tabs, find &amp; replace, drag &amp; drop, auto-reload of external changes, light/dark themes.</p></a>
+      <a class="card" href="https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md"><h3>Free &amp; source-available</h3><p>PolyForm Noncommercial license — free for personal, research, and other non-commercial use, with the full source on GitHub.</p></a>
     </div>
   </section>
 
+  <a class="shotlink" href="assets/split-view.png"
+     title="Open the full-size screenshot">
   <picture>
     <source type="image/webp"
             srcset="assets/split-view-460.webp   460w,
@@ -262,15 +278,16 @@
          width="1400" height="850" loading="lazy" decoding="async"
          alt="Split view showing Markdown source with a floating format toolbar next to the live preview">
   </picture>
+  </a>
   <p class="cap">Split view — raw Markdown with the floating format toolbar, live preview beside it.</p>
 
   <section>
     <h2>Common questions</h2>
     <div class="grid">
-      <div class="card"><h3>Is it free?</h3><p>Yes — free for personal, research and other non-commercial use (PolyForm Noncommercial), source on GitHub.</p></div>
-      <div class="card"><h3>Can it really format court filings?</h3><p>Yes — 12pt double-spaced justified body, captions, signature lines, page breaks. Always check your local court's rules.</p></div>
-      <div class="card"><h3>Does it work with AI assistants?</h3><p>That's the point: assistants draft the Markdown, Studio prints it. Templates are JSON an AI can generate for you.</p></div>
-      <div class="card"><h3>Which platforms?</h3><p>Windows, Linux, Android, macOS and iOS — one codebase, native builds on every release.</p></div>
+      <a class="card" href="https://github.com/TheSaltyKorean/md/blob/main/LICENSE.md"><h3>Is it free?</h3><p>Yes — free for personal, research and other non-commercial use (PolyForm Noncommercial), source on GitHub.</p></a>
+      <a class="card" href="samples/motion-for-continuance.pdf"><h3>Can it really format court filings?</h3><p>Yes — 12pt double-spaced justified body, captions, signature lines, page breaks. See the printed sample. Always check your local court's rules.</p></a>
+      <a class="card" href="ai-profile-authoring.html"><h3>Does it work with AI assistants?</h3><p>That's the point: assistants draft the Markdown, Studio prints it. Templates are JSON an AI can generate for you.</p></a>
+      <a class="card" href="#get"><h3>Which platforms?</h3><p>Windows, Linux, Android, macOS and iOS — one codebase, native builds on every release.</p></a>
     </div>
   </section>
 
@@ -290,10 +307,10 @@
   <section>
     <h2>Guides</h2>
     <div class="grid">
-      <div class="card"><h3><a href="print-profiles.html">Print &amp; branding profiles</a></h3><p>Templates, every field explained, colour/font tables, worked examples — from personal notes to court filings.</p></div>
-      <div class="card"><h3><a href="pdf-inline-html.html">Fill-in lines &amp; inline HTML</a></h3><p>Signature lines, fill-in blanks, redactions, two-column captions, and forced page breaks in printed PDFs.</p></div>
-      <div class="card"><h3><a href="ai-profile-authoring.html">AI profile authoring</a></h3><p>A copy-paste prompt so any AI assistant generates an importable print template from plain English.</p></div>
-      <div class="card"><h3><a href="ROADMAP.html">Roadmap</a></h3><p>What is planned next for the editor, print profiles, and platform support.</p></div>
+      <a class="card" href="print-profiles.html"><h3>Print &amp; branding profiles</h3><p>Templates, every field explained, colour/font tables, worked examples — from personal notes to court filings.</p></a>
+      <a class="card" href="pdf-inline-html.html"><h3>Fill-in lines &amp; inline HTML</h3><p>Signature lines, fill-in blanks, redactions, two-column captions, and forced page breaks in printed PDFs.</p></a>
+      <a class="card" href="ai-profile-authoring.html"><h3>AI profile authoring</h3><p>A copy-paste prompt so any AI assistant generates an importable print template from plain English.</p></a>
+      <a class="card" href="ROADMAP.html"><h3>Roadmap</h3><p>What is planned next for the editor, print profiles, and platform support.</p></a>
     </div>
   </section>
 
