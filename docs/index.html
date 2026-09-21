@@ -192,6 +192,9 @@
   /* Same for the screenshots: a big bordered product shot invites a click to
      enlarge, so make that click open the full-resolution image. */
   a.shotlink{display:block}
+  .note a{color:inherit;text-decoration:underline dotted}
+  .note a:hover{color:var(--accent)}
+  tr[id]{scroll-margin-top:24px}
   a.shotlink:hover .shot,a.shotlink:focus-visible .shot{border-color:var(--accent)}
   table{width:100%;border-collapse:collapse;font-size:.95rem}
   td,th{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left}
@@ -222,7 +225,7 @@
       <a class="btn alt" href="https://github.com/TheSaltyKorean/md">View on GitHub</a>
       <a class="btn alt" href="https://venmo.com/u/thesaltykorean">❤ Support</a>
     </div>
-    <p class="note">Windows (MSI / setup.exe / portable) · Linux (.deb / tar.gz) · Android APK · macOS · iOS — free for non-commercial use</p>
+    <p class="note"><a href="#get-windows">Windows</a> (MSI / setup.exe / portable) · <a href="#get-linux">Linux</a> (.deb / tar.gz) · <a href="#get-android">Android</a> APK · <a href="#get-macos">macOS</a> · <a href="#get-ios">iOS</a> — free for non-commercial use</p>
   </header>
 
   <a class="shotlink" href="assets/print-preview-court.png"
@@ -294,11 +297,11 @@
   <section id="get">
     <h2>Get it</h2>
     <table>
-      <tr><th>Windows</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64.msi">MSI installer</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-setup.exe">setup.exe</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-portable.zip">portable zip</a></td></tr>
-      <tr><th>Linux</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-amd64.deb">.deb package</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-x64-portable.tar.gz">portable tar.gz</a></td></tr>
-      <tr><th>Android</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-android.apk">APK</a> (signed)</td></tr>
-      <tr><th>macOS</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-macos.zip">app zip</a> (unsigned — right-click → Open)</td></tr>
-      <tr><th>iOS</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-ios-unsigned.ipa">unsigned IPA</a> (sideload)</td></tr>
+      <tr id="get-windows"><th>Windows</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64.msi">MSI installer</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-setup.exe">setup.exe</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-windows-x64-portable.zip">portable zip</a></td></tr>
+      <tr id="get-linux"><th>Linux</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-amd64.deb">.deb package</a> · <a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-linux-x64-portable.tar.gz">portable tar.gz</a></td></tr>
+      <tr id="get-android"><th>Android</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-android.apk">APK</a> (signed)</td></tr>
+      <tr id="get-macos"><th>macOS</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-macos.zip">app zip</a> (unsigned — right-click → Open)</td></tr>
+      <tr id="get-ios"><th>iOS</th><td><a href="https://github.com/TheSaltyKorean/md/releases/latest/download/markdown-studio-ios-unsigned.ipa">unsigned IPA</a> (sideload)</td></tr>
     </table>
     <p class="note" style="margin-top:10px">Install notes ship with every
     <a href="https://github.com/TheSaltyKorean/md/releases/latest">release</a>.</p>

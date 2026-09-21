@@ -18,9 +18,9 @@ Each document remembers which profile it uses, and one profile is the app-wide
 with company branding while your personal notes use a plain profile.
 
 Two profiles ship built in — **Personal** and **Work** — plus a **Court Filing**
-profile that demonstrates the legal-formatting options (12pt body, double
-spacing, justified body, 0.5″ first-line indent, centred captions, monochrome
-output, text flowing continuously across pages).
+profile that demonstrates the legal-formatting options (US Letter paper, 12pt
+body, double spacing, justified body, 0.5″ first-line indent, centred captions,
+monochrome output, text flowing continuously across pages).
 
 ## Why this exists
 
@@ -147,6 +147,7 @@ Every key below is optional **except `id` and `name`**. Types are JSON types.
 
 | JSON key | Type | Default | Clamp | Meaning |
 | --- | --- | --- | --- | --- |
+| `pageSize` | string | `"a4"` | `a4` \| `letter` \| `legal` | Paper size. `letter` = US Letter (8.5 × 11 in), required by US courts; `legal` = 8.5 × 14 in. Omitted or unrecognised values fall back to `a4`. |
 | `marginCm` | double | `2.0` | `1.0`–`3.5` | Page margin in centimetres (all four sides). `2.54` = 1 inch. |
 
 ### Legal / manuscript
@@ -270,6 +271,7 @@ Each block is a complete, importable profile. Save as
   "showDate": false,
   "showTitleInHeader": false,
   "accentRule": false,
+  "pageSize": "letter",
   "marginCm": 2.54,
   "legalMode": true,
   "justifyBody": true,

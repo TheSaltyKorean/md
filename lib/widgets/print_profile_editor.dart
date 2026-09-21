@@ -36,6 +36,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   late bool _date;
   late bool _titleInHeader;
   late double _margin;
+  late PrintPageSize _pageSize;
   late bool _accentRule;
   late bool _headingRule;
   late bool _footerCentered;
@@ -81,6 +82,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     _date = p.showDate;
     _titleInHeader = p.showTitleInHeader;
     _margin = p.marginCm;
+    _pageSize = p.pageSize;
     _accentRule = p.accentRule;
     _headingRule = p.headingRule;
     _footerCentered = p.footerCentered;
@@ -130,6 +132,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         showDate: _date,
         showTitleInHeader: _titleInHeader,
         marginCm: _margin,
+        pageSize: _pageSize,
         accentRule: _accentRule,
         headingRule: _headingRule,
         footerCentered: _footerCentered,
@@ -383,6 +386,22 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
           ),
           const SizedBox(height: 20),
           _section('Layout'),
+          DropdownButtonFormField<PrintPageSize>(
+            initialValue: _pageSize,
+            decoration: const InputDecoration(labelText: 'Page size'),
+            items: const [
+              DropdownMenuItem(
+                  value: PrintPageSize.a4, child: Text('A4 (210 × 297 mm)')),
+              DropdownMenuItem(
+                  value: PrintPageSize.letter,
+                  child: Text('US Letter (8.5 × 11 in)')),
+              DropdownMenuItem(
+                  value: PrintPageSize.legal,
+                  child: Text('US Legal (8.5 × 14 in)')),
+            ],
+            onChanged: (v) => setState(() => _pageSize = v ?? _pageSize),
+          ),
+          const SizedBox(height: 16),
           Row(
             children: [
               const Text('Margin'),
