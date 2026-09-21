@@ -52,6 +52,7 @@ OPTIONAL keys (omit any you don't need; these are the defaults):
 - "headingRule": boolean = false            // coloured underline beneath h2/h3
 - "confidentialLabel": string|null = null   // e.g. "CONFIDENTIAL" badge in header
 - "watermarkText": string|null = null       // diagonal background watermark
+- "pageSize": "a4"|"letter"|"legal" = "a4" // paper; "letter" = US Letter, what US courts require
 - "marginCm": number = 2.0                  // page margin, cm; RANGE 1.0–3.5; 2.54 = 1 inch
 - "legalMode": boolean = false              // court output: monochrome chrome, uniform 12pt body,
                                             // continuous spacing rhythm, text flows across pages
@@ -128,6 +129,7 @@ the request and leaves the rest out.
   "showTitleInHeader": false,
   "showPageNumbers": true,
   "accentRule": false,
+  "pageSize": "letter",
   "marginCm": 2.54,
   "legalMode": true,
   "justifyBody": true,

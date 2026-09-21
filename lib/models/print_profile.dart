@@ -3,6 +3,11 @@ import 'dart:convert';
 /// Horizontal placement used for header/footer slots and the logo.
 enum PrintAlign { left, center, right }
 
+/// Paper size a profile prints on. Courts in the US require US Letter, while
+/// most of the world defaults to A4 — so the paper is a property of the
+/// profile rather than a global app setting.
+enum PrintPageSize { a4, letter, legal }
+
 /// A reusable print/branding template that controls how a document looks when
 /// printed or exported to PDF: fonts, colours, logo, header & footer content,
 /// page numbering and an optional watermark (e.g. "CONFIDENTIAL").
@@ -38,6 +43,7 @@ class PrintProfile {
     this.lineSpacingMultiple = 1.0,
     this.firstLineIndentIn = 0.0,
     this.centerHeadings = false,
+    this.pageSize = PrintPageSize.a4,
   });
 
   /// Stable identifier (also used as the per-document association key).
@@ -122,6 +128,10 @@ class PrintProfile {
   /// Centre headings horizontally (used for pleading captions / titles).
   final bool centerHeadings;
 
+  /// Paper size the profile prints on. Defaults to A4 so profiles saved before
+  /// this setting existed keep the size they have always rendered at.
+  final PrintPageSize pageSize;
+
   PrintProfile copyWith({
     String? id,
     String? name,
@@ -149,6 +159,7 @@ class PrintProfile {
     double? lineSpacingMultiple,
     double? firstLineIndentIn,
     bool? centerHeadings,
+    PrintPageSize? pageSize,
   }) {
     return PrintProfile(
       id: id ?? this.id,
@@ -185,6 +196,7 @@ class PrintProfile {
       lineSpacingMultiple: lineSpacingMultiple ?? this.lineSpacingMultiple,
       firstLineIndentIn: firstLineIndentIn ?? this.firstLineIndentIn,
       centerHeadings: centerHeadings ?? this.centerHeadings,
+      pageSize: pageSize ?? this.pageSize,
     );
   }
 
@@ -215,6 +227,7 @@ class PrintProfile {
         'lineSpacingMultiple': lineSpacingMultiple,
         'firstLineIndentIn': firstLineIndentIn,
         'centerHeadings': centerHeadings,
+        'pageSize': pageSize.name,
       };
 
   factory PrintProfile.fromJson(Map<String, dynamic> json) => PrintProfile(
@@ -259,6 +272,12 @@ class PrintProfile {
                 .clamp(0.0, 1.0)
                 .toDouble(),
         centerHeadings: json['centerHeadings'] as bool? ?? false,
+        // Absent (pre-page-size profiles) or unrecognised => A4, the size
+        // those profiles have always rendered at.
+        pageSize: PrintPageSize.values.firstWhere(
+          (s) => s.name == json['pageSize'],
+          orElse: () => PrintPageSize.a4,
+        ),
       );
 
   static String encodeList(List<PrintProfile> profiles) =>
@@ -303,9 +322,9 @@ class PrintProfile {
     accentRule: true,
   );
 
-  /// Court-filing profile: monochrome serif, 1-inch margins, double-spaced and
-  /// justified body with a 0.5" first-line indent and centred captions —
-  /// the conventions most courts require for pleadings.
+  /// Court-filing profile: monochrome serif on US Letter, 1-inch margins,
+  /// double-spaced and justified body with a 0.5" first-line indent and centred
+  /// captions — the conventions most courts require for pleadings.
   static const PrintProfile courtFiling = PrintProfile(
     id: 'court-filing',
     name: 'Court Filing',
@@ -322,6 +341,8 @@ class PrintProfile {
     lineSpacingMultiple: 2.0,
     firstLineIndentIn: 0.5,
     centerHeadings: true,
+    // US courts file on Letter, not A4.
+    pageSize: PrintPageSize.letter,
   );
 
   static List<PrintProfile> get seeds => const [personal, work, courtFiling];

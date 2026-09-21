@@ -52,13 +52,27 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
 
   /// The page format currently shown in the preview (updated as the user
   /// changes size/orientation). "Save as PDF" exports at this format.
-  PdfPageFormat _previewFormat = PdfPageFormat.a4;
+  ///
+  /// Seeded from the profile's own paper size and re-seeded whenever the
+  /// profile changes, so picking "Court Filing" prints on Letter without the
+  /// user also having to reach for the page-size menu.
+  late PdfPageFormat _previewFormat;
 
   @override
   void initState() {
     super.initState();
     final profiles = context.read<PrintProfileService>();
-    _selectedId = profiles.forDocument(widget.docPath).id;
+    final profile = profiles.forDocument(widget.docPath);
+    _selectedId = profile.id;
+    _previewFormat = PrintService.formatFor(profile.pageSize);
+  }
+
+  /// Adopt [id]'s paper size, keeping the orientation the user is viewing.
+  void _adoptProfilePageSize(String id) {
+    final wasLandscape = _previewFormat.width > _previewFormat.height;
+    final next = PrintService.formatFor(
+        context.read<PrintProfileService>().byId(id).pageSize);
+    _previewFormat = wasLandscape ? next.landscape : next;
   }
 
   @override
@@ -112,6 +126,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     _userChose = true;
     setState(() {
       _selectedId = id;
+      _adoptProfilePageSize(id);
       _previewEpoch++;
     });
     final path = widget.docPath;
@@ -134,7 +149,11 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     } else {
       // Editing the already-shown profile is not a choice: an unassigned
       // document merely displaying the default must not become pinned to it.
-      setState(() => _previewEpoch++);
+      // Its paper size may have changed in the editor, though.
+      setState(() {
+        _adoptProfilePageSize(_selectedId);
+        _previewEpoch++;
+      });
     }
   }
 
@@ -539,7 +558,10 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     final profilesService = context.watch<PrintProfileService>();
     final profiles = profilesService.profiles;
     if (!profiles.any((p) => p.id == _selectedId)) {
+      // The selected profile was deleted in another tab: fall back to the
+      // first one, on its paper.
       _selectedId = profiles.first.id;
+      _previewFormat = PrintService.formatFor(profiles.first.pageSize);
     }
     final selected = profilesService.byId(_selectedId);
     final cs = Theme.of(context).colorScheme;

@@ -22,10 +22,21 @@ class PrintService {
   }) async {
     await Printing.layoutPdf(
       name: title,
+      // Open the dialog on the profile's paper (Letter for court filings)
+      // rather than the platform default; the user can still change it there,
+      // and whatever they pick comes back through [onLayout].
+      format: formatFor(profile.pageSize),
       onLayout: (format) => _buildPdf(
           markdown: markdown, profile: profile, title: title, format: format),
     );
   }
+
+  /// The [PdfPageFormat] a profile's [PrintProfile.pageSize] selects.
+  static PdfPageFormat formatFor(PrintPageSize size) => switch (size) {
+        PrintPageSize.a4 => PdfPageFormat.a4,
+        PrintPageSize.letter => PdfPageFormat.letter,
+        PrintPageSize.legal => PdfPageFormat.legal,
+      };
 
   /// Share / export the document as a PDF file.
   Future<void> sharePdf({
@@ -37,7 +48,7 @@ class PrintService {
       markdown: markdown,
       profile: profile,
       title: title,
-      format: PdfPageFormat.a4,
+      format: formatFor(profile.pageSize),
     );
     final safe = title.replaceAll(RegExp(r'[^\w\-. ]'), '_');
     await Printing.sharePdf(bytes: bytes, filename: '$safe.pdf');
