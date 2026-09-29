@@ -305,6 +305,10 @@ Each block is a complete, importable profile. Save as
 
 ## See also
 
+- **[Markdown to PDF](markdown-to-pdf.md)** — the quick how-to: open,
+  pick a profile, save as PDF.
+- **[Court filings from Markdown](court-filing-from-markdown.md)** — a
+  pro se walkthrough of the Court Filing profile with a full sample motion.
 - **[AI profile authoring](ai-profile-authoring.md)** — a self-contained prompt
   you can paste into any AI assistant, plus the machine-readable schema, so it
   generates an importable profile from a plain-English description.
