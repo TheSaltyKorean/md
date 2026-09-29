@@ -74,6 +74,34 @@ defaults:
         through Markdown Studio's Court Filing profile — source, raw .md, and
         the finished PDF.
 
+  # Search landing pages: each targets one query people actually type.
+  # `title` is set explicitly because the H1 is longer than Bing's 70-char
+  # limit once " | Markdown Studio" (18 chars) is appended. Keep titles
+  # under ~50 chars and descriptions under ~160.
+  - scope:
+      path: markdown-to-pdf.md
+    values:
+      title: Markdown to PDF with headers & page numbers
+      description: >-
+        Convert Markdown to PDF with a logo, custom header and footer, page
+        numbers, watermark, and your own fonts. Free on Windows, Linux, and Mac.
+
+  - scope:
+      path: ai-output-to-pdf.md
+    values:
+      title: ChatGPT or Claude output to a formatted PDF
+      description: >-
+        Paste an AI assistant's Markdown answer and print it as a clean,
+        branded PDF with headers, page numbers, and selectable text.
+
+  - scope:
+      path: court-filing-from-markdown.md
+    values:
+      title: Court filings from Markdown (pro se guide)
+      description: >-
+        Write a motion in Markdown and print a double-spaced, 12pt, US Letter
+        court filing with a case caption, page numbers, and certificate of service.
+
   - scope:
       path: ROADMAP.md
     values:

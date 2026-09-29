@@ -36,6 +36,15 @@ exists at the same path with an `.html` extension and is what the sitemap
 points search engines at, but this file is read by assistants, who should get
 the source.
 
+- [Markdown to PDF](https://markdownstudio.dev/markdown-to-pdf.md):
+  How to convert Markdown to a PDF with a logo, header/footer, page numbers,
+  watermark and custom fonts using print profiles.
+- [AI output to PDF](https://markdownstudio.dev/ai-output-to-pdf.md):
+  Turning a ChatGPT / Claude / Gemini Markdown answer into a formatted PDF,
+  and prompting the assistant for print-ready Markdown.
+- [Court filing from Markdown](https://markdownstudio.dev/court-filing-from-markdown.md):
+  A pro se guide to printing a motion as a double-spaced, 12pt, US Letter
+  filing with caption, signature line and certificate of service.
 - [Print & branding profiles](https://markdownstudio.dev/print-profiles.md):
   The complete reference for print/PDF templates — every JSON field explained,
   color and font tables, and worked examples from personal notes to court
