@@ -1,3 +1,4 @@
+import 'dart:ui' show Locale;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:markdown_studio/models/print_profile.dart';
 import 'package:markdown_studio/services/print_service.dart';
@@ -29,9 +30,9 @@ void main() {
       expect(page.availableHeight, closeTo(9 * PdfPageFormat.inch, 0.01));
     });
 
-    test('other built-ins keep A4', () {
-      expect(PrintProfile.personal.pageSize, PrintPageSize.a4);
-      expect(PrintProfile.work.pageSize, PrintPageSize.a4);
+    test('other built-ins follow the region default', () {
+      expect(PrintProfile.personal.pageSize, PrintPageSize.auto);
+      expect(PrintProfile.work.pageSize, PrintPageSize.auto);
     });
 
     test('formatFor maps every size', () {
@@ -39,6 +40,19 @@ void main() {
           closeTo(PdfPageFormat.a4.width, 0.01));
       expect(PrintService.formatFor(PrintPageSize.legal).height,
           closeTo(14 * PdfPageFormat.inch, 0.01));
+    });
+  });
+
+  group('region default', () {
+    final binding = TestWidgetsFlutterBinding.ensureInitialized();
+    tearDown(binding.platformDispatcher.clearLocaleTestValue);
+
+    test('US resolves to Letter, others to A4', () {
+      binding.platformDispatcher.localeTestValue = const Locale('en', 'US');
+      expect(PrintPageSize.auto.resolved, PrintPageSize.letter);
+      binding.platformDispatcher.localeTestValue = const Locale('en', 'GB');
+      expect(PrintPageSize.auto.resolved, PrintPageSize.a4);
+      expect(PrintPageSize.legal.resolved, PrintPageSize.legal);
     });
   });
 
@@ -51,21 +65,19 @@ void main() {
     });
 
     test('a profile saved before page size existed defaults to A4', () {
-      // Back-compat: profiles already on disk have no "pageSize" key, and have
-      // always rendered at A4 — they must keep doing so.
       final json = PrintProfile.personal.toJson()..remove('pageSize');
-      expect(PrintProfile.fromJson(json).pageSize, PrintPageSize.a4);
+      expect(PrintProfile.fromJson(json).pageSize, PrintPageSize.auto);
     });
 
-    test('an unrecognised size falls back to A4 rather than throwing', () {
+    test('an unrecognised size falls back to the region size rather than throwing', () {
       final json = PrintProfile.personal.toJson()..['pageSize'] = 'tabloid';
-      expect(PrintProfile.fromJson(json).pageSize, PrintPageSize.a4);
+      expect(PrintProfile.fromJson(json).pageSize, PrintPageSize.auto);
     });
 
     test('copyWith carries the size', () {
       final p = PrintProfile.personal.copyWith(pageSize: PrintPageSize.legal);
       expect(p.pageSize, PrintPageSize.legal);
-      expect(PrintProfile.personal.pageSize, PrintPageSize.a4); // unchanged
+      expect(PrintProfile.personal.pageSize, PrintPageSize.auto); // unchanged
     });
   });
 }

@@ -391,6 +391,9 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             decoration: const InputDecoration(labelText: 'Page size'),
             items: const [
               DropdownMenuItem(
+                  value: PrintPageSize.auto,
+                  child: Text('Region default (Letter in US, else A4)')),
+              DropdownMenuItem(
                   value: PrintPageSize.a4, child: Text('A4 (210 × 297 mm)')),
               DropdownMenuItem(
                   value: PrintPageSize.letter,
