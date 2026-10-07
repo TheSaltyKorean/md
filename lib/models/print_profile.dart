@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/widgets.dart' show WidgetsBinding;
 
 /// Horizontal placement used for header/footer slots and the logo.
 enum PrintAlign { left, center, right }
@@ -6,7 +7,27 @@ enum PrintAlign { left, center, right }
 /// Paper size a profile prints on. Courts in the US require US Letter, while
 /// most of the world defaults to A4 — so the paper is a property of the
 /// profile rather than a global app setting.
-enum PrintPageSize { a4, letter, legal }
+enum PrintPageSize {
+  /// Follow the device region: Letter in North America, A4 elsewhere.
+  auto,
+  a4,
+  letter,
+  legal;
+
+  static const _letterRegions = {
+    'US', 'CA', 'MX', 'PR', 'CO', 'VE', 'CL', 'PH', 'GT', 'CR', 'DO', 'PA',
+    'NI', 'SV', 'HN', 'BZ', 'CU', //
+  };
+
+  /// This size with [auto] resolved to the device region's default.
+  PrintPageSize get resolved {
+    if (this != auto) return this;
+    final country = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+    return _letterRegions.contains(country?.toUpperCase())
+        ? letter
+        : a4;
+  }
+}
 
 /// A reusable print/branding template that controls how a document looks when
 /// printed or exported to PDF: fonts, colours, logo, header & footer content,
@@ -43,7 +64,7 @@ class PrintProfile {
     this.lineSpacingMultiple = 1.0,
     this.firstLineIndentIn = 0.0,
     this.centerHeadings = false,
-    this.pageSize = PrintPageSize.a4,
+    this.pageSize = PrintPageSize.auto,
   });
 
   /// Stable identifier (also used as the per-document association key).
@@ -128,8 +149,7 @@ class PrintProfile {
   /// Centre headings horizontally (used for pleading captions / titles).
   final bool centerHeadings;
 
-  /// Paper size the profile prints on. Defaults to A4 so profiles saved before
-  /// this setting existed keep the size they have always rendered at.
+  /// Paper size the profile prints on. Defaults to the device region's size.
   final PrintPageSize pageSize;
 
   PrintProfile copyWith({
@@ -272,11 +292,10 @@ class PrintProfile {
                 .clamp(0.0, 1.0)
                 .toDouble(),
         centerHeadings: json['centerHeadings'] as bool? ?? false,
-        // Absent (pre-page-size profiles) or unrecognised => A4, the size
-        // those profiles have always rendered at.
+        // Absent or unrecognised => the regional default.
         pageSize: PrintPageSize.values.firstWhere(
           (s) => s.name == json['pageSize'],
-          orElse: () => PrintPageSize.a4,
+          orElse: () => PrintPageSize.auto,
         ),
       );
 

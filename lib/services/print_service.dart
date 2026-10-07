@@ -32,7 +32,8 @@ class PrintService {
   }
 
   /// The [PdfPageFormat] a profile's [PrintProfile.pageSize] selects.
-  static PdfPageFormat formatFor(PrintPageSize size) => switch (size) {
+  static PdfPageFormat formatFor(PrintPageSize size) => switch (size.resolved) {
+        PrintPageSize.auto => PdfPageFormat.a4,
         PrintPageSize.a4 => PdfPageFormat.a4,
         PrintPageSize.letter => PdfPageFormat.letter,
         PrintPageSize.legal => PdfPageFormat.legal,
