@@ -49,6 +49,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
   final GlobalKey _shareButtonKey = GlobalKey();
   late String _selectedId;
   int _previewEpoch = 0;
+  List<PdfAttachment> _attachments = [];
 
   /// The page format currently shown in the preview (updated as the user
   /// changes size/orientation). "Save as PDF" exports at this format.
@@ -269,6 +270,54 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
   /// Open the OS print dialog for the rendered document. Start from the page
   /// size/orientation the user is previewing (the print dialog can still change
   /// it, in which case onLayout rebuilds at the chosen format).
+  Future<void> _addAttachments() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      allowMultiple: true,
+    );
+    final paths = result?.files.map((f) => f.path).whereType<String>() ?? [];
+    if (paths.isEmpty) return;
+    setState(() {
+      _attachments = [..._attachments, for (final p in paths) PdfAttachment(p)];
+      _previewEpoch++;
+    });
+  }
+
+  void _removeAttachment(int i) => setState(() {
+        _attachments = [..._attachments]..removeAt(i);
+        _previewEpoch++;
+      });
+
+  Widget _attachmentsMenu() => PopupMenuButton<int>(
+        tooltip: 'Append PDF exhibits to the export',
+        icon: Badge(
+          isLabelVisible: _attachments.isNotEmpty,
+          label: Text('${_attachments.length}'),
+          child: const Icon(Icons.attach_file_rounded),
+        ),
+        onSelected: (v) {
+          if (v == -1) {
+            _addAttachments();
+          } else if (v == -2) {
+            setState(() {
+              _attachments = [];
+              _previewEpoch++;
+            });
+          } else {
+            _removeAttachment(v);
+          }
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: -1, child: Text('Add PDFs to append…')),
+          for (var i = 0; i < _attachments.length; i++)
+            PopupMenuItem(
+                value: i, child: Text('Remove: ${_attachments[i].label}')),
+          if (_attachments.isNotEmpty)
+            const PopupMenuItem(value: -2, child: Text('Remove all')),
+        ],
+      );
+
   Future<void> _print(PrintProfile profile) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -281,6 +330,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
           title: widget.title,
           format: format,
           baseDir: _baseDir,
+          attachments: _attachments,
         ),
       );
     } catch (e) {
@@ -307,6 +357,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
         title: widget.title,
         format: _previewFormat,
         baseDir: _baseDir,
+        attachments: _attachments,
       );
       await Printing.sharePdf(
           bytes: bytes, filename: '$safe.pdf', bounds: bounds);
@@ -386,6 +437,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
         color: assigned ? cs.primary : null,
         onPressed: !hasPath ? null : () => _togglePin(assigned),
       ),
+      _attachmentsMenu(),
       // Divider before the output actions.
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -485,6 +537,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
         // Match the size/orientation the user is previewing.
         format: _previewFormat,
         baseDir: _baseDir,
+        attachments: _attachments,
       );
     } catch (e) {
       if (mounted) {
@@ -539,7 +592,8 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
     final profiles = context.read<PrintProfileService>();
     final key = '${format.width}x${format.height}'
         ':${format.marginLeft}:${format.marginTop}'
-        ':$_selectedId:${profiles.revision}:$_previewEpoch';
+        ':$_selectedId:${profiles.revision}:$_previewEpoch'
+        ':${_attachments.map((a) => a.path).join('|')}';
     if (_pdfMemo != null && _pdfMemoKey == key) return _pdfMemo!;
     final bytes = await _service.generate(
       markdown: widget.markdown,
@@ -547,6 +601,7 @@ class _PrintPreviewViewState extends State<PrintPreviewView> {
       title: widget.title,
       format: format,
       baseDir: _baseDir,
+      attachments: _attachments,
     );
     _pdfMemo = bytes;
     _pdfMemoKey = key;

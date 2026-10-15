@@ -64,6 +64,7 @@ class PrintService {
     required String title,
     required PdfPageFormat format,
     String? baseDir,
+    List<PdfAttachment> attachments = const [],
   }) =>
       _buildPdf(
         markdown: markdown,
@@ -71,6 +72,7 @@ class PrintService {
         title: title,
         format: format,
         baseDir: baseDir,
+        attachments: attachments,
       );
 
   // --- PDF assembly -----------------------------------------------------------
@@ -81,6 +83,7 @@ class PrintService {
     required String title,
     required PdfPageFormat format,
     String? baseDir,
+    List<PdfAttachment> attachments = const [],
   }) async {
     final fonts = await _resolveFonts(profile.fontFamily);
     final logo = await _loadLogo(profile.logoPath);
@@ -98,50 +101,99 @@ class PrintService {
       maxImageHeight: contentHeight,
       remoteImages: remoteImages,
     );
-    final content = builder.build(markdown);
+    Future<pw.Document> compose(
+        PrintProfile profile, List<_RasterAttachment> rasters) async {
+      final content = builder.build(markdown);
 
-    // Brand "cover" mode: the logo appears once at the top of the document
-    // (not as a running header), like a branded cover sheet.
-    final useCover = profile.coverLogo && logo != null;
-    final body = <pw.Widget>[
-      if (useCover) _coverLogo(logo),
-      ...content,
-    ];
+      // Brand "cover" mode: the logo appears once at the top of the document
+      // (not as a running header), like a branded cover sheet.
+      final useCover = profile.coverLogo && logo != null;
+      final body = <pw.Widget>[
+        if (useCover) _coverLogo(logo),
+        ...content,
+      ];
 
-    final doc = pw.Document(title: title);
+      final doc = pw.Document(title: title);
 
-    doc.addPage(
-      pw.MultiPage(
-        pageTheme: pw.PageTheme(
-          pageFormat: format.copyWith(
-            marginLeft: margin,
-            marginRight: margin,
-            marginTop: margin,
-            marginBottom: margin,
+      doc.addPage(
+        pw.MultiPage(
+          pageTheme: pw.PageTheme(
+            pageFormat: format.copyWith(
+              marginLeft: margin,
+              marginRight: margin,
+              marginTop: margin,
+              marginBottom: margin,
+            ),
+            theme: pw.ThemeData.withFont(
+              base: fonts.base,
+              bold: fonts.bold,
+              italic: fonts.italic,
+              boldItalic: fonts.boldItalic,
+            ),
+            buildBackground: profile.watermarkText == null
+                ? null
+                : (context) => _watermark(profile.watermarkText!),
           ),
-          theme: pw.ThemeData.withFont(
-            base: fonts.base,
-            bold: fonts.bold,
-            italic: fonts.italic,
-            boldItalic: fonts.boldItalic,
-          ),
-          buildBackground: profile.watermarkText == null
-              ? null
-              : (context) => _watermark(profile.watermarkText!),
+          // In cover mode the logo is rendered once at the top of the body, so the
+          // running header omits the logo and the (now-redundant) company name —
+          // the cover logo already conveys the brand. The header is still kept so
+          // any title, classification label and accent rule appear on every page.
+          header: (context) => _header(
+              context, profile, title, useCover ? null : logo,
+              hideCompany: useCover),
+          footer: (context) => _footer(context, profile, title),
+          build: (context) => body,
         ),
-        // In cover mode the logo is rendered once at the top of the body, so the
-        // running header omits the logo and the (now-redundant) company name —
-        // the cover logo already conveys the brand. The header is still kept so
-        // any title, classification label and accent rule appear on every page.
-        header: (context) => _header(
-            context, profile, title, useCover ? null : logo,
-            hideCompany: useCover),
-        footer: (context) => _footer(context, profile, title),
-        build: (context) => body,
-      ),
-    );
+      );
 
-    return doc.save();
+      final pageMargin = pw.EdgeInsets.all(margin);
+      for (final att in rasters) {
+        for (var i = 0; i < att.pages.length; i++) {
+          final image = att.pages[i];
+          doc.addPage(
+            pw.Page(
+              pageFormat: format,
+              margin: pageMargin,
+              build: (context) {
+                final picture =
+                    pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain));
+                return pw.Column(
+                  children: [
+                    pw.Expanded(
+                      child: i == 0
+                          ? pw.Outline(
+                              name: 'attachment-${att.label}',
+                              title: att.label,
+                              level: 0,
+                              child: picture,
+                            )
+                          : picture,
+                    ),
+                    pw.SizedBox(height: 8),
+                    _footer(context, profile, title),
+                  ],
+                );
+              },
+            ),
+          );
+        }
+      }
+      return doc;
+    }
+
+    final rasters = await _rasterizeAttachments(attachments);
+    final attachPages = rasters.fold<int>(0, (n, r) => n + r.pages.length);
+    var numbered = profile;
+    if (attachPages > 0 && profile.pageNumberTotal == null) {
+      // A MultiPage only knows its own length, so lay the body out once to
+      // count it before stamping "Page N of M" across body + attachments.
+      final bodyPages =
+          (await compose(profile, const [])).document.pdfPageList.pages.length;
+      numbered = profile.copyWith(
+          pageNumberTotal:
+              bodyPages + attachPages + profile.pageNumberStart - 1);
+    }
+    return (await compose(numbered, rasters)).save();
   }
 
   pw.Widget _coverLogo(pw.MemoryImage logo) {
@@ -270,8 +322,8 @@ class PrintService {
       var line = bits.join('  —  ');
       if (profile.showPageNumbers) {
         line = line.isEmpty
-            ? 'Page ${context.pageNumber} of ${context.pagesCount}'
-            : '$line  |  Page ${context.pageNumber} of ${context.pagesCount}';
+            ? _pageLabel(profile, context)
+            : '$line  |  ${_pageLabel(profile, context)}';
       }
       return pw.Container(
         decoration: const pw.BoxDecoration(
@@ -307,7 +359,7 @@ class PrintService {
     final right = <String>[];
     if (profile.showDate) right.add(_today());
     if (profile.showPageNumbers) {
-      right.add('Page ${context.pageNumber} of ${context.pagesCount}');
+      right.add(_pageLabel(profile, context));
     }
 
     return pw.Column(
@@ -490,6 +542,32 @@ class PrintService {
       }
     }
     return bytes.takeBytes();
+  }
+
+  /// Renders each attached PDF's pages to images so they can be appended to
+  /// the export (the pdf package cannot import existing pages). Exhibits
+  /// therefore lose their text layer; 150 dpi keeps scans legible.
+  Future<List<_RasterAttachment>> _rasterizeAttachments(
+      List<PdfAttachment> attachments) async {
+    final out = <_RasterAttachment>[];
+    for (final att in attachments) {
+      final bytes = await File(att.path).readAsBytes();
+      final pages = <pw.MemoryImage>[];
+      await for (final page in Printing.raster(bytes, dpi: 150)) {
+        pages.add(pw.MemoryImage(await page.toPng()));
+      }
+      if (pages.isEmpty) {
+        throw FormatException('Attachment "${att.label}" has no pages.');
+      }
+      out.add(_RasterAttachment(att.label, pages));
+    }
+    return out;
+  }
+
+  String _pageLabel(PrintProfile profile, pw.Context context) {
+    final offset = profile.pageNumberStart - 1;
+    final total = profile.pageNumberTotal ?? context.pagesCount + offset;
+    return 'Page ${context.pageNumber + offset} of $total';
   }
 
   Future<pw.MemoryImage?> _loadLogo(String? path) async {
@@ -714,4 +792,22 @@ class FontLoadException implements Exception {
   final String message;
   @override
   String toString() => message;
+}
+
+/// A PDF appended after the body at export; [label] is its bookmark title.
+class PdfAttachment {
+  PdfAttachment(this.path, {String? label})
+      : label = label ??
+            path
+                .split(RegExp(r'[\\/]'))
+                .last
+                .replaceFirst(RegExp(r'\.pdf$', caseSensitive: false), '');
+  final String path;
+  final String label;
+}
+
+class _RasterAttachment {
+  _RasterAttachment(this.label, this.pages);
+  final String label;
+  final List<pw.MemoryImage> pages;
 }
