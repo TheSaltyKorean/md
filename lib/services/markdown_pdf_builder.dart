@@ -1412,7 +1412,25 @@ class MarkdownPdfBuilder {
     }
   }
 
+  int _outlineSeq = 0;
+
+  /// Wraps the heading in a PDF outline entry (bookmark) so viewers show a
+  /// navigable tree; appellate rules (e.g. Ark. Sup. Ct. R. 4-1(e)) require it.
   pw.Widget _heading(md.Element el, double level, {double spacingTop = 10}) {
+    final depth = int.tryParse(el.tag.replaceFirst('h', '')) ?? 1;
+    final title = el.textContent.trim();
+    final body = _headingBody(el, level, spacingTop: spacingTop);
+    if (title.isEmpty) return body;
+    return pw.Outline(
+      name: 'heading-${_outlineSeq++}',
+      title: title,
+      level: depth - 1,
+      child: body,
+    );
+  }
+
+  pw.Widget _headingBody(md.Element el, double level,
+      {double spacingTop = 10}) {
     // Legal documents never set a heading smaller than the body (a 14pt body
     // with 12pt section titles would break a minimum-type-size rule).
     final size = profile.legalMode && level < _bodySize ? _bodySize : level;

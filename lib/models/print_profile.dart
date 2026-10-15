@@ -29,7 +29,7 @@ enum PrintPageSize {
 }
 
 /// Clamp an imported body font size to the editor's range; `null` stays null.
-double? _clampFont(double? v) => v?.clamp(9.0, 18.0).toDouble();
+double? _clampFont(double? v) => v?.clamp(8.0, 24.0).toDouble();
 
 /// A reusable print/branding template that controls how a document looks when
 /// printed or exported to PDF: fonts, colours, logo, header & footer content,

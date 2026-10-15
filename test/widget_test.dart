@@ -84,6 +84,8 @@ Iterable<pw.Widget> _allWidgets(pw.Widget w) sync* {
     for (final c in w.children) {
       yield* _allWidgets(c);
     }
+  } else if (w is pw.Outline && w.child != null) {
+    yield* _allWidgets(w.child!);
   } else if (w is pw.ConstrainedBox && w.child != null) {
     yield* _allWidgets(w.child!);
   } else if (w is pw.Table) {
@@ -2414,7 +2416,7 @@ void main() {
     expect(
         PrintProfile.fromJson({'id': 'a', 'name': 'A', 'bodyFontSize': 99})
             .bodyFontSize,
-        18);
+        24);
     expect(p.copyWith(clearBodyFontSize: true).bodyFontSize, isNull);
   });
 
@@ -3605,6 +3607,15 @@ After the table.
     expect(text, contains('Exhibit 39'));
     // A long table still paginates rather than overflowing a page.
     await _renderA4(widgets);
+  });
+
+  test('Headings emit PDF outline entries at their level', () {
+    final builder = MarkdownPdfBuilder(
+        profile: PrintProfile.courtFiling, fonts: _standardFonts());
+    final ws = builder.build('# One\n\n##### Deep\n\nbody');
+    final outlines = _walk(ws).whereType<pw.Outline>().toList();
+    expect(outlines.map((o) => o.title), ['One', 'Deep']);
+    expect(outlines.map((o) => o.level), [0, 4]);
   });
 
   test('A <table> inside a code fence stays literal', () {

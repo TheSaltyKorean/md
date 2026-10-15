@@ -1,6 +1,7 @@
 import 'dart:async' show TimeoutException;
+import 'dart:convert' show Utf8Decoder;
 import 'dart:io';
-import 'dart:typed_data' show BytesBuilder;
+import 'dart:typed_data' show BytesBuilder, ByteData, Uint8List;
 
 import 'package:flutter/foundation.dart';
 import 'package:pdf/pdf.dart';
@@ -577,7 +578,7 @@ class PrintService {
         // Tinos is metric-compatible with Times New Roman (the conventional
         // court-brief face); the PDF core Times faces are the offline fallback.
         return PdfFontSet(
-          base: await safe(PdfGoogleFonts.tinos, pw.Font.times()),
+          base: await safe(PdfGoogleFonts.tinosRegular, pw.Font.times()),
           bold: await safe(PdfGoogleFonts.tinosBold, pw.Font.timesBold()),
           italic: await safe(PdfGoogleFonts.tinosItalic, pw.Font.timesItalic()),
           boldItalic: await safe(
@@ -595,7 +596,6 @@ class PrintService {
           mono: mono,
         );
       case 'Roboto':
-      default:
         return PdfFontSet(
           base: await safe(PdfGoogleFonts.robotoRegular, pw.Font.helvetica()),
           bold: await safe(PdfGoogleFonts.robotoBold, pw.Font.helveticaBold()),
@@ -605,6 +605,92 @@ class PrintService {
               PdfGoogleFonts.robotoBoldItalic, pw.Font.helveticaBoldOblique()),
           mono: mono,
         );
+      default:
+        return _loadGoogleFamily(family, mono);
+    }
+  }
+
+  static final Map<String, PdfFontSet> _googleFamilyCache = {};
+
+  /// Loads any Google Fonts family by name through the public CSS API. Throws
+  /// [FontLoadException] (never silently substitutes) when it can't be found
+  /// or fetched.
+  Future<PdfFontSet> _loadGoogleFamily(String family, pw.Font mono) async {
+    final name = family.trim();
+    final cached = _googleFamilyCache[name];
+    if (cached != null) return cached;
+    final enc = Uri.encodeQueryComponent(name).replaceAll('+', '%20');
+    final specs = [
+      'family=$enc:ital,wght@0,400;0,700;1,400;1,700',
+      'family=$enc:wght@400;700',
+      'family=$enc',
+    ];
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 10);
+    try {
+      String? css;
+      for (final spec in specs) {
+        final req = await client
+            .getUrl(Uri.parse('https://fonts.googleapis.com/css2?$spec'));
+        req.headers.set('User-Agent', 'Mozilla/4.0');
+        final res = await req.close().timeout(const Duration(seconds: 15));
+        final body = await res.transform(const Utf8Decoder()).join();
+        if (res.statusCode == 200 && body.contains('@font-face')) {
+          css = body;
+          break;
+        }
+      }
+      if (css == null) {
+        throw FontLoadException(
+            'Font "$name" was not found. Check the spelling against '
+            'fonts.google.com, or pick a preset.');
+      }
+      final faces = <String, Uint8List>{};
+      final block = RegExp(r'@font-face\s*\{([^}]*)\}');
+      for (final m in block.allMatches(css)) {
+        final b = m.group(1)!;
+        final italic = RegExp(r'font-style:\s*italic').hasMatch(b);
+        final weight = int.tryParse(
+                RegExp(r'font-weight:\s*(\d+)').firstMatch(b)?.group(1) ??
+                    '400') ??
+            400;
+        final url = RegExp(r'url\(([^)]+)\)').firstMatch(b)?.group(1);
+        if (url == null) continue;
+        final key = '${weight >= 600 ? 'b' : 'r'}${italic ? 'i' : ''}';
+        if (faces.containsKey(key)) continue;
+        final fontUri = Uri.parse(url.replaceAll("'", ''));
+        if (fontUri.scheme != 'https' || fontUri.host != 'fonts.gstatic.com') {
+          continue;
+        }
+        final req = await client.getUrl(fontUri);
+        final res = await req.close().timeout(const Duration(seconds: 30));
+        if (res.statusCode != 200) continue;
+        faces[key] = Uint8List.fromList(
+            await res.fold<List<int>>(<int>[], (a, c) => a..addAll(c)));
+      }
+      pw.Font? face(String key) {
+        final d = faces[key];
+        return d == null ? null : pw.Font.ttf(ByteData.sublistView(d));
+      }
+
+      final base = face('r');
+      if (base == null) {
+        throw FontLoadException('Font "$name" could not be downloaded.');
+      }
+      final set = PdfFontSet(
+        base: base,
+        bold: face('b') ?? base,
+        italic: face('ri') ?? base,
+        boldItalic: face('bi') ?? face('b') ?? base,
+        mono: mono,
+      );
+      return _googleFamilyCache[name] = set;
+    } on FontLoadException {
+      rethrow;
+    } catch (e) {
+      throw FontLoadException('Could not load font "$name": $e');
+    } finally {
+      client.close(force: true);
     }
   }
 
@@ -621,4 +707,11 @@ class PrintService {
     'Noto Serif',
     'Times New Roman',
   ];
+}
+
+class FontLoadException implements Exception {
+  FontLoadException(this.message);
+  final String message;
+  @override
+  String toString() => message;
 }

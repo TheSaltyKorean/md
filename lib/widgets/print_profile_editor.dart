@@ -28,7 +28,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   late TextEditingController _watermark;
   late TextEditingController _confidential;
 
-  late String _font;
+  late TextEditingController _fontCtl;
   late int _primary;
   late int _textColor;
   late String? _logoPath;
@@ -48,7 +48,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   late bool _centerHeadings;
   late double _lineSpacing;
   late double _firstLineIndent;
-  late double? _bodyFont;
+  late TextEditingController _bodyFontCtl;
 
   static const _swatches = <int>[
     0xFF0D3B66, // navy
@@ -73,9 +73,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     _footer = TextEditingController(text: p.footerText ?? '');
     _watermark = TextEditingController(text: p.watermarkText ?? '');
     _confidential = TextEditingController(text: p.confidentialLabel ?? '');
-    _font = PrintService.availableFonts.contains(p.fontFamily)
-        ? p.fontFamily
-        : PrintService.availableFonts.first;
+    _fontCtl = TextEditingController(text: p.fontFamily);
     _primary = p.primaryColor;
     _textColor = p.textColor;
     _logoPath = p.logoPath;
@@ -95,7 +93,12 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     _centerHeadings = p.centerHeadings;
     _lineSpacing = p.lineSpacingMultiple.clamp(1.0, 2.0);
     _firstLineIndent = p.firstLineIndentIn.clamp(0.0, 1.0);
-    _bodyFont = p.bodyFontSize;
+    _bodyFontCtl = TextEditingController(
+        text: p.bodyFontSize == null
+            ? ''
+            : p.bodyFontSize!
+                .toStringAsFixed(2)
+                .replaceFirst(RegExp(r'\.?0+$'), ''));
   }
 
   @override
@@ -107,6 +110,8 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
       _footer,
       _watermark,
       _confidential,
+      _fontCtl,
+      _bodyFontCtl,
     ]) {
       c.dispose();
     }
@@ -126,7 +131,8 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         footerText: _trimOrNull(_footer),
         watermarkText: _trimOrNull(_watermark),
         confidentialLabel: _trimOrNull(_confidential),
-        fontFamily: _font,
+        fontFamily:
+            _fontCtl.text.trim().isEmpty ? 'Roboto' : _fontCtl.text.trim(),
         primaryColor: _primary,
         textColor: _textColor,
         logoPath: _logoPath,
@@ -145,9 +151,14 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         centerHeadings: _centerHeadings,
         lineSpacingMultiple: _lineSpacing,
         firstLineIndentIn: _firstLineIndent,
-        bodyFontSize: _bodyFont,
-        clearBodyFontSize: _bodyFont == null,
+        bodyFontSize: _parsedBodyFont,
+        clearBodyFontSize: _parsedBodyFont == null,
       );
+
+  double? get _parsedBodyFont {
+    final v = double.tryParse(_bodyFontCtl.text.trim());
+    return v?.clamp(8.0, 24.0).toDouble();
+  }
 
   Future<void> _pickLogo() async {
     final result = await FilePicker.platform.pickFiles(
@@ -212,14 +223,21 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
           _section('Branding'),
           _logoRow(cs),
           const SizedBox(height: 16),
-          DropdownButtonFormField<String>(
-            initialValue: _font,
-            decoration: const InputDecoration(labelText: 'Font family'),
-            items: [
-              for (final f in PrintService.availableFonts)
-                DropdownMenuItem(value: f, child: Text(f)),
-            ],
-            onChanged: (v) => setState(() => _font = v ?? _font),
+          TextField(
+            controller: _fontCtl,
+            decoration: InputDecoration(
+              labelText: 'Font family',
+              helperText: 'Any Google Fonts name, e.g. Tinos, EB Garamond',
+              suffixIcon: PopupMenuButton<String>(
+                tooltip: 'Presets',
+                icon: const Icon(Icons.arrow_drop_down),
+                onSelected: (v) => setState(() => _fontCtl.text = v),
+                itemBuilder: (_) => [
+                  for (final f in PrintService.availableFonts)
+                    PopupMenuItem(value: f, child: Text(f)),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 16),
           _colorField('Primary / accent colour', _primary,
@@ -350,24 +368,15 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              const Text('Body text size'),
-              const SizedBox(width: 12),
-              DropdownButton<double?>(
-                value: _bodyFont,
-                items: const [
-                  DropdownMenuItem(value: null, child: Text('Default')),
-                  DropdownMenuItem(value: 11, child: Text('11 pt')),
-                  DropdownMenuItem(value: 12, child: Text('12 pt')),
-                  DropdownMenuItem(value: 13, child: Text('13 pt')),
-                  DropdownMenuItem(value: 14, child: Text('14 pt')),
-                  DropdownMenuItem(value: 16, child: Text('16 pt')),
-                ],
-                onChanged: (v) => setState(() => _bodyFont = v),
-              ),
-            ],
+          TextField(
+            controller: _bodyFontCtl,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'Body text size (pt, 8-24)',
+              helperText: 'Leave blank for the default',
+            ),
           ),
+          const SizedBox(height: 8),
           Row(
             children: [
               const Text('Line spacing'),
