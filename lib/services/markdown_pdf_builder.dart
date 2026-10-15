@@ -230,7 +230,8 @@ class MarkdownPdfBuilder {
   /// everything that must match the body (list markers, fill-in blank
   /// baselines, the block-gap rhythm) derives from this so the whole filing
   /// stays one size. Non-legal documents keep 11pt unchanged.
-  double get _bodySize => profile.legalMode ? 12.0 : 11.0;
+  double get _bodySize =>
+      profile.bodyFontSize ?? (profile.legalMode ? 12.0 : 11.0);
 
   /// One parser configuration for [build] *and* [remoteImageSources], so the
   /// URLs discovered for pre-fetch are exactly the images build() renders.
@@ -1411,7 +1412,10 @@ class MarkdownPdfBuilder {
     }
   }
 
-  pw.Widget _heading(md.Element el, double size, {double spacingTop = 10}) {
+  pw.Widget _heading(md.Element el, double level, {double spacingTop = 10}) {
+    // Legal documents never set a heading smaller than the body (a 14pt body
+    // with 12pt section titles would break a minimum-type-size rule).
+    final size = profile.legalMode && level < _bodySize ? _bodySize : level;
     final center = profile.centerHeadings;
     // Legal documents keep one continuous spacing rhythm: the preceding
     // block's bottom gap already provides the space above a heading, and the

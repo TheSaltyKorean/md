@@ -48,6 +48,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
   late bool _centerHeadings;
   late double _lineSpacing;
   late double _firstLineIndent;
+  late double? _bodyFont;
 
   static const _swatches = <int>[
     0xFF0D3B66, // navy
@@ -94,6 +95,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
     _centerHeadings = p.centerHeadings;
     _lineSpacing = p.lineSpacingMultiple.clamp(1.0, 2.0);
     _firstLineIndent = p.firstLineIndentIn.clamp(0.0, 1.0);
+    _bodyFont = p.bodyFontSize;
   }
 
   @override
@@ -143,6 +145,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         centerHeadings: _centerHeadings,
         lineSpacingMultiple: _lineSpacing,
         firstLineIndentIn: _firstLineIndent,
+        bodyFontSize: _bodyFont,
       );
 
   Future<void> _pickLogo() async {
@@ -346,6 +349,24 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
             contentPadding: EdgeInsets.zero,
           ),
           const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text('Body text size'),
+              const SizedBox(width: 12),
+              DropdownButton<double?>(
+                value: _bodyFont,
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('Default')),
+                  DropdownMenuItem(value: 11, child: Text('11 pt')),
+                  DropdownMenuItem(value: 12, child: Text('12 pt')),
+                  DropdownMenuItem(value: 13, child: Text('13 pt')),
+                  DropdownMenuItem(value: 14, child: Text('14 pt')),
+                  DropdownMenuItem(value: 16, child: Text('16 pt')),
+                ],
+                onChanged: (v) => setState(() => _bodyFont = v),
+              ),
+            ],
+          ),
           Row(
             children: [
               const Text('Line spacing'),
