@@ -68,6 +68,8 @@ class PrintProfile {
     this.centerHeadings = false,
     this.pageSize = PrintPageSize.auto,
     this.bodyFontSize,
+    this.pageNumberStart = 1,
+    this.pageNumberTotal,
   });
 
   /// Stable identifier (also used as the per-document association key).
@@ -157,6 +159,14 @@ class PrintProfile {
   /// Ark. Sup. Ct. R. 4-1(d)), so the Court Filing profile sets 14.
   final double? bodyFontSize;
 
+  /// Number shown on the first page (continue numbering from a cover or
+  /// earlier part filed separately). Defaults to 1.
+  final int pageNumberStart;
+
+  /// Total shown after "of". `null` = the real page count plus the offset
+  /// from [pageNumberStart].
+  final int? pageNumberTotal;
+
   /// Paper size the profile prints on. Defaults to the device region's size.
   final PrintPageSize pageSize;
 
@@ -190,6 +200,9 @@ class PrintProfile {
     PrintPageSize? pageSize,
     double? bodyFontSize,
     bool clearBodyFontSize = false,
+    int? pageNumberStart,
+    int? pageNumberTotal,
+    bool clearPageNumberTotal = false,
   }) {
     return PrintProfile(
       id: id ?? this.id,
@@ -226,6 +239,10 @@ class PrintProfile {
       lineSpacingMultiple: lineSpacingMultiple ?? this.lineSpacingMultiple,
       firstLineIndentIn: firstLineIndentIn ?? this.firstLineIndentIn,
       centerHeadings: centerHeadings ?? this.centerHeadings,
+      pageNumberStart: pageNumberStart ?? this.pageNumberStart,
+      pageNumberTotal: clearPageNumberTotal
+          ? null
+          : (pageNumberTotal ?? this.pageNumberTotal),
       bodyFontSize:
           clearBodyFontSize ? null : (bodyFontSize ?? this.bodyFontSize),
       pageSize: pageSize ?? this.pageSize,
@@ -261,6 +278,8 @@ class PrintProfile {
         'centerHeadings': centerHeadings,
         'pageSize': pageSize.name,
         'bodyFontSize': bodyFontSize,
+        'pageNumberStart': pageNumberStart,
+        'pageNumberTotal': pageNumberTotal,
       };
 
   factory PrintProfile.fromJson(Map<String, dynamic> json) => PrintProfile(
@@ -300,6 +319,10 @@ class PrintProfile {
             ((json['lineSpacingMultiple'] as num?)?.toDouble() ?? 1.0)
                 .clamp(1.0, 2.0)
                 .toDouble(),
+        pageNumberStart:
+            ((json['pageNumberStart'] as num?)?.toInt() ?? 1).clamp(1, 9999),
+        pageNumberTotal:
+            (json['pageNumberTotal'] as num?)?.toInt().clamp(1, 9999),
         bodyFontSize: _clampFont((json['bodyFontSize'] as num?)?.toDouble()),
         firstLineIndentIn:
             ((json['firstLineIndentIn'] as num?)?.toDouble() ?? 0.0)

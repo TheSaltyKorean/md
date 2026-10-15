@@ -3609,6 +3609,18 @@ After the table.
     await _renderA4(widgets);
   });
 
+  test('pageNumberStart/Total round-trip and default to 1/null', () {
+    final d = PrintProfile.fromJson({'id': 'a', 'name': 'A'});
+    expect(d.pageNumberStart, 1);
+    expect(d.pageNumberTotal, isNull);
+    final p = d.copyWith(pageNumberStart: 4, pageNumberTotal: 23);
+    final back = PrintProfile.fromJson(
+        jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.pageNumberStart, 4);
+    expect(back.pageNumberTotal, 23);
+    expect(back.copyWith(clearPageNumberTotal: true).pageNumberTotal, isNull);
+  });
+
   test('Headings emit PDF outline entries at their level', () {
     final builder = MarkdownPdfBuilder(
         profile: PrintProfile.courtFiling, fonts: _standardFonts());
