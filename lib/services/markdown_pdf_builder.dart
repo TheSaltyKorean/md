@@ -70,8 +70,8 @@ class ListMarkerBox extends pw.Widget {
     if (drawable.isEmpty) return;
     context.canvas
       ..setFillColor(style.color)
-      ..drawString(font, style.fontSize ?? 12, drawable,
-          box!.left + textOffset, box!.bottom);
+      ..drawString(font, style.fontSize ?? 12, drawable, box!.left + textOffset,
+          box!.bottom);
   }
 }
 

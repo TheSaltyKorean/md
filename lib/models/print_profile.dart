@@ -22,12 +22,14 @@ enum PrintPageSize {
   /// This size with [auto] resolved to the device region's default.
   PrintPageSize get resolved {
     if (this != auto) return this;
-    final country = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
-    return _letterRegions.contains(country?.toUpperCase())
-        ? letter
-        : a4;
+    final country =
+        WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+    return _letterRegions.contains(country?.toUpperCase()) ? letter : a4;
   }
 }
+
+/// Clamp an imported body font size to the editor's range; `null` stays null.
+double? _clampFont(double? v) => v?.clamp(9.0, 18.0).toDouble();
 
 /// A reusable print/branding template that controls how a document looks when
 /// printed or exported to PDF: fonts, colours, logo, header & footer content,
@@ -36,9 +38,6 @@ enum PrintPageSize {
 /// Profiles are stored as JSON and can be associated with individual documents,
 /// so a work document can carry company branding while personal notes use a
 /// plain personal profile.
-/// Clamp an imported body font size to the editor's range; `null` stays null.
-double? _clampFont(double? v) => v == null ? null : v.clamp(9.0, 18.0).toDouble();
-
 class PrintProfile {
   const PrintProfile({
     required this.id,
@@ -190,6 +189,7 @@ class PrintProfile {
     bool? centerHeadings,
     PrintPageSize? pageSize,
     double? bodyFontSize,
+    bool clearBodyFontSize = false,
   }) {
     return PrintProfile(
       id: id ?? this.id,
@@ -226,7 +226,8 @@ class PrintProfile {
       lineSpacingMultiple: lineSpacingMultiple ?? this.lineSpacingMultiple,
       firstLineIndentIn: firstLineIndentIn ?? this.firstLineIndentIn,
       centerHeadings: centerHeadings ?? this.centerHeadings,
-      bodyFontSize: bodyFontSize ?? this.bodyFontSize,
+      bodyFontSize:
+          clearBodyFontSize ? null : (bodyFontSize ?? this.bodyFontSize),
       pageSize: pageSize ?? this.pageSize,
     );
   }

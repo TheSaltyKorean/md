@@ -2403,6 +2403,21 @@ void main() {
     expect(clamped.firstLineIndentIn, 0.0);
   });
 
+  test('bodyFontSize round-trips, clamps, and can be cleared', () {
+    expect(PrintProfile.courtFiling.bodyFontSize, 14);
+    final p = PrintProfile.courtFiling.copyWith(bodyFontSize: 16);
+    final back = PrintProfile.fromJson(
+        jsonDecode(jsonEncode(p.toJson())) as Map<String, dynamic>);
+    expect(back.bodyFontSize, 16);
+    expect(
+        PrintProfile.fromJson({'id': 'a', 'name': 'A'}).bodyFontSize, isNull);
+    expect(
+        PrintProfile.fromJson({'id': 'a', 'name': 'A', 'bodyFontSize': 99})
+            .bodyFontSize,
+        18);
+    expect(p.copyWith(clearBodyFontSize: true).bodyFontSize, isNull);
+  });
+
   test('Inline <span> fill-in lines and labels never leak as literal HTML', () {
     final builder = MarkdownPdfBuilder(
         profile: PrintProfile.personal, fonts: _standardFonts());
@@ -2665,7 +2680,9 @@ void main() {
       () async {
     // Exercises the justify + first-line-indent WidgetSpan + centred-heading
     // paths; a layout crash in any of them would fail here.
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     final widgets = builder.build(
       '# In re: Example Matter\n\n'
@@ -2788,7 +2805,9 @@ void main() {
   });
 
   test('legalMode paragraphs carry the full spaced block gap', () async {
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     // (The trailing block's own gap is trimmed at the document end, so this
     // doc ends with a closing paragraph to keep four inter-block gaps.)
@@ -2829,7 +2848,9 @@ void main() {
   });
 
   test('legalMode body text and plain <div>s render at 12pt', () {
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final legal = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     final plain = MarkdownPdfBuilder(
         profile: PrintProfile.personal, fonts: _standardFonts());
@@ -2877,7 +2898,9 @@ void main() {
 
   test('legalMode paragraphs and list items flow across page boundaries',
       () async {
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     const sentence =
         'The hearing in this matter is currently set for a date on which the '
@@ -2943,7 +2966,9 @@ void main() {
   });
 
   test('Captions, signature divs and headings stay atomic in legal mode', () {
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     final ws = builder
         .build('<div style="display:flex; justify-content:space-between">'
@@ -2975,7 +3000,9 @@ void main() {
   });
 
   test('Page-break divs and hrs emit a top-level pw.NewPage', () async {
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
 
     final ws = builder.build('Body of the motion.\n\n'
@@ -3221,7 +3248,9 @@ void main() {
   });
 
   test('legalMode keeps one gap for blockquotes and nested lists', () {
-    final court = PrintProfile.seeds.firstWhere((p) => p.id == 'court-filing');
+    final court = PrintProfile.seeds
+        .firstWhere((p) => p.id == 'court-filing')
+        .copyWith(bodyFontSize: 12);
     final builder = MarkdownPdfBuilder(profile: court, fonts: _standardFonts());
     final gap = 2.5 + 12.0 * (court.lineSpacingMultiple - 1.0);
 

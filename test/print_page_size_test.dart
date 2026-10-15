@@ -18,8 +18,8 @@ void main() {
       // marginCm 2.54 is applied by print_service as marginCm * PdfPageFormat.cm.
       final margin = PrintProfile.courtFiling.marginCm * PdfPageFormat.cm;
       expect(margin, closeTo(PdfPageFormat.inch, 0.01)); // 72pt
-      final page = PrintService.formatFor(PrintProfile.courtFiling.pageSize)
-          .copyWith(
+      final page =
+          PrintService.formatFor(PrintProfile.courtFiling.pageSize).copyWith(
         marginLeft: margin,
         marginRight: margin,
         marginTop: margin,
@@ -58,8 +58,8 @@ void main() {
 
   group('page size round-trips through JSON', () {
     test('explicit size survives encode/decode', () {
-      const p = PrintProfile(
-          id: 'x', name: 'X', pageSize: PrintPageSize.letter);
+      const p =
+          PrintProfile(id: 'x', name: 'X', pageSize: PrintPageSize.letter);
       final back = PrintProfile.fromJson(p.toJson());
       expect(back.pageSize, PrintPageSize.letter);
     });
@@ -69,7 +69,9 @@ void main() {
       expect(PrintProfile.fromJson(json).pageSize, PrintPageSize.auto);
     });
 
-    test('an unrecognised size falls back to the region size rather than throwing', () {
+    test(
+        'an unrecognised size falls back to the region size rather than throwing',
+        () {
       final json = PrintProfile.personal.toJson()..['pageSize'] = 'tabloid';
       expect(PrintProfile.fromJson(json).pageSize, PrintPageSize.auto);
     });

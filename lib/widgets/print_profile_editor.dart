@@ -146,6 +146,7 @@ class _PrintProfileEditorState extends State<PrintProfileEditor> {
         lineSpacingMultiple: _lineSpacing,
         firstLineIndentIn: _firstLineIndent,
         bodyFontSize: _bodyFont,
+        clearBodyFontSize: _bodyFont == null,
       );
 
   Future<void> _pickLogo() async {
