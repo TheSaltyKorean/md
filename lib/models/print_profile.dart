@@ -361,7 +361,7 @@ class PrintProfile {
   static const PrintProfile courtFiling = PrintProfile(
     id: 'court-filing',
     name: 'Court Filing',
-    fontFamily: 'Noto Serif',
+    fontFamily: 'Times New Roman',
     primaryColor: 0xFF000000,
     textColor: 0xFF000000,
     showPageNumbers: true,

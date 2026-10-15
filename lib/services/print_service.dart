@@ -573,6 +573,17 @@ class PrintService {
               pw.Font.helveticaBoldOblique()),
           mono: mono,
         );
+      case 'Times New Roman':
+        // Tinos is metric-compatible with Times New Roman (the conventional
+        // court-brief face); the PDF core Times faces are the offline fallback.
+        return PdfFontSet(
+          base: await safe(PdfGoogleFonts.tinos, pw.Font.times()),
+          bold: await safe(PdfGoogleFonts.tinosBold, pw.Font.timesBold()),
+          italic: await safe(PdfGoogleFonts.tinosItalic, pw.Font.timesItalic()),
+          boldItalic: await safe(
+              PdfGoogleFonts.tinosBoldItalic, pw.Font.timesBoldItalic()),
+          mono: mono,
+        );
       case 'Noto Serif':
         return PdfFontSet(
           base: await safe(PdfGoogleFonts.notoSerifRegular, pw.Font.times()),
@@ -608,5 +619,6 @@ class PrintService {
     'Montserrat',
     'Merriweather',
     'Noto Serif',
+    'Times New Roman',
   ];
 }
