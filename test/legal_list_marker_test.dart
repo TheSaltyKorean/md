@@ -21,9 +21,10 @@ Future<List<_Run>> _render(String markdown) async {
     boldItalic: pw.Font.timesBoldItalic(),
     mono: pw.Font.courier(),
   );
-  final widgets =
-      MarkdownPdfBuilder(profile: PrintProfile.courtFiling, fonts: fonts)
-          .build(markdown);
+  final widgets = MarkdownPdfBuilder(
+          profile: PrintProfile.courtFiling.copyWith(bodyFontSize: 12),
+          fonts: fonts)
+      .build(markdown);
 
   final doc = pw.Document(compress: false);
   doc.addPage(

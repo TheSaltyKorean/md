@@ -22,12 +22,14 @@ enum PrintPageSize {
   /// This size with [auto] resolved to the device region's default.
   PrintPageSize get resolved {
     if (this != auto) return this;
-    final country = WidgetsBinding.instance.platformDispatcher.locale.countryCode;
-    return _letterRegions.contains(country?.toUpperCase())
-        ? letter
-        : a4;
+    final country =
+        WidgetsBinding.instance.platformDispatcher.locale.countryCode;
+    return _letterRegions.contains(country?.toUpperCase()) ? letter : a4;
   }
 }
+
+/// Clamp an imported body font size to the editor's range; `null` stays null.
+double? _clampFont(double? v) => v?.clamp(9.0, 18.0).toDouble();
 
 /// A reusable print/branding template that controls how a document looks when
 /// printed or exported to PDF: fonts, colours, logo, header & footer content,
@@ -65,6 +67,7 @@ class PrintProfile {
     this.firstLineIndentIn = 0.0,
     this.centerHeadings = false,
     this.pageSize = PrintPageSize.auto,
+    this.bodyFontSize,
   });
 
   /// Stable identifier (also used as the per-document association key).
@@ -149,6 +152,11 @@ class PrintProfile {
   /// Centre headings horizontally (used for pleading captions / titles).
   final bool centerHeadings;
 
+  /// Body text size in points. `null` keeps the historical default (12pt in
+  /// legal mode, 11pt otherwise). Appellate rules commonly require 14pt (e.g.
+  /// Ark. Sup. Ct. R. 4-1(d)), so the Court Filing profile sets 14.
+  final double? bodyFontSize;
+
   /// Paper size the profile prints on. Defaults to the device region's size.
   final PrintPageSize pageSize;
 
@@ -180,6 +188,8 @@ class PrintProfile {
     double? firstLineIndentIn,
     bool? centerHeadings,
     PrintPageSize? pageSize,
+    double? bodyFontSize,
+    bool clearBodyFontSize = false,
   }) {
     return PrintProfile(
       id: id ?? this.id,
@@ -216,6 +226,8 @@ class PrintProfile {
       lineSpacingMultiple: lineSpacingMultiple ?? this.lineSpacingMultiple,
       firstLineIndentIn: firstLineIndentIn ?? this.firstLineIndentIn,
       centerHeadings: centerHeadings ?? this.centerHeadings,
+      bodyFontSize:
+          clearBodyFontSize ? null : (bodyFontSize ?? this.bodyFontSize),
       pageSize: pageSize ?? this.pageSize,
     );
   }
@@ -248,6 +260,7 @@ class PrintProfile {
         'firstLineIndentIn': firstLineIndentIn,
         'centerHeadings': centerHeadings,
         'pageSize': pageSize.name,
+        'bodyFontSize': bodyFontSize,
       };
 
   factory PrintProfile.fromJson(Map<String, dynamic> json) => PrintProfile(
@@ -287,6 +300,7 @@ class PrintProfile {
             ((json['lineSpacingMultiple'] as num?)?.toDouble() ?? 1.0)
                 .clamp(1.0, 2.0)
                 .toDouble(),
+        bodyFontSize: _clampFont((json['bodyFontSize'] as num?)?.toDouble()),
         firstLineIndentIn:
             ((json['firstLineIndentIn'] as num?)?.toDouble() ?? 0.0)
                 .clamp(0.0, 1.0)
@@ -362,6 +376,8 @@ class PrintProfile {
     centerHeadings: true,
     // US courts file on Letter, not A4.
     pageSize: PrintPageSize.letter,
+    // Ark. Sup. Ct. R. 4-1(d): proportional serif type of at least 14 points.
+    bodyFontSize: 14,
   );
 
   static List<PrintProfile> get seeds => const [personal, work, courtFiling];
